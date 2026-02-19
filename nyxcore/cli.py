@@ -445,11 +445,11 @@ def _write_judge_summary_md(
 def _judge_system_prompt() -> str:
     return (
         "You are a strict music mood/genre judge.\n"
-        "Return STRICT JSON with keys: tags, genre_top, tag_agreement, conflicts, genre_decision, reason.\n"
+        "Return STRICT JSON with keys: tags, genre_top, tag_agreement, genre_decision, reason.\n"
+        "Optional debug key: conflicts (0,1,2).\n"
         "tags must be 2-3 items max, unique, subset of allowed moods.\n"
         "genre_top must be null or subset of allowed genres.\n"
         "tag_agreement must be one of: low, medium, high.\n"
-        "conflicts must be one of: 0, 1, 2.\n"
         "genre_decision must be one of: keep, drop.\n"
         "Do not output numeric confidence.\n"
         "reason must be <=120 chars.\n"
@@ -615,7 +615,46 @@ def _bpm_note_for_genre(genre: str | None, bpm: float | None) -> str:
     return "atypical"
 
 
-def _sanitize_judge_response(data: dict, source_row: dict) -> tuple[list[str], str | None, float | None, str, str]:
+def _source_genre_from_row(source_row: dict) -> str | None:
+    source_genre_raw = source_row.get("source_genre_top")
+    if source_genre_raw is None:
+        source_genre_raw = source_row.get("genre_top")
+    return _canonicalize_genre(None if source_genre_raw is None else str(source_genre_raw))
+
+
+def _source_bpm_from_row(source_row: dict) -> float | None:
+    bpm_raw = source_row.get("source_bpm")
+    if bpm_raw is None:
+        bpm_raw = source_row.get("bpm")
+    if bpm_raw is None:
+        return None
+    try:
+        return float(bpm_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_conflicts_local(source_row: dict, genre_for_eval: str | None) -> tuple[int, str, str]:
+    bpm_note = _bpm_note_for_genre(genre_for_eval, _source_bpm_from_row(source_row))
+    filename_signal = _filename_genre_signal(str(source_row.get("path", "")), genre_for_eval)
+    score = 0
+    if bpm_note == "atypical":
+        score += 1
+    if filename_signal == "contradicts":
+        score += 2
+    if score <= 0:
+        conflicts_local = 0
+    elif score == 1:
+        conflicts_local = 1
+    else:
+        conflicts_local = 2
+    return conflicts_local, bpm_note, filename_signal
+
+
+def _sanitize_judge_response(
+    data: dict,
+    source_row: dict,
+) -> tuple[list[str], str | None, float | None, str, str, int, int | None]:
     tags_raw = data.get("tags", [])
     tags: list[str] = []
     if isinstance(tags_raw, list):
@@ -629,23 +668,24 @@ def _sanitize_judge_response(data: dict, source_row: dict) -> tuple[list[str], s
     llm_genre = _canonicalize_genre(None if genre_raw is None else str(genre_raw))
     tag_agreement = str(data.get("tag_agreement", "")).strip().lower()
     conflicts_raw = data.get("conflicts")
+    conflicts_llm: int | None = None
     try:
-        conflicts = int(conflicts_raw)
+        parsed_conflicts = int(conflicts_raw)
+        if parsed_conflicts in {0, 1, 2}:
+            conflicts_llm = parsed_conflicts
     except (TypeError, ValueError):
-        conflicts = 1
+        conflicts_llm = None
 
-    source_genre_raw = source_row.get("source_genre_top")
-    source_genre = _canonicalize_genre(None if source_genre_raw is None else str(source_genre_raw))
+    source_genre = _source_genre_from_row(source_row)
     filename_hint = _strong_filename_genre_hint(str(source_row.get("path", "")))
 
     genre_for_eval = source_genre or llm_genre or _canonicalize_genre(filename_hint)
-    bpm_note = _bpm_note_for_genre(genre_for_eval, source_row.get("bpm"))
-    filename_signal = _filename_genre_signal(str(source_row.get("path", "")), genre_for_eval)
+    conflicts_local, bpm_note, filename_signal = _compute_conflicts_local(source_row, genre_for_eval)
     filename_supports_genre = filename_signal == "supports"
     filename_contradicts_genre = filename_signal == "contradicts"
 
-    keep_by_policy = filename_supports_genre or (source_genre is not None and conflicts <= 1) or bpm_note == "ok"
-    drop_by_policy = conflicts >= 2 and bpm_note == "atypical" and filename_contradicts_genre
+    keep_by_policy = filename_supports_genre or (source_genre is not None and conflicts_local <= 1) or bpm_note == "ok"
+    drop_by_policy = conflicts_local >= 2 and bpm_note == "atypical" and filename_contradicts_genre
 
     if drop_by_policy:
         final_genre = None
@@ -653,18 +693,19 @@ def _sanitize_judge_response(data: dict, source_row: dict) -> tuple[list[str], s
         final_genre = source_genre
     else:
         final_genre = llm_genre or _canonicalize_genre(filename_hint)
-    genre_decision = "keep" if final_genre is not None else "drop"
+    if keep_by_policy and not drop_by_policy and final_genre is None:
+        final_genre = llm_genre or _canonicalize_genre(filename_hint)
 
     conf = 0.55
     if tag_agreement == "high":
         conf += 0.10
     elif tag_agreement == "medium":
         conf += 0.05
-    if conflicts == 0:
+    if conflicts_local == 0:
         conf += 0.05
-    elif conflicts == 2:
+    elif conflicts_local == 2:
         conf -= 0.05
-    if genre_decision == "keep":
+    if final_genre is not None:
         conf += 0.05
     confidence: float | None = max(0.50, min(0.85, conf))
 
@@ -672,7 +713,6 @@ def _sanitize_judge_response(data: dict, source_row: dict) -> tuple[list[str], s
     if (
         tag_agreement not in {"low", "medium", "high"}
         and conflicts_raw is None
-        and genre_decision not in {"keep", "drop"}
     ):
         conf_raw = data.get("confidence")
         if conf_raw is not None:
@@ -693,7 +733,7 @@ def _sanitize_judge_response(data: dict, source_row: dict) -> tuple[list[str], s
     else:
         fallback_reason = f"Genre kept as {final_genre} from combined evidence"
     reason = _format_reason(reason, fallback_reason)
-    return tags, final_genre, confidence, reason, bpm_note
+    return tags, final_genre, confidence, reason, bpm_note, conflicts_local, conflicts_llm
 
 
 def _normalize_judge_write_fields(fields_csv: str | None) -> list[str]:
@@ -1192,7 +1232,10 @@ def judge(
                 if cached is not None:
                     cache_hits += 1
                     result = cached
-                    bpm_note = _bpm_note_for_genre(result.genre_top, row.get("bpm"))
+                    source_genre = _source_genre_from_row(row)
+                    eval_genre = source_genre or _canonicalize_genre(result.genre_top)
+                    conflicts_local, bpm_note, _filename_signal = _compute_conflicts_local(row, eval_genre)
+                    conflicts_llm = None
                 else:
                     cache_misses += 1
                     try:
@@ -1204,7 +1247,9 @@ def judge(
                             user_prompt=_judge_user_prompt(row),
                             temperature=0.0,
                         )
-                        tags, genre_top, confidence, reason, bpm_note = _sanitize_judge_response(response.data, row)
+                        tags, genre_top, confidence, reason, bpm_note, conflicts_local, conflicts_llm = (
+                            _sanitize_judge_response(response.data, row)
+                        )
                         result = JudgeResult(
                             tags=tags,
                             genre_top=genre_top,
@@ -1219,7 +1264,9 @@ def judge(
                         )
                     except Exception as exc:
                         failures += 1
-                        bpm_note = "atypical"
+                        source_genre = _source_genre_from_row(row)
+                        conflicts_local, bpm_note, _filename_signal = _compute_conflicts_local(row, source_genre)
+                        conflicts_llm = None
                         result = JudgeResult(
                             tags=[],
                             genre_top=None,
@@ -1257,6 +1304,9 @@ def judge(
                         "confidence": result.confidence,
                         "reason": result.reason,
                         "bpm_note": bpm_note,
+                        "conflicts": conflicts_local,
+                        "conflicts_local": conflicts_local,
+                        "conflicts_llm": conflicts_llm,
                         "judge_provider": result.provider,
                         "judge_model": result.model,
                         "prompt_version": result.prompt_version,
