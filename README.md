@@ -81,14 +81,15 @@ Recursive MP3 scanning with:
 
 ```bash
 python -m nyxcore.cli scan music --out data/reports
+```
 
 ### Phase 2 — Normalize → Review → Apply
 
 #### Normalize
 
 Generates preview of proposed metadata changes.
-Generates preview of proposed metadata changes.
 
+```bash
 python -m nyxcore.cli normalize music --out data/reports --strategy smart
 ```
 
@@ -147,6 +148,76 @@ Safety guarantees:
 - Does NOT modify artist
 - Does NOT modify album
 - Does NOT modify cover art
+
+### Phase 3.5 — LLM Judge (DeepSeek-V3.2)
+
+Uses an OpenAI-compatible DeepSeek endpoint to refine mood tags and genre from hybrid analysis.
+
+Required environment variables:
+
+```bash
+# default base URL is https://api.deepseek.com if not set
+# both are accepted:
+# - https://api.deepseek.com
+# - https://api.deepseek.com/v1
+export DEEPSEEK_API_KEY="your_key_here"
+export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+# backward compatible:
+# export NYX_DEEPSEEK_API_KEY="your_key_here"
+# export NYX_DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DEEPSEEK_API_KEY="your_key_here"
+$env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
+# backward compatible:
+# $env:NYX_DEEPSEEK_API_KEY="your_key_here"
+# $env:NYX_DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+Model mapping:
+
+- `deepseek-chat` = DeepSeek-V3.2 non-thinking
+- `deepseek-reasoner` = DeepSeek-V3.2 thinking
+
+Judge preview (cached in `data/cache/judge.sqlite`):
+
+```bash
+python -m nyxcore.cli judge music \
+  --analysis data/reports/analysis_preview.jsonl \
+  --out data/reports \
+  --provider deepseek \
+  --model deepseek-chat \
+  --limit 50
+```
+
+Apply judge tags safely (NYX_* TXXX only):
+
+```bash
+python -m nyxcore.cli apply-judge music \
+  --in data/reports/judge_preview.jsonl \
+  --backup-dir data/backups \
+  --limit 50 \
+  --dry-run
+```
+
+Recommended full flow:
+
+```bash
+python -m nyxcore.cli analyze music --backend hybrid --out data/reports
+python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --provider deepseek --model deepseek-chat
+python -m nyxcore.cli apply-judge music --in data/reports/judge_preview.jsonl --backup-dir data/backups
+python -m nyxcore.cli playlists music --from-cache --out data/playlists
+```
+
+Quick judge smoke test:
+
+```bash
+export DEEPSEEK_API_KEY=...
+python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --model deepseek-chat --limit 5 --force
+```
 
 ## 🎶 Smart Playlists
 
