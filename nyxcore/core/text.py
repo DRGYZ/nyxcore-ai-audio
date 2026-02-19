@@ -5,6 +5,15 @@ import re
 REASON_CONNECTOR_TAILS = {"but", "and", "or", "with", "because", "so", "which"}
 DANGLING_REASON_FRAGMENTS = {"clap tags", "clap_tags", "genre evidence", "evidence inconsistent"}
 REASON_TRAILING_TOKENS = {"genre", "evidence", "inconsistent", "clap", "tags"}
+REASON_END_CONNECTORS = {"for", "but", "and", "or", "with", "because", "vs", "v", "to", "of"}
+REASON_END_WEAK_TAILS = {"conflict", "contradictory", "ambiguous", "partial", "partially"}
+REASON_BAD_END_PATTERNS = (
+    r"(?i)\bbpm atypical for$",
+    r"(?i)\bbpm atypical$",
+    r"(?i)\bconflict\s*\($",
+    r"(?i)^conflict(\s*\(|\b)",
+    r"(?i)\bcontradictory$",
+)
 
 
 def clean_reason_text(text: str) -> str:
@@ -37,6 +46,15 @@ def clean_reason_text(text: str) -> str:
         if not removed:
             break
     r = r.rstrip(" ,.;:!?")
+    while r:
+        words = r.split()
+        if not words:
+            break
+        tail = words[-1].lower().strip(".,;:!?-()")
+        if tail in REASON_END_CONNECTORS or tail in REASON_END_WEAK_TAILS:
+            r = " ".join(words[:-1]).rstrip(" ,.;:!?-()")
+            continue
+        break
     return r
 
 
@@ -57,18 +75,32 @@ def format_reason(reason: str, fallback: str, max_chars: int = 120) -> str:
     if len(r) > max_chars:
         clipped = r[:max_chars]
         r = clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
-    r = r.strip(" ,.;:!?")
+    r = r.strip(" ,.;:!?-()")
     while r:
         words = r.split()
         if not words:
             break
-        if words[-1].lower().strip(".,;:!?") in REASON_CONNECTOR_TAILS:
-            r = " ".join(words[:-1]).strip(" ,.;:!?")
+        tail = words[-1].lower().strip(".,;:!?-()")
+        if tail in REASON_CONNECTOR_TAILS:
+            r = " ".join(words[:-1]).strip(" ,.;:!?-()")
             continue
-        if words[-1].lower().strip(".,;:!?") in REASON_TRAILING_TOKENS:
-            r = " ".join(words[:-1]).strip(" ,.;:!?")
+        if tail in REASON_TRAILING_TOKENS:
+            r = " ".join(words[:-1]).strip(" ,.;:!?-()")
+            continue
+        if tail in REASON_END_CONNECTORS or tail in REASON_END_WEAK_TAILS:
+            r = " ".join(words[:-1]).strip(" ,.;:!?-()")
             continue
         break
+    r = r.strip(" ,.;:!?-()")
+    if r:
+        for pattern in REASON_BAD_END_PATTERNS:
+            if re.search(pattern, r):
+                r = ""
+                break
+    if len(r) <= 12:
+        r = ""
     if not r:
         r = clean_reason_text(fallback)
+    if len(r) < 12:
+        r = "Genre kept from source; evidence mixed"
     return r
