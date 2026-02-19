@@ -3,6 +3,26 @@
 Local-first AI-powered music intelligence engine.  
 Clean metadata. Analyze audio. Write structured AI tags. Generate smart playlists.
 
+## 📦 Installation
+
+Requirements:
+
+- Python 3.11+ (3.12 recommended)
+- `ffmpeg` available on PATH
+
+Setup:
+
+```bash
+python -m venv .venv
+# Windows PowerShell:
+# .venv\Scripts\Activate.ps1
+# Linux/macOS:
+# source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install -e .
+```
+
 ## 🚀 Overview
 
 NyxCore is a local CLI tool that transforms a messy MP3 library into a structured, AI-enhanced music system.
