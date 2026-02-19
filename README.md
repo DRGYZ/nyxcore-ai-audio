@@ -61,15 +61,14 @@ Recursive MP3 scanning with:
 
 ```bash
 python -m nyxcore.cli scan music --out data/reports
-```
 
 ### Phase 2 — Normalize → Review → Apply
 
 #### Normalize
 
 Generates preview of proposed metadata changes.
+Generates preview of proposed metadata changes.
 
-```bash
 python -m nyxcore.cli normalize music --out data/reports --strategy smart
 ```
 
@@ -206,4 +205,3 @@ Built as a local-first AI systems experiment combining:
 - Audio intelligence
 - Metadata engineering
 - Modular backend architecture
-
