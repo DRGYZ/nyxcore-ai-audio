@@ -1,185 +1,209 @@
-# nyxcore
+# 🧠🎧 NyxCore
 
-Local-first music library auditor for MP3 collections.
+Local-first AI-powered music intelligence engine.  
+Clean metadata. Analyze audio. Write structured AI tags. Generate smart playlists.
 
-## MVP (Step 1)
+## 🚀 Overview
 
-- Recursively scans a folder (default: `./music`)
-- Finds all `.mp3` files
-- Reads ID3 tags using `mutagen` (read-only)
-- Writes:
-  - `scan.json` (machine readable)
-  - `scan.md` (human readable)
+NyxCore is a local CLI tool that transforms a messy MP3 library into a structured, AI-enhanced music system.
 
-Corrupted or unreadable files are captured with warnings and do not crash the scan.
+It combines:
 
-## Requirements
+- 🔎 Metadata normalization
+- 🎼 Signal-based audio analysis (Essentia)
+- 🤖 Semantic AI tagging (CLAP)
+- 🏷 Safe ID3 TXXX frame writing
+- 📂 Smart playlist generation
+- 💾 Persistent caching
 
-- Python 3.11+
+Everything runs locally.  
+No cloud. No streaming APIs. No data leaving your machine.
 
-## Install
+## 🏗 Architecture
 
-```bash
-python -m venv .venv
-# Linux/macOS:
-source .venv/bin/activate
-# Windows PowerShell:
-# .venv\Scripts\Activate.ps1
+NyxCore uses a modular backend system:
 
-pip install -e .
-```
+### 1️⃣ Essentia (Signal Analysis)
 
-## Usage
+Extracts:
 
-Run a scan:
+- `energy_0_10`
+- `bpm`
+
+Based on digital signal processing (DSP), with objective acoustic measurements.
+
+### 2️⃣ CLAP (AI Semantic Model)
+
+Generates:
+
+- `tags` (mood labels)
+- `genre_top`
+
+Uses pretrained contrastive audio-text embeddings and matches audio against descriptive prompts.
+
+### 3️⃣ Hybrid Backend
+
+Combines both:
+
+- Physical features (Essentia)
+- Semantic understanding (CLAP)
+
+## 🧩 Features
+
+### Phase 1 — Scan
+
+Recursive MP3 scanning with:
+
+- Missing metadata detection
+- Cover art detection
+- Bitrate checks
+- Safe read-only mode
 
 ```bash
 python -m nyxcore.cli scan music --out data/reports
 ```
 
-If `music` is omitted, the command defaults to `./music`.
+### Phase 2 — Normalize → Review → Apply
 
-Normalize preview (read-only):
+#### Normalize
+
+Generates preview of proposed metadata changes.
 
 ```bash
 python -m nyxcore.cli normalize music --out data/reports --strategy smart
 ```
 
-Conservative artist hygiene preview:
+Outputs:
+
+- `normalize_preview.jsonl`
+- `normalize_preview.csv`
+- `normalize_preview.md`
+
+#### Apply (Safe ID3 Write)
+
+Writes only selected fields with backups.
 
 ```bash
-python -m nyxcore.cli normalize music --out data/reports --strategy artist_hygiene
+python -m nyxcore.cli apply music \
+  --in data/reports/normalize_preview.jsonl \
+  --fields album \
+  --backup-dir data/backups
 ```
 
-Apply plan (dry run):
+### Phase 3 — AI Audio Analysis
+
+#### Analyze (Hybrid AI)
 
 ```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.7 --dry-run
+python -m nyxcore.cli analyze music \
+  --out data/reports \
+  --backend hybrid
 ```
 
-Apply changes (writes title/artist/album tags only):
+Outputs:
+
+- `analysis_preview.jsonl`
+- `analysis_summary.md`
+- SQLite cache (persistent)
+
+#### Apply AI Tags (Safe)
+
+Writes only custom ID3 frames:
+
+- `TXXX:NYX_ENERGY`
+- `TXXX:NYX_BPM`
+- `TXXX:NYX_TAGS`
+- `TXXX:NYX_GENRE_TOP`
 
 ```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.7
+python -m nyxcore.cli apply-ai music \
+  --in data/reports/analysis_preview.jsonl \
+  --fields energy,bpm,tags,genre \
+  --backup-dir data/backups
 ```
 
-Optional backups before write:
+Safety guarantees:
 
-```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.7 --backup-dir data/backups
-```
+- Does NOT modify title
+- Does NOT modify artist
+- Does NOT modify album
+- Does NOT modify cover art
 
-Album-only conservative apply:
+## 🎶 Smart Playlists
 
-```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.6 --fields album --backup-dir data/backups
-```
-
-Staged test:
-
-```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.6 --fields album --limit 50 --backup-dir data/backups
-```
-
-Artist-only hygiene dry-run:
-
-```bash
-python -m nyxcore.cli apply music --in data/reports/normalize_preview.jsonl --min-confidence 0.9 --fields artist --backup-dir data/backups --limit 50 --dry-run
-```
-
-Phase 3 analyze (local-first with cache):
-
-```bash
-python -m nyxcore.cli analyze music --out data/reports --backend essentia --limit 0
-```
-
-Phase 3 CLAP/HYBRID (WSL/Linux):
-
-```bash
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install laion-clap
-python -m nyxcore.cli analyze music --backend clap
-python -m nyxcore.cli analyze music --backend hybrid
-```
-
-Phase 3 apply AI tags (NYX_* TXXX only):
-
-```bash
-python -m nyxcore.cli apply-ai music --in data/reports/analysis_preview.jsonl --fields energy,bpm,tags,genre --backup-dir data/backups --limit 50 --dry-run
-```
-
-Apply AI tags (real write):
-
-```bash
-python -m nyxcore.cli apply-ai music --in data/reports/analysis_preview.jsonl --fields energy,bpm,tags,genre
-```
-
-Phase 3 playlists:
+Generate playlists from AI data:
 
 ```bash
 python -m nyxcore.cli playlists music --from-cache --out data/playlists
 ```
 
-## Output
+Examples:
 
-`data/reports/scan.json` contains:
+- `energy_8_10.m3u`
+- `bpm_120_140.m3u`
+- `mood_chill.m3u`
+- `mood_dark.m3u`
 
-- `path`
-- `file_size_bytes`
-- `mtime_iso`
-- `tags`: `title`, `artist`, `album`, `albumartist`, `tracknumber`, `date`, `genre`
-- `has_cover_art`
-- `duration_seconds`
-- `warnings` (examples: `missing_title`, `missing_artist`, `missing_album`, `missing_cover_art`, `duration_unavailable`, `bitrate_unavailable`, `low_bitrate`, `filename_youtube_noise`, `filename_brackets_noise`, `filename_feat_pattern`, `read_error`, `tag_parse_error`, `possible_duplicate`)
+## 🛡 Safety Design
 
-`data/reports/scan.md` contains:
+- Read-only scanning by default
+- Preview-first workflow
+- Confidence filtering
+- Field-level write control
+- Backup directory support
+- No destructive overwrites
+- AI metadata isolated in `NYX_*` custom frames
 
-- Total tracks scanned
-- Missing tag counts (title/artist/album)
-- Cover art present vs missing
-- Top 15 artists
-- Top 15 albums
-- First 30 problematic tracks
-- "What to fix next" summary
+## ⚙️ Tech Stack
 
-Normalization preview outputs:
+- Python 3.12
+- Typer + Rich (CLI UX)
+- Mutagen (ID3 handling)
+- Essentia (audio DSP)
+- LAION CLAP (audio-text model)
+- SQLite caching
+- FFmpeg fallback decoding
 
-- `data/reports/normalize_preview.jsonl`
-- `data/reports/normalize_preview.csv`
-- `data/reports/normalize_preview.md`
+## 🧠 Why This Project Matters
 
-Apply outputs:
+NyxCore demonstrates:
 
-- `data/reports/apply_plan.md` (for `--dry-run`)
-- `data/reports/apply_log.jsonl` (when writing)
+- Multi-backend architecture
+- AI inference pipelines
+- Audio signal processing
+- Safe metadata engineering
+- Local-first system design
+- Cache-aware computation
+- Real-world data normalization
 
-AI analysis outputs:
+It bridges:
 
-- `data/reports/analysis_preview.jsonl`
-- `data/reports/analysis_summary.md`
-- `data/reports/apply_ai_log.jsonl`
-- `data/cache/analysis.sqlite`
-- `.m3u` playlists under `data/playlists`
+Low-level audio processing + modern AI embeddings + robust CLI tooling.
 
-## Example CLI summary
+## 🔮 Future Vision
 
-```text
-            Scan Summary
-┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ Metric            ┃ Value ┃
-┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ Total tracks      │  1024 │
-│ Missing title     │    31 │
-│ Missing artist    │    18 │
-│ Missing album     │    54 │
-│ Cover art present │   873 │
-│ Cover art missing │   151 │
-└───────────────────┴───────┘
-Wrote: data/reports/scan.json
-Wrote: data/reports/scan.md
-```
+Planned expansions:
 
-## Notes
+- Prompt-optimized genre detection
+- Confidence-aware tagging
+- Parallel analysis
+- GPU acceleration
+- Web dashboard (NeuroDesk integration)
+- Context-aware music modes (Focus, Gym, Night)
 
-- Uses `pathlib` for cross-platform path handling (Windows and Linux).
-- The scanner never edits audio files.
+## 🧪 Status
+
+- ✔ Phase 1 — Scan
+- ✔ Phase 2 — Normalize & Apply
+- ✔ Phase 3 — Hybrid AI + Tag Writing
+- ✔ Playlist generation
+- 🔜 UX layer & dashboard integration
+
+## 👤 Author
+
+Built as a local-first AI systems experiment combining:
+
+- Audio intelligence
+- Metadata engineering
+- Modular backend architecture
+
