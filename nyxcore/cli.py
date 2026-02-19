@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import os
-import re
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +20,9 @@ from nyxcore.audio.cache import AnalysisCache
 from nyxcore.audio.models import AnalysisResult
 from nyxcore.core.scanner import scan_music_folder
 from nyxcore.core.track import TrackRecord
+from nyxcore.core.jsonl import read_jsonl, write_jsonl
 from nyxcore.core.utils import ensure_out_dir
+from nyxcore.judge.service import JudgeService
 from nyxcore.llm.cache import JudgeCache
 from nyxcore.llm.deepseek_client import chat_json
 from nyxcore.llm.models import JudgeResult
@@ -75,9 +76,6 @@ JUDGE_GENRES = [
     "jazz",
     "reggaeton",
 ]
-_REASON_CONNECTOR_TAILS = {"but", "and", "or", "with", "because", "so", "which"}
-_DANGLING_REASON_FRAGMENTS = {"clap tags", "clap_tags", "genre evidence", "evidence inconsistent"}
-_REASON_TRAILING_TOKENS = {"genre", "evidence", "inconsistent", "clap", "tags"}
 
 
 @app.callback()
@@ -393,24 +391,6 @@ def _write_analysis_summary_md(
     return path
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    rows: list[dict] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            text = line.strip()
-            if text:
-                rows.append(json.loads(text))
-    return rows
-
-
-def _write_judge_preview_jsonl(out_dir: Path, rows: list[dict]) -> Path:
-    path = out_dir / "judge_preview.jsonl"
-    with path.open("w", encoding="utf-8", newline="\n") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return path
-
-
 def _write_judge_summary_md(
     out_dir: Path,
     *,
@@ -440,300 +420,6 @@ def _write_judge_summary_md(
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
-
-
-def _judge_system_prompt() -> str:
-    return (
-        "You are a strict music mood/genre judge.\n"
-        "Return STRICT JSON with keys: tags, genre_top, tag_agreement, genre_decision, reason.\n"
-        "Optional debug key: conflicts (0,1,2).\n"
-        "tags must be 2-3 items max, unique, subset of allowed moods.\n"
-        "genre_top must be null or subset of allowed genres.\n"
-        "tag_agreement must be one of: low, medium, high.\n"
-        "genre_decision must be one of: keep, drop.\n"
-        "Do not output numeric confidence.\n"
-        "reason must be <=120 chars.\n"
-        "Never invent artist/title. Use only supplied evidence."
-    )
-
-
-def _judge_user_prompt(row: dict) -> str:
-    allowed_moods = ", ".join(JUDGE_MOODS)
-    allowed_genres = ", ".join(JUDGE_GENRES)
-    evidence = {
-        "path": row.get("path"),
-        "filename": Path(str(row.get("path", ""))).name,
-        "energy_0_10": row.get("energy_0_10"),
-        "bpm": row.get("bpm"),
-        "clap_tags": row.get("tags", []),
-        "clap_genre_top": row.get("genre_top"),
-        "errors": row.get("errors", []),
-    }
-    return (
-        "Allowed moods: [" + allowed_moods + "]\n"
-        "Allowed genres: [" + allowed_genres + "]\n"
-        "Rules:\n"
-        "- use hybrid evidence (bpm/energy + clap tags/genre + filename path)\n"
-        "- if genre ambiguous, set genre_top=null\n"
-        "- 2-3 tags max, no duplicates\n"
-        "- keep consistent with vocab\n\n"
-        "- use phrase 'BPM atypical for genre' instead of strong mismatch claims\n"
-        "- set tag_agreement based on filename/title cues + hybrid tag consistency\n"
-        "- set genre_decision=keep only when genre evidence is coherent\n\n"
-        "Evidence JSON:\n"
-        + json.dumps(evidence, ensure_ascii=False)
-    )
-
-
-def _clean_reason_text(reason: str) -> str:
-    r = reason.strip()
-    for sep in (".", "!", "?"):
-        if sep in r:
-            r = r.split(sep, 1)[0]
-            break
-    r = r.strip()
-    if len(r) > 120:
-        clipped = r[:120]
-        r = clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
-    r = r.strip()
-    while r:
-        words = r.split()
-        if not words:
-            break
-        if words[-1].lower().strip(".,;:!?") in _REASON_CONNECTOR_TAILS:
-            r = " ".join(words[:-1]).strip()
-            continue
-        break
-    while r:
-        lowered = r.lower().rstrip(" ,.;:!?")
-        removed = False
-        for frag in _DANGLING_REASON_FRAGMENTS:
-            if lowered.endswith(frag):
-                r = r[: len(r) - len(frag)].rstrip(" ,.;:!?")
-                removed = True
-                break
-        if not removed:
-            break
-    r = r.rstrip(" ,.;:!?")
-    return r
-
-
-def _format_reason(reason: str, fallback: str) -> str:
-    r = reason or ""
-    # Keep one sentence max
-    for sep in (".", "!", "?"):
-        if sep in r:
-            r = r.split(sep, 1)[0]
-            break
-
-    # Remove banned fragments case-insensitively
-    r = re.sub(r"(?i)\bclap[_\s]*tags?\b", "", r)
-    r = re.sub(r"(?i)\bgenre\s+evidence\b", "", r)
-    r = re.sub(r"(?i)\bevidence\s+inconsistent\b", "", r)
-    r = re.sub(r"(?i)\bgenre\s+e\b", "", r)
-    r = re.sub(r"\s+", " ", r).strip(" ,.;:!?")
-
-    r = _clean_reason_text(r)
-    if len(r) > 120:
-        clipped = r[:120]
-        r = clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
-    r = r.strip(" ,.;:!?")
-    while r:
-        words = r.split()
-        if not words:
-            break
-        if words[-1].lower().strip(".,;:!?") in _REASON_CONNECTOR_TAILS:
-            r = " ".join(words[:-1]).strip(" ,.;:!?")
-            continue
-        if words[-1].lower().strip(".,;:!?") in _REASON_TRAILING_TOKENS:
-            r = " ".join(words[:-1]).strip(" ,.;:!?")
-            continue
-        break
-    if not r:
-        r = _clean_reason_text(fallback)
-    return r
-
-
-def _canonicalize_genre(genre: str | None) -> str | None:
-    if genre is None:
-        return None
-    g = str(genre).strip().lower()
-    if g == "":
-        return None
-    aliases = {
-        "drum and bass": "drum and bass",
-        "drum & bass": "drum and bass",
-        "dnb": "drum and bass",
-        "hip hop": "hip hop",
-        "hiphop": "hip hop",
-    }
-    if g in aliases:
-        return aliases[g]
-    if g in JUDGE_GENRES:
-        return g
-    return None
-
-
-def _strong_filename_genre_hint(path_str: str) -> str | None:
-    text = Path(path_str).name.lower()
-    if any(token in text for token in ("ost", "soundtrack", "theme")):
-        return "soundtrack"
-    if "2pac" in text:
-        return "hip hop"
-    return None
-
-
-def _filename_genre_signal(path_str: str, genre: str | None) -> str:
-    """supports | contradicts | neutral"""
-    hint = _strong_filename_genre_hint(path_str)
-    if hint is None or genre is None:
-        return "neutral"
-    if _canonicalize_genre(hint) == _canonicalize_genre(genre):
-        return "supports"
-    return "contradicts"
-
-
-def _bpm_note_for_genre(genre: str | None, bpm: float | None) -> str:
-    g = _canonicalize_genre(genre)
-    if g is None:
-        return "atypical"
-    if bpm is None:
-        return "atypical"
-    b = float(bpm)
-    if g == "drum and bass":
-        if 160 <= b <= 180 or 150 <= b <= 190:
-            return "ok"
-        return "atypical"
-    if g == "dubstep":
-        if 135 <= b <= 150 or 130 <= b <= 155 or 65 <= b <= 77:
-            return "ok"
-        return "atypical"
-    if g == "hip hop":
-        if 70 <= b <= 105 or 60 <= b <= 115 or 140 <= b <= 170:
-            return "ok"
-        return "atypical"
-    return "atypical"
-
-
-def _source_genre_from_row(source_row: dict) -> str | None:
-    source_genre_raw = source_row.get("source_genre_top")
-    if source_genre_raw is None:
-        source_genre_raw = source_row.get("genre_top")
-    return _canonicalize_genre(None if source_genre_raw is None else str(source_genre_raw))
-
-
-def _source_bpm_from_row(source_row: dict) -> float | None:
-    bpm_raw = source_row.get("source_bpm")
-    if bpm_raw is None:
-        bpm_raw = source_row.get("bpm")
-    if bpm_raw is None:
-        return None
-    try:
-        return float(bpm_raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _compute_conflicts_local(source_row: dict, genre_for_eval: str | None) -> tuple[int, str, str]:
-    bpm_note = _bpm_note_for_genre(genre_for_eval, _source_bpm_from_row(source_row))
-    filename_signal = _filename_genre_signal(str(source_row.get("path", "")), genre_for_eval)
-    score = 0
-    if bpm_note == "atypical":
-        score += 1
-    if filename_signal == "contradicts":
-        score += 2
-    if score <= 0:
-        conflicts_local = 0
-    elif score == 1:
-        conflicts_local = 1
-    else:
-        conflicts_local = 2
-    return conflicts_local, bpm_note, filename_signal
-
-
-def _sanitize_judge_response(
-    data: dict,
-    source_row: dict,
-) -> tuple[list[str], str | None, float | None, str, str, int, int | None]:
-    tags_raw = data.get("tags", [])
-    tags: list[str] = []
-    if isinstance(tags_raw, list):
-        for tag in tags_raw:
-            t = str(tag).strip().lower()
-            if t in JUDGE_MOODS and t not in tags:
-                tags.append(t)
-            if len(tags) >= 3:
-                break
-    genre_raw = data.get("genre_top")
-    llm_genre = _canonicalize_genre(None if genre_raw is None else str(genre_raw))
-    tag_agreement = str(data.get("tag_agreement", "")).strip().lower()
-    conflicts_raw = data.get("conflicts")
-    conflicts_llm: int | None = None
-    try:
-        parsed_conflicts = int(conflicts_raw)
-        if parsed_conflicts in {0, 1, 2}:
-            conflicts_llm = parsed_conflicts
-    except (TypeError, ValueError):
-        conflicts_llm = None
-
-    source_genre = _source_genre_from_row(source_row)
-    filename_hint = _strong_filename_genre_hint(str(source_row.get("path", "")))
-
-    genre_for_eval = source_genre or llm_genre or _canonicalize_genre(filename_hint)
-    conflicts_local, bpm_note, filename_signal = _compute_conflicts_local(source_row, genre_for_eval)
-    filename_supports_genre = filename_signal == "supports"
-    filename_contradicts_genre = filename_signal == "contradicts"
-
-    keep_by_policy = filename_supports_genre or (source_genre is not None and conflicts_local <= 1) or bpm_note == "ok"
-    drop_by_policy = conflicts_local >= 2 and bpm_note == "atypical" and filename_contradicts_genre
-
-    if drop_by_policy:
-        final_genre = None
-    elif source_genre is not None:
-        final_genre = source_genre
-    else:
-        final_genre = llm_genre or _canonicalize_genre(filename_hint)
-    if keep_by_policy and not drop_by_policy and final_genre is None:
-        final_genre = llm_genre or _canonicalize_genre(filename_hint)
-
-    conf = 0.55
-    if tag_agreement == "high":
-        conf += 0.10
-    elif tag_agreement == "medium":
-        conf += 0.05
-    if conflicts_local == 0:
-        conf += 0.05
-    elif conflicts_local == 2:
-        conf -= 0.05
-    if final_genre is not None:
-        conf += 0.05
-    confidence: float | None = max(0.50, min(0.85, conf))
-
-    # Backward compatibility for old cached/raw outputs
-    if (
-        tag_agreement not in {"low", "medium", "high"}
-        and conflicts_raw is None
-    ):
-        conf_raw = data.get("confidence")
-        if conf_raw is not None:
-            try:
-                confidence = max(0.50, min(0.85, float(conf_raw)))
-            except (TypeError, ValueError):
-                confidence = 0.55
-
-    reason = _clean_reason_text(str(data.get("reason", "")))
-    if bpm_note == "ok":
-        pieces = [p.strip() for p in reason.replace(";", ",").split(",")]
-        pieces = [p for p in pieces if "bpm atypical" not in p.lower() and "bpm" not in p.lower()]
-        reason = _clean_reason_text(", ".join(pieces))
-    if final_genre is None:
-        fallback_reason = "Genre remains ambiguous from current evidence"
-    elif bpm_note == "atypical":
-        fallback_reason = f"Genre kept as {final_genre}; BPM atypical for genre but other evidence supports it"
-    else:
-        fallback_reason = f"Genre kept as {final_genre} from combined evidence"
-    reason = _format_reason(reason, fallback_reason)
-    return tags, final_genre, confidence, reason, bpm_note, conflicts_local, conflicts_llm
 
 
 def _normalize_judge_write_fields(fields_csv: str | None) -> list[str]:
@@ -1185,9 +871,15 @@ def judge(
         raise typer.BadParameter("--limit must be >= 0")
 
     ensure_out_dir(out)
-    input_rows = _read_jsonl(analysis)
+    input_rows = list(read_jsonl(analysis))
     if limit > 0:
         input_rows = input_rows[:limit]
+    judge_service = JudgeService(
+        prompt_version=JUDGE_PROMPT_VERSION,
+        moods=JUDGE_MOODS,
+        genres=JUDGE_GENRES,
+        llm_client=chat_json,
+    )
 
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("NYX_DEEPSEEK_API_KEY")
     base_url = (
@@ -1232,24 +924,29 @@ def judge(
                 if cached is not None:
                     cache_hits += 1
                     result = cached
-                    source_genre = _source_genre_from_row(row)
-                    eval_genre = source_genre or _canonicalize_genre(result.genre_top)
-                    conflicts_local, bpm_note, _filename_signal = _compute_conflicts_local(row, eval_genre)
+                    source_genre = judge_service.source_genre_from_row(row)
+                    eval_genre = source_genre or judge_service.canonicalize_genre(result.genre_top)
+                    conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, eval_genre)
                     conflicts_llm = None
                 else:
                     cache_misses += 1
                     try:
-                        response = chat_json(
+                        response = judge_service.call_llm(
                             api_key=api_key,
                             base_url=base_url,
                             model=model,
-                            system_prompt=_judge_system_prompt(),
-                            user_prompt=_judge_user_prompt(row),
+                            system_prompt=judge_service.build_system_prompt(),
+                            user_prompt=judge_service.build_user_prompt(row),
                             temperature=0.0,
                         )
-                        tags, genre_top, confidence, reason, bpm_note, conflicts_local, conflicts_llm = (
-                            _sanitize_judge_response(response.data, row)
-                        )
+                        sanitized = judge_service.sanitize_llm_response(response.data, row)
+                        tags = sanitized["tags"]
+                        genre_top = sanitized["genre_top"]
+                        confidence = sanitized["confidence"]
+                        reason = sanitized["reason"]
+                        bpm_note = sanitized["bpm_note"]
+                        conflicts_local = sanitized["conflicts_local"]
+                        conflicts_llm = sanitized["conflicts_llm"]
                         result = JudgeResult(
                             tags=tags,
                             genre_top=genre_top,
@@ -1264,8 +961,8 @@ def judge(
                         )
                     except Exception as exc:
                         failures += 1
-                        source_genre = _source_genre_from_row(row)
-                        conflicts_local, bpm_note, _filename_signal = _compute_conflicts_local(row, source_genre)
+                        source_genre = judge_service.source_genre_from_row(row)
+                        conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, source_genre)
                         conflicts_llm = None
                         result = JudgeResult(
                             tags=[],
@@ -1321,7 +1018,8 @@ def judge(
     finally:
         cache.close()
 
-    preview_path = _write_judge_preview_jsonl(out, rows)
+    preview_path = out / "judge_preview.jsonl"
+    write_jsonl(preview_path, rows)
     avg_tokens = None if not total_tokens_list else sum(total_tokens_list) / len(total_tokens_list)
     summary_path = _write_judge_summary_md(
         out,
@@ -1373,7 +1071,7 @@ def apply_ai(
         raise typer.BadParameter("--limit must be >= 0")
 
     selected_fields = _normalize_ai_fields(fields)
-    input_rows = _read_jsonl(in_)
+    input_rows = list(read_jsonl(in_))
     reports_dir = in_.parent
     ensure_out_dir(reports_dir)
     log_path = reports_dir / "apply_ai_log.jsonl"
@@ -1506,7 +1204,7 @@ def apply_judge(
         raise typer.BadParameter("--limit must be >= 0")
 
     selected_fields = _normalize_judge_write_fields(fields)
-    input_rows = _read_jsonl(in_)
+    input_rows = list(read_jsonl(in_))
     reports_dir = in_.parent
     ensure_out_dir(reports_dir)
     log_path = reports_dir / "apply_judge_log.jsonl"
@@ -1639,7 +1337,7 @@ def playlists(
     else:
         if not in_.exists():
             raise typer.BadParameter(f"Input analysis file does not exist: {in_}")
-        rows = _read_jsonl(in_)
+        rows = list(read_jsonl(in_))
 
     buckets: dict[str, list[str]] = {
         "energy_8_10.m3u": [],
