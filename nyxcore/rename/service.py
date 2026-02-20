@@ -9,6 +9,9 @@ from pathlib import Path
 from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.rename.rules import RenameProposal, deterministic_cleanup
 
+WINDOWS_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
+MAX_FILENAME_LEN = 180
+
 
 @dataclass(slots=True)
 class RenameResult:
@@ -21,7 +24,7 @@ class RenameResult:
 
 
 def iter_mp3_files(root: Path) -> list[Path]:
-    return [p for p in root.rglob("*.mp3") if p.is_file()]
+    return [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".mp3"]
 
 
 def _tokenize(text: str) -> set[str]:
@@ -66,9 +69,42 @@ def _resolve_collision(target: Path) -> Path:
         idx += 1
 
 
+def _sanitize_windows_filename(base: str) -> str:
+    out = WINDOWS_INVALID_CHARS_RE.sub(" ", base)
+    out = re.sub(r"\s+", " ", out).strip()
+    out = out.rstrip(". ").strip()
+    return out
+
+
+def _truncate_base_for_limit(base: str, suffix: str) -> str:
+    max_base_len = max(1, MAX_FILENAME_LEN - len(suffix))
+    if len(base) <= max_base_len:
+        return base
+    clipped = base[:max_base_len].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    clipped = clipped.rstrip(" -_.;,|").strip()
+    return clipped or base[:max_base_len].rstrip(" -_.;,|").strip() or "track"
+
+
 def build_rename_result(path: Path, new_base: str, notes: list[str], llm_used: bool) -> RenameResult:
-    new_name = f"{new_base}.mp3"
+    suffix = path.suffix  # preserve exact extension case
+    sanitized_base = _sanitize_windows_filename(new_base)
+    if sanitized_base != new_base:
+        notes.append("windows_sanitize")
+    if not sanitized_base:
+        sanitized_base = _sanitize_windows_filename(path.stem) or "track"
+        notes.append("fallback_stem")
+
+    final_base = _truncate_base_for_limit(sanitized_base, suffix)
+    if final_base != sanitized_base:
+        notes.append("name_truncated")
+
+    new_name = f"{final_base}{suffix}"
     candidate = path.with_name(new_name)
+    if candidate.parent != path.parent:
+        candidate = path.with_name(path.name)
+        notes.append("same_dir_enforced")
     resolved = _resolve_collision(candidate) if candidate != path else candidate
     changed = resolved != path
     return RenameResult(
