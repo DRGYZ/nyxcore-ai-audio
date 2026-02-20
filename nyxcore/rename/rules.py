@@ -108,7 +108,7 @@ def _normalize_brackets(text: str) -> tuple[str, list[str]]:
 
 
 def _remove_leading_timestamp(text: str) -> tuple[str, list[str]]:
-    updated = re.sub(r"^\d{7,}[_-]+", "", text)
+    updated = re.sub(r"^\d{7,}(?:[_-]|\s)+", "", text)
     if updated != text:
         return updated, ["leading_timestamp_removed"]
     return text, []
@@ -172,9 +172,9 @@ def _looks_messy(text: str) -> bool:
 
 def deterministic_cleanup(stem: str) -> RenameProposal:
     notes: list[str] = []
-    out = _replace_separators(stem)
-    out, ts_notes = _remove_leading_timestamp(out)
+    out, ts_notes = _remove_leading_timestamp(stem)
     notes.extend(ts_notes)
+    out = _replace_separators(out)
 
     out, br_notes = _normalize_brackets(out)
     notes.extend(br_notes)
