@@ -219,6 +219,23 @@ export DEEPSEEK_API_KEY=...
 python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --model deepseek-chat --limit 5 --force
 ```
 
+## 📝 Today's Updates (2026-02-20)
+
+- Refactored judge internals out of `nyxcore/cli.py` into `nyxcore/judge/service.py` (`JudgeService`) so CLI stays orchestration-only.
+- Added shared JSONL utilities in `nyxcore/core/jsonl.py` (`read_jsonl`, `write_jsonl`) and reused them in CLI flows.
+- Added shared text cleanup utilities in `nyxcore/core/text.py` for stable reason formatting.
+- Kept judge output schema backward-compatible while making conflicts deterministic:
+  - `conflicts` now mirrors local deterministic score
+  - `conflicts_local` added for explicit local gate auditing
+  - `conflicts_llm` preserved as debug-only metadata
+- Hardened reason quality:
+  - removed dangling fragments and broken parenthesis tails
+  - removed `conflict (...)` artifacts
+  - normalized punctuation/separator artifacts
+- Reduced BPM mismatch spam:
+  - when `bpm_note="ok"`: BPM mismatch language is removed
+  - when `bpm_note="atypical"`: BPM mention appears only if BPM is far from tolerant range (`>=10 BPM` distance)
+
 ## 🎶 Smart Playlists
 
 Generate playlists from AI data:
