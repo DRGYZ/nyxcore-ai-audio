@@ -37,8 +37,6 @@ It combines:
 - 📂 Smart playlist generation
 - 💾 Persistent caching
 
-Everything runs locally.  
-No cloud. No streaming APIs. No data leaving your machine.
 
 ## ⚡ Quickstart
 
