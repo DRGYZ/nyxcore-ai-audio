@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from nyxcore.core.text import clean_reason_text, format_reason
@@ -228,9 +229,26 @@ class JudgeService:
 
         reason = clean_reason_text(str(data.get("reason", "")))
         if bpm_note == "ok":
+            mismatch_patterns = (
+                r"(?i)\bbpm\b",
+                r"(?i)\btempo\b",
+                r"(?i)\batypical\b",
+                r"(?i)\bmismatch\b",
+                r"(?i)\bdoes(?:\s+not|n't)\s+fit\b",
+                r"(?i)\bnot\s+typical\b",
+                r"(?i)\boutside\s+range\b",
+                r"(?i)\btoo\s+fast\b",
+                r"(?i)\btoo\s+slow\b",
+            )
             pieces = [p.strip() for p in reason.replace(";", ",").split(",")]
-            pieces = [p for p in pieces if "bpm atypical" not in p.lower() and "bpm" not in p.lower()]
-            reason = clean_reason_text(", ".join(pieces))
+            kept: list[str] = []
+            for piece in pieces:
+                if not piece:
+                    continue
+                if any(re.search(pattern, piece) for pattern in mismatch_patterns):
+                    continue
+                kept.append(piece)
+            reason = clean_reason_text(", ".join(kept))
         if final_genre is None:
             fallback_reason = "Genre remains ambiguous from current evidence"
         elif bpm_note == "atypical":

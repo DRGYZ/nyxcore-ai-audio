@@ -16,8 +16,24 @@ REASON_BAD_END_PATTERNS = (
 )
 
 
+def _remove_conflict_segments(text: str) -> str:
+    # Remove "conflict (...)" including broken/unclosed parenthesis variants.
+    t = re.sub(r"(?i)\bconflict\s*\([^)]*\)", "", text)
+    t = re.sub(r"(?i)\bconflict\s*\([^)]*$", "", t)
+    t = re.sub(r"(?i)\bconflict\s*\([^,.;:!?)]*", "", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _drop_unmatched_bracket_tail(text: str, open_ch: str, close_ch: str) -> str:
+    if text.count(open_ch) > text.count(close_ch):
+        idx = text.rfind(open_ch)
+        if idx >= 0:
+            return text[:idx].rstrip(" ,.;:!?-()[]")
+    return text
+
+
 def clean_reason_text(text: str) -> str:
-    r = text.strip()
+    r = _remove_conflict_segments(text.strip())
     for sep in (".", "!", "?"):
         if sep in r:
             r = r.split(sep, 1)[0]
@@ -46,6 +62,8 @@ def clean_reason_text(text: str) -> str:
         if not removed:
             break
     r = r.rstrip(" ,.;:!?")
+    r = _drop_unmatched_bracket_tail(r, "(", ")")
+    r = _drop_unmatched_bracket_tail(r, "[", "]")
     while r:
         words = r.split()
         if not words:
@@ -59,7 +77,7 @@ def clean_reason_text(text: str) -> str:
 
 
 def format_reason(reason: str, fallback: str, max_chars: int = 120) -> str:
-    r = reason or ""
+    r = _remove_conflict_segments(reason or "")
     for sep in (".", "!", "?"):
         if sep in r:
             r = r.split(sep, 1)[0]
@@ -70,11 +88,15 @@ def format_reason(reason: str, fallback: str, max_chars: int = 120) -> str:
     r = re.sub(r"(?i)\bevidence\s+inconsistent\b", "", r)
     r = re.sub(r"(?i)\bgenre\s+e\b", "", r)
     r = re.sub(r"\s+", " ", r).strip(" ,.;:!?")
+    r = _drop_unmatched_bracket_tail(r, "(", ")")
+    r = _drop_unmatched_bracket_tail(r, "[", "]")
 
     r = clean_reason_text(r)
     if len(r) > max_chars:
         clipped = r[:max_chars]
         r = clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
+    r = _drop_unmatched_bracket_tail(r, "(", ")")
+    r = _drop_unmatched_bracket_tail(r, "[", "]")
     r = r.strip(" ,.;:!?-()")
     while r:
         words = r.split()
