@@ -9,6 +9,7 @@ Requirements:
 
 - Python 3.11+ (3.12 recommended)
 - `ffmpeg` available on PATH
+- Dependencies include `aiohttp`, `sqlmodel`, and `PyYAML`
 
 Setup:
 
@@ -38,6 +39,16 @@ It combines:
 
 Everything runs locally.  
 No cloud. No streaming APIs. No data leaving your machine.
+
+## ⚡ Quickstart
+
+```bash
+python -m nyxcore.cli scan music --out data/reports
+python -m nyxcore.cli analyze music --backend hybrid --out data/reports
+python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --concurrency 10
+python -m nyxcore.cli apply-judge music --in data/reports/judge_preview.jsonl --backup-dir data/backups --dry-run
+python -m nyxcore.cli playlists music --from-cache --out data/playlists
+```
 
 ## 🏗 Architecture
 
@@ -190,8 +201,14 @@ python -m nyxcore.cli judge music \
   --out data/reports \
   --provider deepseek \
   --model deepseek-chat \
+  --concurrency 10 \
   --limit 50
 ```
+
+Concurrency notes:
+
+- `--concurrency` default is `10`
+- allowed range is `1-20`
 
 Apply judge tags safely (NYX_* TXXX only):
 
@@ -219,22 +236,56 @@ export DEEPSEEK_API_KEY=...
 python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --model deepseek-chat --limit 5 --force
 ```
 
-## 📝 Today's Updates (2026-02-20)
+### Phase 3.6 — Smart Rename (Preview → Apply → Undo)
 
-- Refactored judge internals out of `nyxcore/cli.py` into `nyxcore/judge/service.py` (`JudgeService`) so CLI stays orchestration-only.
-- Added shared JSONL utilities in `nyxcore/core/jsonl.py` (`read_jsonl`, `write_jsonl`) and reused them in CLI flows.
-- Added shared text cleanup utilities in `nyxcore/core/text.py` for stable reason formatting.
-- Kept judge output schema backward-compatible while making conflicts deterministic:
-  - `conflicts` now mirrors local deterministic score
-  - `conflicts_local` added for explicit local gate auditing
-  - `conflicts_llm` preserved as debug-only metadata
-- Hardened reason quality:
-  - removed dangling fragments and broken parenthesis tails
-  - removed `conflict (...)` artifacts
-  - normalized punctuation/separator artifacts
-- Reduced BPM mismatch spam:
-  - when `bpm_note="ok"`: BPM mismatch language is removed
-  - when `bpm_note="atypical"`: BPM mention appears only if BPM is far from tolerant range (`>=10 BPM` distance)
+Smart filename cleanup for `.mp3` files only.
+Folders are preserved; only filenames are changed.
+
+Safe rename workflow:
+
+1. Deterministic dry-run (no LLM), limited sample:
+
+```bash
+python -m nyxcore.cli rename music --dry-run --no-llm --limit 50
+```
+
+2. Dry-run with optional LLM refinement:
+
+```bash
+python -m nyxcore.cli rename music --dry-run --limit 50 --concurrency 10
+```
+
+3. Apply full rename and write map to reports folder:
+
+```bash
+python -m nyxcore.cli rename music --apply --out data/reports --concurrency 10
+```
+
+4. Undo from saved map:
+
+```bash
+python -m nyxcore.cli rename-undo --map data/reports/rename_map.jsonl --dry-run
+python -m nyxcore.cli rename-undo --map data/reports/rename_map.jsonl
+```
+
+Rename safety notes:
+
+- Default mode is preview (`--dry-run`)
+- Windows-safe filename sanitization is applied
+- Collision handling appends ` - 2`, ` - 3`, etc.
+- No directory moves; rename stays within the same folder
+- Writes a rename map JSONL into the reports folder
+
+## 🗒 Release Notes
+
+### 2026-02-20
+
+- Refactored judge logic into `JudgeService` with cleaner CLI orchestration.
+- Added deterministic local conflict scoring with debug-only `conflicts_llm`.
+- Hardened judge reason cleanup and reduced noisy BPM mismatch wording.
+- Added async concurrent DeepSeek judge requests with semaphore control.
+- Introduced YAML config loading and dependency injection for judge prompts/rules.
+- Added smart rename preview/apply/undo workflow with optional LLM refinement.
 
 ## 🎶 Smart Playlists
 
