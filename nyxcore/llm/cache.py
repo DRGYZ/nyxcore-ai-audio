@@ -1,46 +1,99 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 from pathlib import Path
+from typing import Optional
 
 from nyxcore.llm.models import JudgeResult
+from sqlmodel import Field, SQLModel, Session, create_engine, select
+
+
+class JudgeCacheEntry(SQLModel, table=True):
+    __tablename__ = "judge_cache"
+
+    path: str = Field(primary_key=True)
+    file_size_bytes: int = Field(primary_key=True)
+    mtime_iso: str = Field(primary_key=True)
+    model: str = Field(primary_key=True)
+    prompt_version: str = Field(primary_key=True)
+    provider: str
+    tags_json: str
+    genre_top: Optional[str] = None
+    confidence: Optional[float] = None
+    reason: str
+    created_at_iso: str
+    errors_json: str
+    usage_prompt_tokens: Optional[int] = None
+    usage_completion_tokens: Optional[int] = None
+    usage_total_tokens: Optional[int] = None
+
+
+class CacheRepo:
+    def __init__(self, engine) -> None:
+        self.engine = engine
+
+    def get(
+        self,
+        *,
+        path: str,
+        file_size_bytes: int,
+        mtime_iso: str,
+        model: str,
+        prompt_version: str,
+    ) -> JudgeCacheEntry | None:
+        with Session(self.engine) as session:
+            stmt = select(JudgeCacheEntry).where(
+                JudgeCacheEntry.path == path,
+                JudgeCacheEntry.file_size_bytes == file_size_bytes,
+                JudgeCacheEntry.mtime_iso == mtime_iso,
+                JudgeCacheEntry.model == model,
+                JudgeCacheEntry.prompt_version == prompt_version,
+            )
+            return session.exec(stmt).first()
+
+    def put(self, entry: JudgeCacheEntry) -> None:
+        with Session(self.engine) as session:
+            stmt = select(JudgeCacheEntry).where(
+                JudgeCacheEntry.path == entry.path,
+                JudgeCacheEntry.file_size_bytes == entry.file_size_bytes,
+                JudgeCacheEntry.mtime_iso == entry.mtime_iso,
+                JudgeCacheEntry.model == entry.model,
+                JudgeCacheEntry.prompt_version == entry.prompt_version,
+            )
+            existing = session.exec(stmt).first()
+            if existing is None:
+                session.add(entry)
+            else:
+                existing.provider = entry.provider
+                existing.tags_json = entry.tags_json
+                existing.genre_top = entry.genre_top
+                existing.confidence = entry.confidence
+                existing.reason = entry.reason
+                existing.created_at_iso = entry.created_at_iso
+                existing.errors_json = entry.errors_json
+                existing.usage_prompt_tokens = entry.usage_prompt_tokens
+                existing.usage_completion_tokens = entry.usage_completion_tokens
+                existing.usage_total_tokens = entry.usage_total_tokens
+                session.add(existing)
+            session.commit()
 
 
 class JudgeCache:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._lock = threading.Lock()
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS judge_cache (
-                path TEXT NOT NULL,
-                file_size_bytes INTEGER NOT NULL,
-                mtime_iso TEXT NOT NULL,
-                model TEXT NOT NULL,
-                prompt_version TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                tags_json TEXT NOT NULL,
-                genre_top TEXT,
-                confidence REAL,
-                reason TEXT NOT NULL,
-                created_at_iso TEXT NOT NULL,
-                errors_json TEXT NOT NULL,
-                usage_prompt_tokens INTEGER,
-                usage_completion_tokens INTEGER,
-                usage_total_tokens INTEGER,
-                PRIMARY KEY(path, file_size_bytes, mtime_iso, model, prompt_version)
-            )
-            """
+        self.engine = create_engine(
+            f"sqlite:///{self.db_path}",
+            connect_args={"check_same_thread": False},
         )
-        self.conn.commit()
+        SQLModel.metadata.create_all(self.engine, tables=[JudgeCacheEntry.__table__])
+        self.repo = CacheRepo(self.engine)
 
     def close(self) -> None:
         with self._lock:
-            self.conn.close()
+            self.engine.dispose()
 
     def get(
         self,
@@ -52,30 +105,28 @@ class JudgeCache:
         prompt_version: str,
     ) -> JudgeResult | None:
         with self._lock:
-            row = self.conn.execute(
-                """
-                SELECT provider, tags_json, genre_top, confidence, reason, created_at_iso, errors_json,
-                       usage_prompt_tokens, usage_completion_tokens, usage_total_tokens
-                FROM judge_cache
-                WHERE path = ? AND file_size_bytes = ? AND mtime_iso = ? AND model = ? AND prompt_version = ?
-                """,
-                (path, file_size_bytes, mtime_iso, model, prompt_version),
-            ).fetchone()
+            row = self.repo.get(
+                path=path,
+                file_size_bytes=file_size_bytes,
+                mtime_iso=mtime_iso,
+                model=model,
+                prompt_version=prompt_version,
+            )
         if row is None:
             return None
         return JudgeResult(
-            tags=list(json.loads(row[1])),
-            genre_top=row[2],
-            confidence=None if row[3] is None else float(row[3]),
-            reason=row[4],
-            provider=row[0],
+            tags=list(json.loads(row.tags_json)),
+            genre_top=row.genre_top,
+            confidence=None if row.confidence is None else float(row.confidence),
+            reason=row.reason,
+            provider=row.provider,
             model=model,
             prompt_version=prompt_version,
-            created_at_iso=row[5],
-            errors=list(json.loads(row[6])),
-            usage_prompt_tokens=row[7],
-            usage_completion_tokens=row[8],
-            usage_total_tokens=row[9],
+            created_at_iso=row.created_at_iso,
+            errors=list(json.loads(row.errors_json)),
+            usage_prompt_tokens=row.usage_prompt_tokens,
+            usage_completion_tokens=row.usage_completion_tokens,
+            usage_total_tokens=row.usage_total_tokens,
         )
 
     def set(
@@ -88,42 +139,22 @@ class JudgeCache:
         prompt_version: str,
         result: JudgeResult,
     ) -> None:
+        entry = JudgeCacheEntry(
+            path=path,
+            file_size_bytes=file_size_bytes,
+            mtime_iso=mtime_iso,
+            model=model,
+            prompt_version=prompt_version,
+            provider=result.provider,
+            tags_json=json.dumps(result.tags, ensure_ascii=False),
+            genre_top=result.genre_top,
+            confidence=result.confidence,
+            reason=result.reason,
+            created_at_iso=result.created_at_iso,
+            errors_json=json.dumps(result.errors, ensure_ascii=False),
+            usage_prompt_tokens=result.usage_prompt_tokens,
+            usage_completion_tokens=result.usage_completion_tokens,
+            usage_total_tokens=result.usage_total_tokens,
+        )
         with self._lock:
-            self.conn.execute(
-                """
-                INSERT INTO judge_cache
-                    (path, file_size_bytes, mtime_iso, model, prompt_version, provider,
-                     tags_json, genre_top, confidence, reason, created_at_iso, errors_json,
-                     usage_prompt_tokens, usage_completion_tokens, usage_total_tokens)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(path, file_size_bytes, mtime_iso, model, prompt_version) DO UPDATE SET
-                    provider=excluded.provider,
-                    tags_json=excluded.tags_json,
-                    genre_top=excluded.genre_top,
-                    confidence=excluded.confidence,
-                    reason=excluded.reason,
-                    created_at_iso=excluded.created_at_iso,
-                    errors_json=excluded.errors_json,
-                    usage_prompt_tokens=excluded.usage_prompt_tokens,
-                    usage_completion_tokens=excluded.usage_completion_tokens,
-                    usage_total_tokens=excluded.usage_total_tokens
-                """,
-                (
-                    path,
-                    file_size_bytes,
-                    mtime_iso,
-                    model,
-                    prompt_version,
-                    result.provider,
-                    json.dumps(result.tags, ensure_ascii=False),
-                    result.genre_top,
-                    result.confidence,
-                    result.reason,
-                    result.created_at_iso,
-                    json.dumps(result.errors, ensure_ascii=False),
-                    result.usage_prompt_tokens,
-                    result.usage_completion_tokens,
-                    result.usage_total_tokens,
-                ),
-            )
-            self.conn.commit()
+            self.repo.put(entry)
