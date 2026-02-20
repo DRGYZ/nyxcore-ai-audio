@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import os
@@ -24,7 +25,7 @@ from nyxcore.core.jsonl import read_jsonl, write_jsonl
 from nyxcore.core.utils import ensure_out_dir
 from nyxcore.judge.service import JudgeService
 from nyxcore.llm.cache import JudgeCache
-from nyxcore.llm.deepseek_client import chat_json
+from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.llm.models import JudgeResult
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview
 from nyxcore.normalize.rules import is_missing
@@ -857,6 +858,7 @@ def judge(
         help="LLM model (recommended: deepseek-chat or deepseek-reasoner)",
     ),
     limit: int = typer.Option(0, "--limit", help="Limit number of rows to process (0 means all)"),
+    concurrency: int = typer.Option(10, "--concurrency", help="Concurrent LLM requests (1-20)"),
     force: bool = typer.Option(False, "--force", help="Ignore judge cache and re-request LLM"),
 ) -> None:
     if not music.exists() or not music.is_dir():
@@ -869,6 +871,8 @@ def judge(
         raise typer.BadParameter("Use model deepseek-chat or deepseek-reasoner for DeepSeek judge")
     if limit < 0:
         raise typer.BadParameter("--limit must be >= 0")
+    if concurrency < 1 or concurrency > 20:
+        raise typer.BadParameter("--concurrency must be between 1 and 20")
 
     ensure_out_dir(out)
     input_rows = list(read_jsonl(analysis))
@@ -878,7 +882,7 @@ def judge(
         prompt_version=JUDGE_PROMPT_VERSION,
         moods=JUDGE_MOODS,
         genres=JUDGE_GENRES,
-        llm_client=chat_json,
+        llm_client=chat_json_async,
     )
 
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("NYX_DEEPSEEK_API_KEY")
@@ -906,14 +910,25 @@ def judge(
         TimeElapsedColumn(),
         console=console,
     )
-    try:
-        with progress:
-            task = progress.add_task("LLM judging tracks", total=max(1, len(input_rows)))
-            for idx, row in enumerate(input_rows, start=1):
-                path = str(row.get("path", ""))
-                size = int(row.get("file_size_bytes", 0) or 0)
-                mtime = str(row.get("mtime_iso", ""))
-                cached = None if force else cache.get(
+    async def _run_async() -> list[dict]:
+        import aiohttp
+
+        nonlocal cache_hits, cache_misses, failures, total_tokens_list
+        system_prompt = judge_service.build_system_prompt()
+        sem = asyncio.Semaphore(concurrency)
+        ordered_rows: list[dict | None] = [None] * len(input_rows)
+        timeout = aiohttp.ClientTimeout(total=45.0)
+
+        async def _process_one(index: int, row: dict, session: aiohttp.ClientSession) -> tuple[int, dict]:
+            nonlocal cache_hits, cache_misses, failures
+            path = str(row.get("path", ""))
+            size = int(row.get("file_size_bytes", 0) or 0)
+            mtime = str(row.get("mtime_iso", ""))
+
+            cached = None
+            if not force:
+                cached = await asyncio.to_thread(
+                    cache.get,
                     path=path,
                     file_size_bytes=size,
                     mtime_iso=mtime,
@@ -921,100 +936,116 @@ def judge(
                     prompt_version=JUDGE_PROMPT_VERSION,
                 )
 
-                if cached is not None:
-                    cache_hits += 1
-                    result = cached
-                    source_genre = judge_service.source_genre_from_row(row)
-                    eval_genre = source_genre or judge_service.canonicalize_genre(result.genre_top)
-                    conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, eval_genre)
-                    conflicts_llm = None
-                else:
-                    cache_misses += 1
-                    try:
-                        response = judge_service.call_llm(
+            if cached is not None:
+                cache_hits += 1
+                result = cached
+                source_genre = judge_service.source_genre_from_row(row)
+                eval_genre = source_genre or judge_service.canonicalize_genre(result.genre_top)
+                conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, eval_genre)
+                conflicts_llm = None
+            else:
+                cache_misses += 1
+                try:
+                    async with sem:
+                        response = await judge_service.call_llm_async(
                             api_key=api_key,
                             base_url=base_url,
                             model=model,
-                            system_prompt=judge_service.build_system_prompt(),
+                            system_prompt=system_prompt,
                             user_prompt=judge_service.build_user_prompt(row),
                             temperature=0.0,
+                            max_retries=3,
+                            session=session,
                         )
-                        sanitized = judge_service.sanitize_llm_response(response.data, row)
-                        tags = sanitized["tags"]
-                        genre_top = sanitized["genre_top"]
-                        confidence = sanitized["confidence"]
-                        reason = sanitized["reason"]
-                        bpm_note = sanitized["bpm_note"]
-                        conflicts_local = sanitized["conflicts_local"]
-                        conflicts_llm = sanitized["conflicts_llm"]
-                        result = JudgeResult(
-                            tags=tags,
-                            genre_top=genre_top,
-                            confidence=confidence,
-                            reason=reason,
-                            provider=provider,
-                            model=model,
-                            prompt_version=JUDGE_PROMPT_VERSION,
-                            usage_prompt_tokens=response.usage.get("prompt_tokens"),
-                            usage_completion_tokens=response.usage.get("completion_tokens"),
-                            usage_total_tokens=response.usage.get("total_tokens"),
-                        )
-                    except Exception as exc:
-                        failures += 1
-                        source_genre = judge_service.source_genre_from_row(row)
-                        conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, source_genre)
-                        conflicts_llm = None
-                        result = JudgeResult(
-                            tags=[],
-                            genre_top=None,
-                            confidence=None,
-                            reason="",
-                            provider=provider,
-                            model=model,
-                            prompt_version=JUDGE_PROMPT_VERSION,
-                            errors=[f"judge_error: {exc}"],
-                        )
-                    cache.set(
-                        path=path,
-                        file_size_bytes=size,
-                        mtime_iso=mtime,
+                    sanitized = judge_service.sanitize_llm_response(response.data, row)
+                    tags = sanitized["tags"]
+                    genre_top = sanitized["genre_top"]
+                    confidence = sanitized["confidence"]
+                    reason = sanitized["reason"]
+                    bpm_note = sanitized["bpm_note"]
+                    conflicts_local = sanitized["conflicts_local"]
+                    conflicts_llm = sanitized["conflicts_llm"]
+                    result = JudgeResult(
+                        tags=tags,
+                        genre_top=genre_top,
+                        confidence=confidence,
+                        reason=reason,
+                        provider=provider,
                         model=model,
                         prompt_version=JUDGE_PROMPT_VERSION,
-                        result=result,
+                        usage_prompt_tokens=response.usage.get("prompt_tokens"),
+                        usage_completion_tokens=response.usage.get("completion_tokens"),
+                        usage_total_tokens=response.usage.get("total_tokens"),
                     )
-
-                if result.usage_total_tokens is not None:
-                    total_tokens_list.append(int(result.usage_total_tokens))
-
-                rows.append(
-                    {
-                        "path": path,
-                        "file_size_bytes": size,
-                        "mtime_iso": mtime,
-                        "source_backend": row.get("backend"),
-                        "source_energy_0_10": row.get("energy_0_10"),
-                        "source_bpm": row.get("bpm"),
-                        "source_tags": row.get("tags", []),
-                        "source_genre_top": row.get("genre_top"),
-                        "tags": result.tags,
-                        "genre_top": result.genre_top,
-                        "confidence": result.confidence,
-                        "reason": result.reason,
-                        "bpm_note": bpm_note,
-                        "conflicts": conflicts_local,
-                        "conflicts_local": conflicts_local,
-                        "conflicts_llm": conflicts_llm,
-                        "judge_provider": result.provider,
-                        "judge_model": result.model,
-                        "prompt_version": result.prompt_version,
-                        "created_at_iso": result.created_at_iso,
-                        "errors": result.errors,
-                        "usage_prompt_tokens": result.usage_prompt_tokens,
-                        "usage_completion_tokens": result.usage_completion_tokens,
-                        "usage_total_tokens": result.usage_total_tokens,
-                    }
+                except Exception as exc:
+                    failures += 1
+                    source_genre = judge_service.source_genre_from_row(row)
+                    conflicts_local, bpm_note, _filename_signal = judge_service.compute_conflicts_local(row, source_genre)
+                    conflicts_llm = None
+                    result = JudgeResult(
+                        tags=[],
+                        genre_top=None,
+                        confidence=None,
+                        reason="",
+                        provider=provider,
+                        model=model,
+                        prompt_version=JUDGE_PROMPT_VERSION,
+                        errors=[f"judge_error: {exc}"],
+                    )
+                await asyncio.to_thread(
+                    cache.set,
+                    path=path,
+                    file_size_bytes=size,
+                    mtime_iso=mtime,
+                    model=model,
+                    prompt_version=JUDGE_PROMPT_VERSION,
+                    result=result,
                 )
-                progress.update(task, completed=idx)
+
+            if result.usage_total_tokens is not None:
+                total_tokens_list.append(int(result.usage_total_tokens))
+
+            row_out = {
+                "path": path,
+                "file_size_bytes": size,
+                "mtime_iso": mtime,
+                "source_backend": row.get("backend"),
+                "source_energy_0_10": row.get("energy_0_10"),
+                "source_bpm": row.get("bpm"),
+                "source_tags": row.get("tags", []),
+                "source_genre_top": row.get("genre_top"),
+                "tags": result.tags,
+                "genre_top": result.genre_top,
+                "confidence": result.confidence,
+                "reason": result.reason,
+                "bpm_note": bpm_note,
+                "conflicts": conflicts_local,
+                "conflicts_local": conflicts_local,
+                "conflicts_llm": conflicts_llm,
+                "judge_provider": result.provider,
+                "judge_model": result.model,
+                "prompt_version": result.prompt_version,
+                "created_at_iso": result.created_at_iso,
+                "errors": result.errors,
+                "usage_prompt_tokens": result.usage_prompt_tokens,
+                "usage_completion_tokens": result.usage_completion_tokens,
+                "usage_total_tokens": result.usage_total_tokens,
+            }
+            return index, row_out
+
+        with progress:
+            task = progress.add_task("LLM judging tracks", total=max(1, len(input_rows)))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                tasks = [asyncio.create_task(_process_one(i, row, session)) for i, row in enumerate(input_rows)]
+                for fut in asyncio.as_completed(tasks):
+                    idx, row_out = await fut
+                    ordered_rows[idx] = row_out
+                    progress.update(task, advance=1)
+
+        return [row for row in ordered_rows if row is not None]
+
+    try:
+        rows = asyncio.run(_run_async())
     finally:
         cache.close()
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import re
 from pathlib import Path
 
@@ -34,6 +35,32 @@ class JudgeService:
             user_prompt=user_prompt,
             temperature=temperature,
         )
+
+    async def call_llm_async(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.0,
+        **kwargs,
+    ):
+        if self.llm_client is None:
+            raise RuntimeError("JudgeService.llm_client is not configured")
+        result = self.llm_client(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            **kwargs,
+        )
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     def build_system_prompt(self) -> str:
         return (
