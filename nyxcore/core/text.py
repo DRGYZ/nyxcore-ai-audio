@@ -32,6 +32,13 @@ def _drop_unmatched_bracket_tail(text: str, open_ch: str, close_ch: str) -> str:
     return text
 
 
+def _normalize_reason_punctuation(text: str) -> str:
+    t = re.sub(r"([,;])(\s*[,;])+", r"\1", text)
+    t = re.sub(r"\s+([,;:])", r"\1", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    return t.strip(" ,.;:!?-()[]")
+
+
 def clean_reason_text(text: str) -> str:
     r = _remove_conflict_segments(text.strip())
     for sep in (".", "!", "?"):
@@ -64,6 +71,7 @@ def clean_reason_text(text: str) -> str:
     r = r.rstrip(" ,.;:!?")
     r = _drop_unmatched_bracket_tail(r, "(", ")")
     r = _drop_unmatched_bracket_tail(r, "[", "]")
+    r = _normalize_reason_punctuation(r)
     while r:
         words = r.split()
         if not words:
@@ -90,6 +98,7 @@ def format_reason(reason: str, fallback: str, max_chars: int = 120) -> str:
     r = re.sub(r"\s+", " ", r).strip(" ,.;:!?")
     r = _drop_unmatched_bracket_tail(r, "(", ")")
     r = _drop_unmatched_bracket_tail(r, "[", "]")
+    r = _normalize_reason_punctuation(r)
 
     r = clean_reason_text(r)
     if len(r) > max_chars:
@@ -123,6 +132,7 @@ def format_reason(reason: str, fallback: str, max_chars: int = 120) -> str:
         r = ""
     if not r:
         r = clean_reason_text(fallback)
+        r = _normalize_reason_punctuation(r)
     if len(r) < 12:
         r = "Genre kept from source; evidence mixed"
     return r
