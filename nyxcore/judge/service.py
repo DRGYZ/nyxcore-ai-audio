@@ -5,14 +5,16 @@ import inspect
 import re
 from pathlib import Path
 
+from nyxcore.config import JudgeConfig
 from nyxcore.core.text import clean_reason_text, format_reason
 
 
 class JudgeService:
-    def __init__(self, prompt_version: str, moods: list[str], genres: list[str], llm_client=None):
-        self.prompt_version = prompt_version
-        self.moods = moods
-        self.genres = genres
+    def __init__(self, config: JudgeConfig, llm_client=None):
+        self.config = config
+        self.prompt_version = config.prompt_version
+        self.moods = config.moods
+        self.genres = config.genres
         self.llm_client = llm_client
 
     def call_llm(
@@ -63,18 +65,7 @@ class JudgeService:
         return result
 
     def build_system_prompt(self) -> str:
-        return (
-            "You are a strict music mood/genre judge.\n"
-            "Return STRICT JSON with keys: tags, genre_top, tag_agreement, genre_decision, reason.\n"
-            "Optional debug key: conflicts (0,1,2).\n"
-            "tags must be 2-3 items max, unique, subset of allowed moods.\n"
-            "genre_top must be null or subset of allowed genres.\n"
-            "tag_agreement must be one of: low, medium, high.\n"
-            "genre_decision must be one of: keep, drop.\n"
-            "Do not output numeric confidence.\n"
-            "reason must be <=120 chars.\n"
-            "Never invent artist/title. Use only supplied evidence."
-        )
+        return self.config.prompts.system.strip()
 
     def build_user_prompt(self, row: dict) -> str:
         allowed_moods = ", ".join(self.moods)
@@ -92,13 +83,8 @@ class JudgeService:
             "Allowed moods: [" + allowed_moods + "]\n"
             "Allowed genres: [" + allowed_genres + "]\n"
             "Rules:\n"
-            "- use hybrid evidence (bpm/energy + clap tags/genre + filename path)\n"
-            "- if genre ambiguous, set genre_top=null\n"
-            "- 2-3 tags max, no duplicates\n"
-            "- keep consistent with vocab\n\n"
-            "- use phrase 'BPM atypical for genre' instead of strong mismatch claims\n"
-            "- set tag_agreement based on filename/title cues + hybrid tag consistency\n"
-            "- set genre_decision=keep only when genre evidence is coherent\n\n"
+            + "\n".join(f"- {rule}" for rule in self.config.prompts.user_rules)
+            + "\n\n"
             "Evidence JSON:\n"
             + json.dumps(evidence, ensure_ascii=False)
         )
@@ -109,13 +95,7 @@ class JudgeService:
         g = str(genre).strip().lower()
         if g == "":
             return None
-        aliases = {
-            "drum and bass": "drum and bass",
-            "drum & bass": "drum and bass",
-            "dnb": "drum and bass",
-            "hip hop": "hip hop",
-            "hiphop": "hip hop",
-        }
+        aliases = {"drum and bass": "drum and bass", "hip hop": "hip hop", **self.config.genre_aliases}
         if g in aliases:
             return aliases[g]
         if g in self.genres:
@@ -124,10 +104,9 @@ class JudgeService:
 
     def strong_filename_genre_hint(self, path_str: str) -> str | None:
         text = Path(path_str).name.lower()
-        if any(token in text for token in ("ost", "soundtrack", "theme")):
-            return "soundtrack"
-        if "2pac" in text:
-            return "hip hop"
+        for token, genre in self.config.filename_hints.items():
+            if token.lower() in text:
+                return self.canonicalize_genre(genre)
         return None
 
     def filename_genre_signal(self, path_str: str, genre: str | None) -> str:
@@ -145,29 +124,23 @@ class JudgeService:
         if bpm is None:
             return "atypical"
         b = float(bpm)
-        if g == "drum and bass":
-            if 160 <= b <= 180 or 150 <= b <= 190:
-                return "ok"
+        band = self.config.bpm_bands.get(g)
+        if band is None:
             return "atypical"
-        if g == "dubstep":
-            if 135 <= b <= 150 or 130 <= b <= 155 or 65 <= b <= 77:
+        for low, high in band.typical:
+            if low <= b <= high:
                 return "ok"
-            return "atypical"
-        if g == "hip hop":
-            if 70 <= b <= 105 or 60 <= b <= 115 or 140 <= b <= 170:
+        for low, high in band.tolerant:
+            if low <= b <= high:
                 return "ok"
-            return "atypical"
         return "atypical"
 
     def _tolerant_bpm_ranges(self, genre: str | None) -> list[tuple[float, float]]:
         g = self.canonicalize_genre(genre)
-        if g == "drum and bass":
-            return [(150.0, 190.0)]
-        if g == "dubstep":
-            return [(130.0, 155.0), (65.0, 77.0)]
-        if g == "hip hop":
-            return [(60.0, 115.0), (140.0, 170.0)]
-        return []
+        if g is None:
+            return []
+        band = self.config.bpm_bands.get(g)
+        return [] if band is None else list(band.tolerant)
 
     def _bpm_distance_to_tolerant(self, genre: str | None, bpm: float | None) -> float | None:
         if bpm is None:
@@ -311,7 +284,7 @@ class JudgeService:
             fallback_reason = "Genre kept from source; evidence mixed"
         else:
             fallback_reason = f"Genre kept as {final_genre} from combined evidence"
-        reason = format_reason(reason, fallback_reason)
+        reason = format_reason(reason, fallback_reason, max_chars=self.config.reason.max_chars)
 
         return {
             "tags": tags,

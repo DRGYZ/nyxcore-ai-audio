@@ -19,6 +19,7 @@ from nyxcore.audio.backends.dummy_backend import DummyBackend
 from nyxcore.audio.backends.essentia_backend import EssentiaBackend
 from nyxcore.audio.cache import AnalysisCache
 from nyxcore.audio.models import AnalysisResult
+from nyxcore.config import DEFAULT_CONFIG_PATH, load_config
 from nyxcore.core.scanner import scan_music_folder
 from nyxcore.core.track import TrackRecord
 from nyxcore.core.jsonl import read_jsonl, write_jsonl
@@ -39,44 +40,6 @@ from nyxcore.tagging.writer import backup_file, write_tags
 
 app = typer.Typer(help="nyxcore - local-first music library auditor")
 console = Console()
-JUDGE_PROMPT_VERSION = "judge_v1_heuristics"
-JUDGE_MOODS = [
-    "dark",
-    "hypnotic",
-    "night-drive",
-    "chill",
-    "energetic",
-    "aggressive",
-    "sad",
-    "uplifting",
-    "cinematic",
-    "melancholic",
-    "tense",
-    "mysterious",
-    "epic",
-    "relaxed",
-]
-JUDGE_GENRES = [
-    "hip hop",
-    "trap",
-    "phonk",
-    "drill",
-    "electronic",
-    "techno",
-    "house",
-    "drum and bass",
-    "dubstep",
-    "ambient",
-    "classical",
-    "rock",
-    "metal",
-    "pop",
-    "r&b",
-    "lofi",
-    "soundtrack",
-    "jazz",
-    "reggaeton",
-]
 
 
 @app.callback()
@@ -851,6 +814,7 @@ def judge(
     music: Path = typer.Argument(Path("./music"), help="Music root folder"),
     analysis: Path = typer.Option(..., "--analysis", help="Path to analysis_preview.jsonl"),
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for judge reports"),
+    config: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", help="Path to YAML config"),
     provider: str = typer.Option("deepseek", "--provider", help="LLM provider"),
     model: str = typer.Option(
         "deepseek-chat",
@@ -858,7 +822,7 @@ def judge(
         help="LLM model (recommended: deepseek-chat or deepseek-reasoner)",
     ),
     limit: int = typer.Option(0, "--limit", help="Limit number of rows to process (0 means all)"),
-    concurrency: int = typer.Option(10, "--concurrency", help="Concurrent LLM requests (1-20)"),
+    concurrency: int | None = typer.Option(None, "--concurrency", help="Concurrent LLM requests (1-20)"),
     force: bool = typer.Option(False, "--force", help="Ignore judge cache and re-request LLM"),
 ) -> None:
     if not music.exists() or not music.is_dir():
@@ -871,6 +835,16 @@ def judge(
         raise typer.BadParameter("Use model deepseek-chat or deepseek-reasoner for DeepSeek judge")
     if limit < 0:
         raise typer.BadParameter("--limit must be >= 0")
+    if not config.exists():
+        raise typer.BadParameter(f"Config file does not exist: {config}")
+
+    try:
+        app_config = load_config(config)
+    except Exception as exc:
+        raise typer.BadParameter(f"Failed to load config: {exc}") from exc
+
+    if concurrency is None:
+        concurrency = app_config.judge.concurrency_default
     if concurrency < 1 or concurrency > 20:
         raise typer.BadParameter("--concurrency must be between 1 and 20")
 
@@ -879,11 +853,10 @@ def judge(
     if limit > 0:
         input_rows = input_rows[:limit]
     judge_service = JudgeService(
-        prompt_version=JUDGE_PROMPT_VERSION,
-        moods=JUDGE_MOODS,
-        genres=JUDGE_GENRES,
+        config=app_config.judge,
         llm_client=chat_json_async,
     )
+    judge_prompt_version = app_config.judge.prompt_version
 
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("NYX_DEEPSEEK_API_KEY")
     base_url = (
@@ -933,7 +906,7 @@ def judge(
                     file_size_bytes=size,
                     mtime_iso=mtime,
                     model=model,
-                    prompt_version=JUDGE_PROMPT_VERSION,
+                    prompt_version=judge_prompt_version,
                 )
 
             if cached is not None:
@@ -972,7 +945,7 @@ def judge(
                         reason=reason,
                         provider=provider,
                         model=model,
-                        prompt_version=JUDGE_PROMPT_VERSION,
+                        prompt_version=judge_prompt_version,
                         usage_prompt_tokens=response.usage.get("prompt_tokens"),
                         usage_completion_tokens=response.usage.get("completion_tokens"),
                         usage_total_tokens=response.usage.get("total_tokens"),
@@ -989,7 +962,7 @@ def judge(
                         reason="",
                         provider=provider,
                         model=model,
-                        prompt_version=JUDGE_PROMPT_VERSION,
+                        prompt_version=judge_prompt_version,
                         errors=[f"judge_error: {exc}"],
                     )
                 await asyncio.to_thread(
@@ -998,7 +971,7 @@ def judge(
                     file_size_bytes=size,
                     mtime_iso=mtime,
                     model=model,
-                    prompt_version=JUDGE_PROMPT_VERSION,
+                    prompt_version=judge_prompt_version,
                     result=result,
                 )
 

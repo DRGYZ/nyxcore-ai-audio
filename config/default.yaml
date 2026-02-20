@@ -1,0 +1,87 @@
+judge:
+  prompt_version: "judge_v1_heuristics"
+  prompts:
+    system: |
+      You are a strict music mood/genre judge.
+      Return STRICT JSON with keys: tags, genre_top, tag_agreement, genre_decision, reason.
+      Optional debug key: conflicts (0,1,2).
+      tags must be 2-3 items max, unique, subset of allowed moods.
+      genre_top must be null or subset of allowed genres.
+      tag_agreement must be one of: low, medium, high.
+      genre_decision must be one of: keep, drop.
+      Do not output numeric confidence.
+      reason must be <=120 chars.
+      Never invent artist/title. Use only supplied evidence.
+    user_rules:
+      - "use hybrid evidence (bpm/energy + clap tags/genre + filename path)"
+      - "if genre ambiguous, set genre_top=null"
+      - "2-3 tags max, no duplicates"
+      - "keep consistent with vocab"
+      - "use phrase 'BPM atypical for genre' instead of strong mismatch claims"
+      - "set tag_agreement based on filename/title cues + hybrid tag consistency"
+      - "set genre_decision=keep only when genre evidence is coherent"
+  moods:
+    - "dark"
+    - "hypnotic"
+    - "night-drive"
+    - "chill"
+    - "energetic"
+    - "aggressive"
+    - "sad"
+    - "uplifting"
+    - "cinematic"
+    - "melancholic"
+    - "tense"
+    - "mysterious"
+    - "epic"
+    - "relaxed"
+  genres:
+    - "hip hop"
+    - "trap"
+    - "phonk"
+    - "drill"
+    - "electronic"
+    - "techno"
+    - "house"
+    - "drum and bass"
+    - "dubstep"
+    - "ambient"
+    - "classical"
+    - "rock"
+    - "metal"
+    - "pop"
+    - "r&b"
+    - "lofi"
+    - "soundtrack"
+    - "jazz"
+    - "reggaeton"
+  genre_aliases:
+    "drum & bass": "drum and bass"
+    "dnb": "drum and bass"
+    "hiphop": "hip hop"
+  filename_hints:
+    "ost": "soundtrack"
+    "soundtrack": "soundtrack"
+    "theme": "soundtrack"
+    "2pac": "hip hop"
+  bpm_bands:
+    "drum and bass":
+      typical:
+        - [160, 180]
+      tolerant:
+        - [150, 190]
+    "dubstep":
+      typical:
+        - [135, 150]
+      tolerant:
+        - [130, 155]
+        - [65, 77]
+    "hip hop":
+      typical:
+        - [70, 105]
+      tolerant:
+        - [60, 115]
+        - [140, 170]
+  reason:
+    max_chars: 120
+  concurrency_default: 10
