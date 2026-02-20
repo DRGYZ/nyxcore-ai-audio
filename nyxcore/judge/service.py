@@ -132,6 +132,30 @@ class JudgeService:
             return "atypical"
         return "atypical"
 
+    def _tolerant_bpm_ranges(self, genre: str | None) -> list[tuple[float, float]]:
+        g = self.canonicalize_genre(genre)
+        if g == "drum and bass":
+            return [(150.0, 190.0)]
+        if g == "dubstep":
+            return [(130.0, 155.0), (65.0, 77.0)]
+        if g == "hip hop":
+            return [(60.0, 115.0), (140.0, 170.0)]
+        return []
+
+    def _bpm_distance_to_tolerant(self, genre: str | None, bpm: float | None) -> float | None:
+        if bpm is None:
+            return None
+        ranges = self._tolerant_bpm_ranges(genre)
+        if not ranges:
+            return None
+        b = float(bpm)
+        distances: list[float] = []
+        for low, high in ranges:
+            if low <= b <= high:
+                return 0.0
+            distances.append(min(abs(b - low), abs(b - high)))
+        return min(distances) if distances else None
+
     def source_genre_from_row(self, source_row: dict) -> str | None:
         source_genre_raw = source_row.get("source_genre_top")
         if source_genre_raw is None:
@@ -191,6 +215,8 @@ class JudgeService:
         filename_hint = self.strong_filename_genre_hint(str(source_row.get("path", "")))
         genre_for_eval = source_genre or llm_genre or self.canonicalize_genre(filename_hint)
         conflicts_local, bpm_note, filename_signal = self.compute_conflicts_local(source_row, genre_for_eval)
+        bpm_distance = self._bpm_distance_to_tolerant(genre_for_eval, self.source_bpm_from_row(source_row))
+        bpm_far = bpm_distance is not None and bpm_distance >= 10.0
         filename_supports_genre = filename_signal == "supports"
         filename_contradicts_genre = filename_signal == "contradicts"
 
@@ -228,18 +254,19 @@ class JudgeService:
                     confidence = 0.55
 
         reason = clean_reason_text(str(data.get("reason", "")))
-        if bpm_note == "ok":
-            mismatch_patterns = (
-                r"(?i)\bbpm\b",
-                r"(?i)\btempo\b",
-                r"(?i)\batypical\b",
-                r"(?i)\bmismatch\b",
-                r"(?i)\bdoes(?:\s+not|n't)\s+fit\b",
-                r"(?i)\bnot\s+typical\b",
-                r"(?i)\boutside\s+range\b",
-                r"(?i)\btoo\s+fast\b",
-                r"(?i)\btoo\s+slow\b",
-            )
+        mismatch_patterns = (
+            r"(?i)\bbpm\b",
+            r"(?i)\btempo\b",
+            r"(?i)\batypical\b",
+            r"(?i)\bmismatch\b",
+            r"(?i)\bdoes(?:\s+not|n't)\s+fit\b",
+            r"(?i)\bnot\s+typical\b",
+            r"(?i)\boutside\s+range\b",
+            r"(?i)\btoo\s+fast\b",
+            r"(?i)\btoo\s+slow\b",
+        )
+        remove_bpm_language = bpm_note == "ok" or (bpm_note == "atypical" and not bpm_far)
+        if remove_bpm_language:
             pieces = [p.strip() for p in reason.replace(";", ",").split(",")]
             kept: list[str] = []
             for piece in pieces:
@@ -251,8 +278,10 @@ class JudgeService:
             reason = clean_reason_text(", ".join(kept))
         if final_genre is None:
             fallback_reason = "Genre remains ambiguous from current evidence"
+        elif bpm_note == "atypical" and bpm_far:
+            fallback_reason = f"Genre kept as {final_genre}; BPM far from typical range"
         elif bpm_note == "atypical":
-            fallback_reason = f"Genre kept as {final_genre}; BPM atypical for genre but other evidence supports it"
+            fallback_reason = "Genre kept from source; evidence mixed"
         else:
             fallback_reason = f"Genre kept as {final_genre} from combined evidence"
         reason = format_reason(reason, fallback_reason)
