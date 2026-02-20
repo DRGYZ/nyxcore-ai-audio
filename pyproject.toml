@@ -28,4 +28,5 @@ packages = [
   "nyxcore.audio.backends",
   "nyxcore.llm",
   "nyxcore.judge",
+  "nyxcore.rename",
 ]

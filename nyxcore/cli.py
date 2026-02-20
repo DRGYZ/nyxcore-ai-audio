@@ -4,6 +4,7 @@ import asyncio
 import csv
 import json
 import os
+import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,12 @@ from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.llm.models import JudgeResult
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview
 from nyxcore.normalize.rules import is_missing
+from nyxcore.rename.service import (
+    apply_rename,
+    iter_mp3_files,
+    propose_rename_for_file,
+    undo_rename,
+)
 from nyxcore.tagging.ai_writer import (
     get_existing_nyx_fields,
     get_existing_nyx_judge_fields,
@@ -485,6 +492,11 @@ def _normalize_fields(fields: list[str] | None) -> list[str]:
     return normalized
 
 
+def _safe_console_text(text: str) -> str:
+    enc = sys.stdout.encoding or "utf-8"
+    return text.encode(enc, errors="replace").decode(enc, errors="replace")
+
+
 @app.command()
 def scan(
     music: Path = typer.Argument(Path("./music"), help="Folder to scan recursively"),
@@ -659,6 +671,192 @@ def apply(
     table.add_row("Log file", str(log_path))
     console.print(table)
     console.print(f"[green]Wrote:[/green] {log_path}")
+
+
+@app.command("rename")
+def rename_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Reports folder for rename map"),
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Preview only by default"),
+    limit: int = typer.Option(0, "--limit", help="Limit number of files to evaluate (0 means all)"),
+    concurrency: int = typer.Option(10, "--concurrency", help="Concurrent LLM rename requests (1-20)"),
+    force: bool = typer.Option(False, "--force", help="Force LLM refinement even when deterministic output is clean"),
+    llm: bool = typer.Option(True, "--llm/--no-llm", help="Allow optional DeepSeek refinement for messy names"),
+    model: str = typer.Option("deepseek-chat", "--model", help="DeepSeek model for optional LLM cleanup"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    if limit < 0:
+        raise typer.BadParameter("--limit must be >= 0")
+    if concurrency < 1 or concurrency > 20:
+        raise typer.BadParameter("--concurrency must be between 1 and 20")
+
+    ensure_out_dir(out)
+    files = sorted(iter_mp3_files(music))
+    if limit > 0:
+        files = files[:limit]
+
+    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("NYX_DEEPSEEK_API_KEY")
+    base_url = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("NYX_DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+    if llm and not api_key:
+        console.print("[yellow]LLM disabled:[/yellow] no DEEPSEEK_API_KEY found; using deterministic rename only.")
+        llm = False
+
+    async def _run() -> list:
+        sem = asyncio.Semaphore(concurrency)
+        results: list = []
+        if llm:
+            import aiohttp
+
+            timeout = aiohttp.ClientTimeout(total=45.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                tasks = [
+                    asyncio.create_task(
+                        propose_rename_for_file(
+                            p,
+                            use_llm=llm,
+                            force=force,
+                            sem=sem,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=model,
+                            max_retries=3,
+                            session=session,
+                        )
+                    )
+                    for p in files
+                ]
+                for fut in asyncio.as_completed(tasks):
+                    results.append(await fut)
+        else:
+            tasks = [
+                asyncio.create_task(
+                    propose_rename_for_file(
+                        p,
+                        use_llm=False,
+                        force=force,
+                        sem=sem,
+                        api_key=None,
+                        base_url=base_url,
+                        model=model,
+                        max_retries=3,
+                        session=None,
+                    )
+                )
+                for p in files
+            ]
+            for fut in asyncio.as_completed(tasks):
+                results.append(await fut)
+        return sorted(results, key=lambda r: str(r.old_path))
+
+    results = asyncio.run(_run())
+    changed = [r for r in results if r.changed]
+
+    table = Table(title="Rename Preview")
+    table.add_column("Old", style="cyan")
+    table.add_column("New", style="magenta")
+    shown = 0
+    for res in changed[:80]:
+        table.add_row(_safe_console_text(str(res.old_path)), _safe_console_text(str(res.new_path)))
+        shown += 1
+    if shown == 0:
+        table.add_row("_No changes_", "_No changes_")
+    console.print(table)
+
+    rename_map_path = out / "rename_map.jsonl"
+    map_rows = [
+        {
+            "old_path": str(r.old_path),
+            "new_path": str(r.new_path),
+            "ts": r.ts,
+            "rule_notes": r.rule_notes,
+            "llm_used": r.llm_used,
+        }
+        for r in changed
+    ]
+
+    if dry_run:
+        console.print(f"[green]Preview complete.[/green] Candidates: {len(changed)}")
+        return
+
+    applied = 0
+    failed = 0
+    for res in changed:
+        try:
+            apply_rename(res)
+            applied += 1
+        except Exception:
+            failed += 1
+
+    write_jsonl(rename_map_path, map_rows)
+    summary = Table(title="Rename Apply Summary")
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", justify="right", style="magenta")
+    summary.add_row("Scanned", str(len(results)))
+    summary.add_row("Changed", str(len(changed)))
+    summary.add_row("Applied", str(applied))
+    summary.add_row("Failed", str(failed))
+    summary.add_row("Map", str(rename_map_path))
+    console.print(summary)
+    console.print(f"[green]Wrote:[/green] {rename_map_path}")
+
+
+@app.command("rename-undo")
+def rename_undo(
+    map_path: Path = typer.Option(Path("data/reports/rename_map.jsonl"), "--map", help="Path to rename map"),
+    limit: int = typer.Option(0, "--limit", help="Limit number of undo operations (0 means all)"),
+    force: bool = typer.Option(False, "--force", help="Force undo when old_path already exists"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview undo actions only"),
+) -> None:
+    if not map_path.exists():
+        raise typer.BadParameter(f"Rename map does not exist: {map_path}")
+    if limit < 0:
+        raise typer.BadParameter("--limit must be >= 0")
+
+    rows = list(read_jsonl(map_path))
+    rows = list(reversed(rows))
+    if limit > 0:
+        rows = rows[:limit]
+
+    table = Table(title="Rename Undo Preview")
+    table.add_column("Current", style="cyan")
+    table.add_column("Restore To", style="magenta")
+    for row in rows[:80]:
+        table.add_row(
+            _safe_console_text(str(row.get("new_path", ""))),
+            _safe_console_text(str(row.get("old_path", ""))),
+        )
+    if not rows:
+        table.add_row("_No entries_", "_No entries_")
+    console.print(table)
+
+    if dry_run:
+        return
+
+    restored = 0
+    skipped = 0
+    failed = 0
+    for row in rows:
+        old_path = Path(str(row.get("old_path", "")))
+        new_path = Path(str(row.get("new_path", "")))
+        try:
+            ok, status = undo_rename(old_path, new_path, force=force)
+            if ok:
+                restored += 1
+            else:
+                skipped += 1
+                _ = status
+        except Exception:
+            failed += 1
+
+    summary = Table(title="Rename Undo Summary")
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", justify="right", style="magenta")
+    summary.add_row("Entries", str(len(rows)))
+    summary.add_row("Restored", str(restored))
+    summary.add_row("Skipped", str(skipped))
+    summary.add_row("Failed", str(failed))
+    console.print(summary)
 
 
 @app.command("analyze")
