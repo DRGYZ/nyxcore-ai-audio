@@ -7,6 +7,7 @@ import {
   toQueryNoticeState,
 } from "../../lib/query-state";
 import {
+  ActionBanner,
   Button,
   DataTable,
   EmptyState,
@@ -38,29 +39,36 @@ export function DashboardPage() {
     toQueryNoticeState(duplicatesState),
     toQueryNoticeState(historyState),
   );
+  const showStartHere = queryNoticeState.usingMock || (review.items.length === 0 && history.items.length === 0);
   const losslessRatio = health.overview.total_audio_files === 0 ? 0 : (health.quality.lossless_files / health.overview.total_audio_files) * 100;
   const highBitrateRatio = health.overview.total_audio_files === 0 ? 0 : (health.quality.bitrate_buckets[">=256k"] / health.overview.total_audio_files) * 100;
 
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="System Diagnostics / V2.4.0 Stable"
+        eyebrow="System Diagnostics"
         title="Mission Control"
         description="Read-only operational view over NyxCore health, review priorities, duplicate pressure, and recent action history."
         actions={
           <>
-            <Button tone="ghost" disabled>Read-Only View</Button>
-            <Button tone="primary" disabled>Scan Controls Stay in CLI</Button>
+            <Button tone="ghost" disabled>UI Is Read-Only</Button>
+            <Button tone="primary" disabled>Start with CLI Scan</Button>
           </>
         }
       />
       <PageQueryStateNotice {...queryNoticeState} />
+      {showStartHere ? (
+        <ActionBanner
+          tone="info"
+          message="Start here: generate a safe sample with `python demo/create_demo_library.py --force`, then run `python -m nyxcore.cli review demo/generated/sample-library --out data/reports`. Point the API at that folder with `NYXCORE_WEB_MUSIC_DIR` for a live UI session."
+        />
+      ) : null}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Total Files"
           value={formatNumber(health.overview.total_audio_files)}
           icon="audio_file"
-          meta={<p className="text-sm font-bold text-emerald-400">+0.2% from last refresh</p>}
+          meta={<p className="text-sm font-bold text-slate-300">{formatNumber(health.overview.total_folders_touched)} folders touched</p>}
         />
         <MetricCard
           label="Exact Duplicates"
@@ -95,7 +103,7 @@ export function DashboardPage() {
               {review.items.length === 0 ? (
                 <EmptyState
                   title="No review findings"
-                  description="Once NyxCore detects duplicate, metadata, or quality issues, the highest-priority findings will surface here."
+                  description="Run `python -m nyxcore.cli review <music-dir> --out data/reports` first. For a safe local demo, generate `demo/generated/sample-library` with `python demo/create_demo_library.py --force` and point the API at that folder."
                 />
               ) : (
                 review.items.slice(0, 4).map((item) => (
@@ -162,10 +170,10 @@ export function DashboardPage() {
                 </div>
                 <div>
                   <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Metadata Health</span>
-                    <span className="font-bold text-slate-200">{Math.max(0, 100 - (health.metadata.placeholder_metadata.count / 100)).toFixed(0)}%</span>
+                    <span className="text-slate-400">Lossless Share</span>
+                    <span className="font-bold text-slate-200">{losslessRatio.toFixed(1)}%</span>
                   </div>
-                  <ProgressBar value={Math.max(0, 100 - health.metadata.placeholder_metadata.count / 100)} tone="violet" />
+                  <ProgressBar value={losslessRatio} tone="violet" />
                 </div>
               </div>
             </div>

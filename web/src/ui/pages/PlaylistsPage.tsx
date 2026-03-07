@@ -23,7 +23,7 @@ export function PlaylistsPage() {
         actions={
           <>
             <Button tone="ghost" disabled>Result History</Button>
-            <Button tone="primary" disabled>Create in CLI</Button>
+            <Button tone="primary" disabled>Create via CLI</Button>
           </>
         }
       />
@@ -39,7 +39,7 @@ export function PlaylistsPage() {
             {response.items.length === 0 ? (
               <EmptyState
                 title="No saved playlists"
-                description="Save a natural-language playlist from the CLI or API, then inspect its latest refresh diff here."
+                description={'Create one with `python -m nyxcore.cli save-playlist <music-dir> --out data/reports --name "Ambient Focus" --query "ambient focus instrumental"`, then inspect its latest refresh diff here.'}
               />
             ) : (
               response.items.map((item) => {

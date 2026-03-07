@@ -13,6 +13,7 @@ tests/_runtime_*/
 tests/tmp*/
 
 stitch_neurodesk_focus_workspace/
+demo/generated/
 
 music/
 Music/

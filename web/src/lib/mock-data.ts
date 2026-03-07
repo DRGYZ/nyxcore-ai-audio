@@ -7,6 +7,7 @@ import type {
   StatusResponse,
 } from "./types";
 
+// Keep fallback examples structurally close to the live API payloads.
 export const mockStatus: StatusResponse = {
   status: "ok",
   service: "nyxcore-webapi",
@@ -72,11 +73,14 @@ export const mockReviewReport: ReviewReport = {
       item_type: "folder_hotspot",
       priority_band: "low",
       priority_score: 72,
-      summary: "Legacy Imports has concentrated issues",
-      reason_summary: "Missing metadata and artwork cluster in one folder.",
+      summary: "Inspect folder imports/legacy with 94 concentrated issues",
+      reason_summary: "Multiple issues cluster in this folder",
       review_status: "snoozed",
-      folder: "/library/imports/legacy",
-      sample_paths: ["/library/imports/legacy"],
+      folder: "imports/legacy",
+      affected_paths: [],
+      sample_paths: [],
+      file_count: 94,
+      details: { issue_count: 94 },
     },
   ],
 };
@@ -198,8 +202,8 @@ export const mockHealthReport: HealthReport = {
     ],
     recommended_actions: [
       "Review exact duplicates first",
-      "Repair missing artist tags in Legacy Imports",
-      "Re-scan corrupt FLAC containers in Vault",
+      "Repair missing artist tags in imports/legacy",
+      "Re-scan unreadable files in downloads/staging",
     ],
   },
 };

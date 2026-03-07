@@ -13,11 +13,16 @@ export function HealthPage() {
   const losslessRatio = report.overview.total_audio_files === 0
     ? 0
     : (report.quality.lossless_files / report.overview.total_audio_files) * 100;
+  const withoutArtworkRatio = report.overview.total_audio_files === 0
+    ? 0
+    : (report.artwork.without_artwork / report.overview.total_audio_files) * 100;
+  const topIssueCategories = report.priorities.top_issue_categories ?? [];
+  const topFolders = report.priorities.top_problematic_folders ?? [];
 
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="System Diagnostics / V2.0.4 Stable"
+        eyebrow="System Diagnostics"
         title="Technical Audio Audit"
         actions={
           <>
@@ -30,26 +35,24 @@ export function HealthPage() {
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         <Panel className="p-5">
           <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Global Integrity</p>
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">EXCELLENT</span>
+            <p className="text-sm font-medium text-slate-400">Audio Files</p>
+            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">LIVE</span>
           </div>
-          <p className="text-3xl font-bold text-slate-100">94.2%</p>
-          <div className="mt-3">
-            <ProgressBar value={94.2} />
-          </div>
+          <p className="text-3xl font-bold text-slate-100">{formatNumber(report.overview.total_audio_files)}</p>
+          <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.overview.total_folders_touched)} folders touched</p>
         </Panel>
         <Panel className="p-5">
           <div className="mb-4 flex justify-between">
             <p className="text-sm font-medium text-slate-400">Artwork Coverage</p>
-            <span className="text-[10px] font-bold text-slate-500">STABLE</span>
+            <span className="text-[10px] font-bold text-slate-500">{formatNumber(report.artwork.with_artwork)} files with artwork</span>
           </div>
           <p className="text-3xl font-bold text-slate-100">{report.artwork.coverage_percent.toFixed(1)}%</p>
-          <p className="mt-2 text-xs font-medium text-emerald-500">+0.4% from last scan</p>
+          <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.artwork.without_artwork)} files still missing artwork</p>
         </Panel>
         <Panel className="p-5">
           <div className="mb-4 flex justify-between">
             <p className="text-sm font-medium text-slate-400">Lossless Ratio</p>
-            <span className="text-[10px] font-bold text-slate-500">TARGET: 90%</span>
+            <span className="text-[10px] font-bold text-slate-500">{formatNumber(report.quality.lossy_files)} lossy files</span>
           </div>
           <p className="text-3xl font-bold text-slate-100">{losslessRatio.toFixed(1)}%</p>
           <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.quality.lossless_files)} tracks</p>
@@ -96,38 +99,47 @@ export function HealthPage() {
             <Panel className="p-6">
               <h3 className="mb-6 flex items-center gap-2 font-display text-lg font-bold text-slate-100">
                 <span className="material-symbols-outlined text-secondary">grid_view</span>
-                Missing Metadata Hotspots
+                Metadata Issues
               </h3>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="space-y-3">
                 {[
-                  ["GEN", "bg-rose-500/20 border-rose-500/30 text-rose-500"],
-                  ["ALB", "bg-primary/10 border-primary/20 text-primary/70"],
-                  ["ART", "bg-primary/5 border-border-dark text-slate-600"],
-                  ["YR", "bg-rose-500/40 border-rose-500/50 text-rose-500"],
-                  ["TRK", "bg-primary/5 border-border-dark text-slate-600"],
-                  ["LYR", "bg-rose-500/20 border-rose-500/30 text-rose-500"],
-                  ["BPM", "bg-primary/5 border-border-dark text-slate-600"],
-                  ["KEY", "bg-primary/5 border-border-dark text-slate-600"],
-                ].map(([label, classes]) => (
-                  <div key={label} className={`aspect-square rounded border ${classes} flex items-center justify-center`}>
-                    <span className="text-[10px] font-bold">{label}</span>
+                  ["Missing Title", report.metadata.missing_title.count],
+                  ["Missing Artist", report.metadata.missing_artist.count],
+                  ["Missing Album", report.metadata.missing_album.count],
+                  ["Placeholder Metadata", report.metadata.placeholder_metadata.count],
+                  ["Suspicious Swaps", report.metadata.suspicious_title_artist_swaps.count],
+                ].map(([label, count]) => (
+                  <div key={label} className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3">
+                    <span className="text-sm text-slate-300">{label}</span>
+                    <span className="text-sm font-bold text-primary">{formatNumber(Number(count))}</span>
                   </div>
                 ))}
               </div>
-              <p className="mt-4 text-xs text-slate-500">Major density hotspots in <span className="text-rose-500">Legacy Imports</span> folder.</p>
+              {topFolders.length > 0 ? (
+                <p className="mt-4 text-xs text-slate-500">
+                  Most concentrated folder: <span className="text-primary">{topFolders[0].folder}</span>
+                </p>
+              ) : null}
             </Panel>
             <Panel className="p-6">
               <h3 className="mb-6 flex items-center gap-2 font-display text-lg font-bold text-slate-100">
                 <span className="material-symbols-outlined text-primary">image</span>
-                Artwork Coverage Trends
+                Artwork Coverage Breakdown
               </h3>
-              <div className="relative h-24 w-full">
-                <svg className="h-full w-full" viewBox="0 0 100 40">
-                  <path d="M0,35 Q10,32 20,34 T40,25 T60,20 T80,10 T100,5" fill="none" stroke="currentColor" strokeWidth="2" className="text-primary" />
-                  <path d="M0,35 Q10,32 20,34 T40,25 T60,20 T80,10 T100,5 V40 H0 Z" fill="currentColor" className="text-primary/10" />
-                </svg>
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <span className="text-2xl font-bold opacity-20">{report.artwork.coverage_percent.toFixed(1)}%</span>
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="text-slate-400">With Artwork</span>
+                    <span className="font-bold text-primary">{formatNumber(report.artwork.with_artwork)}</span>
+                  </div>
+                  <ProgressBar value={report.artwork.coverage_percent} />
+                </div>
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="text-slate-400">Without Artwork</span>
+                    <span className="font-bold text-slate-200">{formatNumber(report.artwork.without_artwork)}</span>
+                  </div>
+                  <ProgressBar value={withoutArtworkRatio} tone="warning" />
                 </div>
               </div>
             </Panel>
@@ -139,7 +151,7 @@ export function HealthPage() {
               <span className="material-symbols-outlined text-amber-500">auto_fix_high</span>
               What to Fix First
             </h3>
-            <p className="mt-1 text-xs text-slate-500">AI-prioritized remedial tasks based on impact score.</p>
+            <p className="mt-1 text-xs text-slate-500">Current report recommendations based on issue counts and priority rules.</p>
           </div>
           <div className="space-y-4 p-4">
             {report.priorities.recommended_actions.length === 0 ? (
@@ -148,7 +160,7 @@ export function HealthPage() {
                 description="Health recommendations will appear here once NyxCore finds metadata, artwork, or quality issues worth fixing first."
               />
             ) : (
-              report.priorities.recommended_actions.map((action, index) => (
+              (topIssueCategories.length > 0 ? topIssueCategories.map((item) => item.action) : report.priorities.recommended_actions).map((action, index) => (
                 <div
                   key={action}
                   className={`rounded-lg border-l-4 bg-background-dark p-4 transition-colors hover:bg-border-dark ${
@@ -159,9 +171,11 @@ export function HealthPage() {
                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
                       index === 0 ? "bg-rose-500/10 text-rose-500" : index === 1 ? "bg-amber-500/10 text-amber-500" : "bg-primary/10 text-primary"
                     }`}>
-                      {index === 0 ? "CRITICAL" : index === 1 ? "WARNING" : "OPTIMIZE"}
+                      {topIssueCategories[index]?.category ? topIssueCategories[index].category.replace(/_/g, " ") : index === 0 ? "primary" : index === 1 ? "secondary" : "follow-up"}
                     </span>
-                    <span className="shrink-0 text-[10px] text-slate-500">ID: 0x{(482 + index).toString(16).toUpperCase()}</span>
+                    {topIssueCategories[index]?.count !== undefined ? (
+                      <span className="shrink-0 text-[10px] text-slate-500">{formatNumber(topIssueCategories[index].count)} items</span>
+                    ) : null}
                   </div>
                   <p className="break-words text-sm font-medium text-slate-200">{action}</p>
                 </div>

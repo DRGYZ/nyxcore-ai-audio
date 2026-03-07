@@ -1,6 +1,6 @@
 # NyxCore on Windows via WSL2 (Ubuntu)
 
-This guide covers the current NyxCore CLI and local web stack on Windows through WSL2.
+This guide covers the current NyxCore CLI, FastAPI backend, demo fixture, and local web UI on Windows through WSL2.
 
 ## 1. Install WSL2 and Ubuntu
 
@@ -25,6 +25,8 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install -y python3 python3-venv python3-pip git ffmpeg curl
 ```
+
+If you plan to run the frontend from WSL, also install Node 18+.
 
 ## 3. Open the project folder from WSL
 
@@ -52,37 +54,44 @@ pip install -e ".[clap]"
 pip install -e ".[audio-analysis,clap,web,dev]"
 ```
 
-NyxCore uses the packaged default config automatically unless you pass `--config`.
+## 5. Generate the demo library
 
-## 5. Run the CLI workflow
+Use the built-in demo fixture for the safest first run:
 
 ```bash
-python -m nyxcore.cli scan music --out data/reports
-python -m nyxcore.cli duplicates music --out data/reports
-python -m nyxcore.cli health music --out data/reports
-python -m nyxcore.cli review music --out data/reports
+python demo/create_demo_library.py --force
 ```
 
-Action plan and history workflow:
+Default output:
+
+- `demo/generated/sample-library`
+
+## 6. Run the CLI demo flow
 
 ```bash
-python -m nyxcore.cli review-plan music --out data/reports --item-id <item-id>
+python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
+python -m nyxcore.cli health demo/generated/sample-library --out data/reports
+python -m nyxcore.cli review demo/generated/sample-library --out data/reports
+python -m nyxcore.cli save-playlist demo/generated/sample-library --out data/reports --name "Ambient Focus" --query "ambient focus instrumental"
+python -m nyxcore.cli list-playlists --out data/reports
+```
+
+If you want history data too, generate and apply one plan:
+
+```bash
+python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <item-id-from-review.json>
 python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --out data/reports
 python -m nyxcore.cli history --out data/reports
 ```
 
-Playlist workflow:
+## 7. Run the FastAPI backend
 
-```bash
-python -m nyxcore.cli playlist music --query "focus music" --out data/reports
-python -m nyxcore.cli save-playlist music --out data/reports --name "Focus Set" --query "focus music"
-python -m nyxcore.cli list-playlists --out data/reports
-```
-
-## 6. Run the FastAPI backend
+Point the API at the generated demo library:
 
 ```bash
 source .venv/bin/activate
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
 uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -90,7 +99,7 @@ API URL:
 
 - `http://127.0.0.1:8000`
 
-## 7. Run the frontend
+## 8. Run the frontend
 
 If Node.js is already available in WSL:
 
@@ -100,13 +109,19 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-If Node.js is not installed yet, install Node 18+ first. `nvm` is the least painful path in WSL for keeping Node current.
-
 Frontend URL:
 
 - `http://127.0.0.1:5173`
 
-## 8. Essentia and analysis extras
+If the frontend shows mock fallback instead of live data:
+
+- confirm the backend is running on `127.0.0.1:8000`
+- confirm `NYXCORE_WEB_MUSIC_DIR` points to the generated demo library
+- confirm `NYXCORE_WEB_OUT_DIR` points to `data/reports`
+
+## 9. Optional analysis extras
+
+Essentia and CLAP are optional for the demo, review, history, playlist, API, and frontend workflows.
 
 Try:
 
@@ -121,23 +136,22 @@ Optional deeper import check:
 python -c "import essentia.standard as es; print('essentia.standard ok')"
 ```
 
-If you only need the review, history, playlist, API, and frontend workflows, Essentia is optional.
+## 10. Troubleshooting
 
-## 9. Troubleshooting
-
-### If `pip install essentia` fails
+### If `ffmpeg` is missing
 
 ```bash
-python -m pip install --upgrade pip setuptools wheel
-pip install essentia
+which ffmpeg
+ffmpeg -version
 ```
 
-If it still fails, the current Python version may not match an available wheel. Python 3.10 or 3.11 is usually the next thing to try in WSL.
+The demo fixture generator depends on `ffmpeg`.
 
 ### If the API starts but the frontend falls back to mock data
 
 - confirm the backend is running on `127.0.0.1:8000`
 - confirm the frontend is running on `127.0.0.1:5173`
+- confirm `NYXCORE_WEB_MUSIC_DIR` and `NYXCORE_WEB_OUT_DIR` are exported in the API terminal
 - check the browser console and API terminal output for request failures
 
 ### If the wrong Python is active

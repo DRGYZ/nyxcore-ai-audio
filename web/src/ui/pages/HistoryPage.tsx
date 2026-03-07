@@ -57,11 +57,11 @@ export function HistoryPage() {
       <PageHeader
         eyebrow="System Integrity Secure"
         title="Operation Audit Trail"
-        description="Inspect reversible plan batches, confirm restore or undo explicitly, and keep review state honest when changes bring issues back."
+        description="Inspect reversible plan batches, confirm restore or undo explicitly, and keep review state honest when changes bring issues back. Restore and Undo labels are both kept for compatibility and currently use the same safe reversal path."
       />
       <PageQueryStateNotice
         {...toQueryNoticeState(historyState)}
-        fallbackMessage="Mock fallback is active. Restore and undo are disabled until the live API is available."
+        fallbackMessage="Mock fallback is active. Restore and Undo are disabled until the live API is available; in live mode they currently use the same safe reversal path."
       />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
 
@@ -226,6 +226,7 @@ export function HistoryPage() {
       >
         <div className="space-y-4 text-sm text-slate-300">
           <p>This action uses the persisted operation ledger and recorded original paths for the selected batch.</p>
+          <p>Restore and Undo currently call the same safe reversal path. Separate labels are preserved for CLI and API compatibility.</p>
           <p>If a restore target is occupied or a file has moved outside NyxCore, the API will fail safely and report the conflict instead of overwriting anything.</p>
         </div>
       </Modal>

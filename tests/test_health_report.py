@@ -4,6 +4,7 @@ import json
 import shutil
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -18,6 +19,7 @@ from nyxcore.duplicates.service import (
     PreferredCopyRecommendation,
 )
 from nyxcore.health.service import build_health_report
+from nyxcore.incremental.service import ChangeSet, RefreshSummary
 
 TEST_ROOT = Path(__file__).resolve().parent
 RUNTIME_ROOT = TEST_ROOT / "_runtime_health"
@@ -196,9 +198,9 @@ class HealthReportTests(unittest.TestCase):
         self.assertEqual(report.priorities.recommended_actions[0], "Review exact duplicates first")
         self.assertEqual(report.priorities.top_issue_categories[0].category, "exact_duplicates")
 
-    @patch("nyxcore.cli.analyze_duplicates")
-    @patch("nyxcore.cli.scan_music_folder")
-    def test_cli_health_smoke_writes_reports(self, scan_music_folder, analyze_duplicates) -> None:
+    @patch("nyxcore.cli.build_duplicate_health_reports")
+    @patch("nyxcore.cli._load_library_records")
+    def test_cli_health_smoke_writes_reports(self, load_library_records, build_duplicate_health_reports_mock) -> None:
         music = self.root / "music"
         out = self.root / "out"
         music.mkdir()
@@ -206,8 +208,12 @@ class HealthReportTests(unittest.TestCase):
         track_path = music / "a.mp3"
         track_path.write_bytes(b"x" * 128)
         record = _track(track_path, title="A", artist="Artist", album="Album", duration=100.0, cover=True)
-        scan_music_folder.return_value = ([record], {})
-        analyze_duplicates.return_value = self._empty_duplicates(1)
+        report = build_health_report(music, [record], duplicate_report=self._empty_duplicates(1))
+        load_library_records.return_value = (
+            [record],
+            RefreshSummary(mode="full", changes=ChangeSet(), rescanned_files=1),
+        )
+        build_duplicate_health_reports_mock.return_value = SimpleNamespace(health_report=report)
 
         runner = CliRunner()
         result = runner.invoke(app, ["health", str(music), "--out", str(out)])

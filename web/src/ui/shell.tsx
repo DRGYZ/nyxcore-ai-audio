@@ -7,7 +7,7 @@ import { Chip, Icon } from "./components";
 const navItems = [
   { to: "/", label: "Mission Control", icon: "dashboard" },
   { to: "/review", label: "Review Inbox", icon: "inbox" },
-  { to: "/playlists", label: "Smart Playlists", icon: "auto_awesome" },
+  { to: "/playlists", label: "Saved Playlists", icon: "auto_awesome" },
   { to: "/history", label: "Operation History", icon: "history_edu" },
   { to: "/duplicates", label: "Duplicates", icon: "copy_all" },
   { to: "/health", label: "Health", icon: "analytics" },
@@ -39,6 +39,8 @@ export function AppShell({ children }: PropsWithChildren) {
   const status = statusQuery.data ?? mockStatus;
   const review = reviewQuery.data?.data ?? mockReviewReport;
   const reviewCount = review.items.filter((item) => item.review_status === "new").length;
+  const unresolvedReviewCount = review.items.filter((item) => item.review_status === "new" || item.review_status === "seen").length;
+  const usingMock = !statusQuery.data || !reviewQuery.data;
 
   return (
     <div className="min-h-screen bg-background-dark text-slate-100">
@@ -63,11 +65,23 @@ export function AppShell({ children }: PropsWithChildren) {
               </div>
             </div>
             <div className="rounded-xl border border-primary/10 bg-gradient-to-br from-primary/10 to-transparent p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Storage Node</p>
-              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full w-[72%] rounded-full bg-primary" />
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Workspace Snapshot</p>
+                <Chip tone={usingMock ? "warning" : "primary"}>{usingMock ? "mock" : "live"}</Chip>
               </div>
-              <p className="mt-2 text-[10px] text-slate-400">72% of 4.2TB used</p>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Open Review</p>
+                  <p className="mt-1 text-lg font-bold text-slate-100">{unresolvedReviewCount}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Saved Playlists</p>
+                  <p className="mt-1 text-lg font-bold text-primary">{status.saved_playlist_count}</p>
+                </div>
+              </div>
+              <p className="mt-3 text-[10px] text-slate-400">
+                {usingMock ? "Showing fallback examples because live API data is unavailable." : "Live status is sourced from the current API session."}
+              </p>
             </div>
           </nav>
         </aside>
@@ -80,8 +94,10 @@ export function AppShell({ children }: PropsWithChildren) {
               </div>
               <div className="hidden h-4 w-px bg-primary/20 md:block" />
               <div className="hidden items-center gap-2 md:flex">
-                <span className="size-2 rounded-full bg-primary shadow-[0_0_8px_#25e2f4]" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Live Engine</span>
+                <span className={`size-2 rounded-full ${usingMock ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.55)]" : "bg-primary shadow-[0_0_8px_#25e2f4]"}`} />
+                <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
+                  {usingMock ? "Mock Fallback" : "Live API"}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -108,8 +124,8 @@ export function AppShell({ children }: PropsWithChildren) {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap items-center gap-6">
                 <span className="flex items-center gap-2">
-                  <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-                  Engine Connected
+                  <span className={`size-1.5 rounded-full ${usingMock ? "bg-amber-400" : "animate-pulse bg-primary"}`} />
+                  {usingMock ? "Mock Fallback Active" : "Live API Connected"}
                 </span>
                 <span>Profile: {status.active_profile}</span>
                 <span>Saved Playlists: {status.saved_playlist_count}</span>

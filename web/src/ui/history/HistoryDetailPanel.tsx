@@ -83,6 +83,12 @@ export function HistoryDetailPanel({
             </div>
           </Panel>
 
+          <Panel className="border-primary/10 bg-background-dark/40 p-4">
+            <p className="text-xs text-slate-400">
+              Restore and Undo currently call the same safe reversal path. Separate labels are preserved for command and API compatibility.
+            </p>
+          </Panel>
+
           {mutationResult ? (
             <Panel className="border-primary/20 bg-primary/5 p-4">
               <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Latest Restore / Undo Outcome</p>
