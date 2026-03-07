@@ -254,6 +254,58 @@ class SavedPlaylistTests(unittest.TestCase):
         self.assertEqual(latest.refresh_diff["estimated_duration_delta_seconds"], -60.0)
 
     @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
+    def test_refresh_diff_stays_stable_when_library_root_moves(self, _load_analysis_map) -> None:
+        store_root = self.out / "saved_playlists"
+        first_root = self.root / "library-a"
+        second_root = self.root / "library-b"
+        relative = Path("focus") / "moved.mp3"
+        (first_root / relative.parent).mkdir(parents=True, exist_ok=True)
+        (second_root / relative.parent).mkdir(parents=True, exist_ok=True)
+        first = first_root / relative
+        second = second_root / relative
+        first.write_bytes(b"a")
+        shutil.copy2(first, second)
+        definition = create_saved_playlist_definition(
+            name="Focus Set",
+            query="focus music",
+            profile="default",
+            max_tracks=10,
+            min_score=0.0,
+        )
+        refresh_saved_playlist(
+            store_root,
+            definition,
+            records=[_track(first, title="Focus Moved", artist="Artist", album="Album", duration=180.0)],
+            refresh_summary=RefreshSummary(
+                mode="full",
+                changes=ChangeSet(added_files=[str(first)], modified_files=[], removed_files=[], unchanged_files=[]),
+                rescanned_files=1,
+            ),
+            app_config=load_config(),
+            analysis_cache_path=Path("fake"),
+            library_root=first_root,
+        )
+
+        latest = refresh_saved_playlist(
+            store_root,
+            definition,
+            records=[_track(second, title="Focus Moved", artist="Artist", album="Album", duration=180.0)],
+            refresh_summary=RefreshSummary(
+                mode="incremental",
+                changes=ChangeSet(added_files=[], modified_files=[], removed_files=[], unchanged_files=[str(second)]),
+                rescanned_files=0,
+            ),
+            app_config=load_config(),
+            analysis_cache_path=Path("fake"),
+            library_root=second_root,
+        )
+
+        self.assertTrue(latest.refresh_diff["has_previous_result"])
+        self.assertEqual(latest.refresh_diff["tracks_added"], [])
+        self.assertEqual(latest.refresh_diff["tracks_removed"], [])
+        self.assertEqual(latest.refresh_diff["track_count_delta"], 0)
+
+    @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
     def test_optional_export_behavior(self, _load_analysis_map) -> None:
         store_root = self.out / "saved_playlists"
         target = self.music / "focus.mp3"

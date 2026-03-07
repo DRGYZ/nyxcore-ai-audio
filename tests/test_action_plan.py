@@ -23,6 +23,7 @@ from nyxcore.duplicates.service import (
 from nyxcore.health.service import build_health_report
 from nyxcore.review_queue.service import build_review_queue
 from nyxcore.review_queue.state import ReviewStateStore
+from nyxcore.tagging.writer import backup_file
 
 TEST_ROOT = Path(__file__).resolve().parent
 RUNTIME_ROOT = TEST_ROOT / "_runtime_action_plan"
@@ -267,6 +268,72 @@ class ActionPlanTests(unittest.TestCase):
         )
         self.assertTrue(quarantine_target.exists())
         self.assertEqual(review_state.items[exact_item.item_id].status, "resolved")
+
+    def test_quarantine_destinations_for_out_of_root_duplicates_are_collision_safe(self) -> None:
+        preferred = self.music / "keep.flac"
+        external_a = self.root / "outside-a" / "shared"
+        external_b = self.root / "outside-b" / "shared"
+        external_a.mkdir(parents=True, exist_ok=True)
+        external_b.mkdir(parents=True, exist_ok=True)
+        candidate_a = external_a / "dup.mp3"
+        candidate_b = external_b / "dup.mp3"
+        content = b"dup" * 256
+        preferred.write_bytes(content)
+        candidate_a.write_bytes(content)
+        candidate_b.write_bytes(content)
+        records = [
+            _track(preferred, title="Track", artist="Artist", album="Album", duration=180.0, cover=True),
+            _track(candidate_a, title="Track", artist="Artist", album="Album", duration=180.0, cover=False),
+            _track(candidate_b, title="Track", artist="Artist", album="Album", duration=180.0, cover=False),
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(3, 1, 3, 0, 0),
+            exact_duplicates=[
+                ExactDuplicateGroup(
+                    group_id="exact-001",
+                    content_hash="hash",
+                    files=[
+                        _dup_info(preferred, size=preferred.stat().st_size, cover=True),
+                        _dup_info(candidate_a, size=candidate_a.stat().st_size),
+                        _dup_info(candidate_b, size=candidate_b.stat().st_size),
+                    ],
+                    preferred=PreferredCopyRecommendation(path=str(preferred), reasons=["preferred_lossless_format"]),
+                )
+            ],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        review_report = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        exact_item = next(item for item in review_report.items if item.item_type == "exact_duplicate_group")
+
+        plan_report = build_action_plan_report(self.music, records, review_report, source_review_item_ids=[exact_item.item_id])
+
+        quarantine_targets = [
+            operation.destination_path
+            for operation in plan_report.plans[0].proposed_operations
+            if operation.operation_type == "quarantine_move"
+        ]
+        self.assertEqual(len(quarantine_targets), 2)
+        self.assertEqual(len(set(quarantine_targets)), 2)
+        self.assertTrue(all("._" not in Path(path).name for path in quarantine_targets if path is not None))
+        self.assertTrue(all("_external" in (path or "") for path in quarantine_targets))
+
+    def test_backup_file_is_collision_safe_for_duplicate_basenames(self) -> None:
+        first_dir = self.root / "alpha"
+        second_dir = self.root / "beta"
+        first_dir.mkdir(parents=True, exist_ok=True)
+        second_dir.mkdir(parents=True, exist_ok=True)
+        first = first_dir / "track.mp3"
+        second = second_dir / "track.mp3"
+        first.write_bytes(b"alpha")
+        second.write_bytes(b"beta")
+
+        first_backup = backup_file(first, self.out / "backups")
+        second_backup = backup_file(second, self.out / "backups")
+
+        self.assertNotEqual(first_backup, second_backup)
+        self.assertEqual(first_backup.read_bytes(), b"alpha")
+        self.assertEqual(second_backup.read_bytes(), b"beta")
 
     @patch("nyxcore.action_plan.service.write_tags")
     def test_partial_failure_keeps_review_state_honest(self, write_tags_mock) -> None:

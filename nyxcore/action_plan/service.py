@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -26,6 +27,20 @@ SUPPORTED_ACTION_TYPES = {
 def _plan_id(action_type: str, source_review_item_ids: list[str]) -> str:
     payload = json.dumps([action_type, sorted(source_review_item_ids)], separators=(",", ":"), ensure_ascii=False)
     return f"{action_type}-{hashlib.sha1(payload.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _sanitize_path_label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._")
+    return cleaned or "external"
+
+
+def _quarantine_destination(root: Path, candidate_path: Path) -> Path:
+    quarantine_root = root / ".nyxcore_quarantine"
+    if candidate_path.is_absolute() and (candidate_path == root or root in candidate_path.parents):
+        return quarantine_root / candidate_path.parent.relative_to(root) / candidate_path.name
+    digest = hashlib.sha1(str(candidate_path.parent).encode("utf-8")).hexdigest()[:10]
+    parent_label = _sanitize_path_label(candidate_path.parent.name or candidate_path.anchor or "external")
+    return quarantine_root / "_external" / f"{parent_label}-{digest}" / candidate_path.name
 
 
 @dataclass(slots=True)
@@ -267,12 +282,7 @@ class ActionPlanBuilder:
         ]
         for index, path in enumerate(candidate_paths, start=1):
             candidate_path = Path(path)
-            relative_parent = (
-                candidate_path.parent.relative_to(self.root)
-                if candidate_path.is_absolute() and self.root in candidate_path.parents
-                else Path(candidate_path.parent.name)
-            )
-            destination = self.root / ".nyxcore_quarantine" / relative_parent / candidate_path.name
+            destination = _quarantine_destination(self.root, candidate_path)
             operations.append(
                 ActionPlanOperation(
                     operation_id=f"{item.item_id}-candidate-{index:03d}",

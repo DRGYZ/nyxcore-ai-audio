@@ -69,6 +69,7 @@ def build_review_pipeline(
         records,
         health_report=reports.health_report,
         duplicate_report=reports.duplicate_report,
+        library_root=music,
         review_settings=app_config.review,
         health_settings=app_config.health,
         active_profile=app_config.profile,

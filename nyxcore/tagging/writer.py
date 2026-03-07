@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 import shutil
 from pathlib import Path
 
@@ -8,6 +10,11 @@ from mutagen import File as MutagenFile
 
 class TagWriteError(RuntimeError):
     """Raised when basic metadata cannot be safely written for a file."""
+
+
+def _sanitize_backup_label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._")
+    return cleaned or "backup"
 
 
 def _load_mutagen_writer(path: Path):
@@ -29,10 +36,13 @@ def _load_mutagen_writer(path: Path):
 
 def backup_file(src: Path, backup_dir: Path) -> Path:
     backup_dir.mkdir(parents=True, exist_ok=True)
-    destination = backup_dir / src.name
+    label_parts = [part for part in (src.parent.name, src.stem) if part]
+    label = "__".join(_sanitize_backup_label(part) for part in label_parts if part) or "backup"
+    digest = hashlib.sha1(str(src).encode("utf-8")).hexdigest()[:10]
+    destination = backup_dir / f"{label}.{digest}{src.suffix}"
     if destination.exists():
-        stem = src.stem
-        suffix = src.suffix
+        stem = destination.stem
+        suffix = destination.suffix
         i = 1
         while True:
             candidate = backup_dir / f"{stem}.{i}{suffix}"

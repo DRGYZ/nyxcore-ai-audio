@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -128,6 +129,18 @@ def _operation_reversible(operation_type: str, backup_path: str | None) -> bool:
     return False
 
 
+def _sanitize_path_label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._")
+    return cleaned or "restore"
+
+
+def _alternate_restore_target(alternate_restore_dir: Path, original_path: str | None) -> Path:
+    original = Path(original_path or "restored-file")
+    digest = hashlib.sha1(str(original.parent).encode("utf-8")).hexdigest()[:10]
+    folder = f"{_sanitize_path_label(original.parent.name or original.anchor or 'restore')}-{digest}"
+    return alternate_restore_dir / folder / original.name
+
+
 def append_operation_batch(
     ledger: OperationLedger,
     *,
@@ -212,7 +225,7 @@ def undo_operation_batch(
                 if destination.exists():
                     if alternate_restore_dir is None:
                         raise RuntimeError(f"restore destination already exists: {destination}")
-                    destination = alternate_restore_dir / Path(operation.original_path or "").name
+                    destination = _alternate_restore_target(alternate_restore_dir, operation.original_path)
                     if destination.exists():
                         raise RuntimeError(f"alternate restore destination already exists: {destination}")
                 destination.parent.mkdir(parents=True, exist_ok=True)

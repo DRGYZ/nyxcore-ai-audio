@@ -894,6 +894,7 @@ def _refresh_saved_playlist_definition(
         profile_override=profile_override,
         max_tracks_override=max_tracks_override,
         min_score_override=min_score_override,
+        library_root=music,
     )
     return latest, refresh_summary
 

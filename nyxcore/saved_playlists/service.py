@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from dataclasses import asdict, dataclass, field
@@ -12,6 +13,9 @@ from nyxcore.config import NyxConfig
 from nyxcore.incremental.service import RefreshSummary
 from nyxcore.playlist_query.service import PlaylistReport, build_playlist_report
 from nyxcore.core.track import TrackRecord
+
+SAVED_PLAYLIST_LATEST_RESULT_SCHEMA_VERSION = 2
+SAVED_PLAYLIST_PATH_IDENTITY_MODE = "library_relative"
 
 
 def _slugify(value: str) -> str:
@@ -76,6 +80,9 @@ class SavedPlaylistLatestResult:
     active_profile: str
     report: dict
     summary: dict[str, object]
+    schema_version: int = SAVED_PLAYLIST_LATEST_RESULT_SCHEMA_VERSION
+    path_identity_mode: str = SAVED_PLAYLIST_PATH_IDENTITY_MODE
+    library_root: str | None = None
     refresh_diff: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -90,6 +97,9 @@ class SavedPlaylistLatestResult:
             active_profile=str(data.get("active_profile", "default")),
             report=dict(data.get("report", {})),
             summary=dict(data.get("summary", {})),
+            schema_version=int(data.get("schema_version", 1)),
+            path_identity_mode=str(data.get("path_identity_mode", "raw_path")),
+            library_root=None if data.get("library_root") in {None, ""} else str(data.get("library_root")),
             refresh_diff=dict(data.get("refresh_diff", {})),
         )
 
@@ -234,12 +244,52 @@ def write_saved_playlist_latest_result(store_root: Path, result: SavedPlaylistLa
     path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _ranked_track_map(payload: dict) -> dict[str, dict]:
+def _infer_library_root(records: list[TrackRecord]) -> Path | None:
+    parent_paths = [str(Path(record.path).parent) for record in records if Path(record.path).is_absolute()]
+    if not parent_paths:
+        return None
+    try:
+        return Path(os.path.commonpath(parent_paths))
+    except ValueError:
+        return None
+
+
+def _track_identity(path_value: object, *, library_root: Path | None) -> str:
+    path = Path(str(path_value))
+    if library_root is not None and path.is_absolute():
+        try:
+            return path.relative_to(library_root).as_posix()
+        except ValueError:
+            return str(path)
+    return str(path)
+
+
+def _latest_result_library_root(result: SavedPlaylistLatestResult | None) -> Path | None:
+    if result is None:
+        return None
+    if result.path_identity_mode != SAVED_PLAYLIST_PATH_IDENTITY_MODE:
+        return None
+    if result.library_root in {None, ""}:
+        return None
+    return Path(result.library_root)
+
+
+def _ranked_track_map(payload: dict, *, library_root: Path | None) -> dict[str, dict]:
     tracks = payload.get("ranked_tracks", [])
-    return {str(track.get("path")): dict(track) for track in tracks if track.get("path")}
+    ranked: dict[str, dict] = {}
+    for track in tracks:
+        if not track.get("path"):
+            continue
+        ranked[_track_identity(track.get("path"), library_root=library_root)] = dict(track)
+    return ranked
 
 
-def _build_refresh_diff(previous: SavedPlaylistLatestResult | None, current_report: PlaylistReport) -> dict[str, object]:
+def _build_refresh_diff(
+    previous: SavedPlaylistLatestResult | None,
+    current_report: PlaylistReport,
+    *,
+    library_root: Path | None,
+) -> dict[str, object]:
     if previous is None:
         return {
             "has_previous_result": False,
@@ -250,20 +300,29 @@ def _build_refresh_diff(previous: SavedPlaylistLatestResult | None, current_repo
             "rank_changes": [],
         }
 
-    previous_tracks = _ranked_track_map(previous.report)
-    current_tracks = {track.path: track for track in current_report.ranked_tracks}
-    added = sorted(path for path in current_tracks if path not in previous_tracks)
-    removed = sorted(path for path in previous_tracks if path not in current_tracks)
-    previous_ranks = {path: index + 1 for index, path in enumerate(previous_tracks)}
-    current_ranks = {track.path: index + 1 for index, track in enumerate(current_report.ranked_tracks)}
+    previous_tracks = _ranked_track_map(previous.report, library_root=_latest_result_library_root(previous))
+    current_tracks = {
+        _track_identity(track.path, library_root=library_root): track
+        for track in current_report.ranked_tracks
+    }
+    added = sorted(track.path for identity, track in current_tracks.items() if identity not in previous_tracks)
+    removed = sorted(str(track.get("path")) for identity, track in previous_tracks.items() if identity not in current_tracks)
+    previous_ranks = {identity: index + 1 for index, identity in enumerate(previous_tracks)}
+    current_ranks = {
+        _track_identity(track.path, library_root=library_root): index + 1
+        for index, track in enumerate(current_report.ranked_tracks)
+    }
     rank_changes = []
-    for path in sorted(set(previous_ranks).intersection(current_ranks)):
-        old_rank = previous_ranks[path]
-        new_rank = current_ranks[path]
+    for identity in sorted(set(previous_ranks).intersection(current_ranks)):
+        old_rank = previous_ranks[identity]
+        new_rank = current_ranks[identity]
         if old_rank != new_rank:
+            current_track = current_tracks.get(identity)
+            if current_track is None:
+                continue
             rank_changes.append(
                 {
-                    "path": path,
+                    "path": current_track.path,
                     "old_rank": old_rank,
                     "new_rank": new_rank,
                     "rank_delta": old_rank - new_rank,
@@ -295,9 +354,11 @@ def refresh_saved_playlist(
     max_tracks_override: int | None = None,
     min_score_override: float | None = None,
     now: datetime | None = None,
+    library_root: Path | None = None,
 ) -> SavedPlaylistLatestResult:
     now = now or datetime.now(tz=UTC)
     active_profile = profile_override or definition.profile
+    resolved_library_root = library_root or _infer_library_root(records)
     previous = read_saved_playlist_latest_result(store_root, definition.playlist_id)
     report = build_playlist_report(
         records,
@@ -307,7 +368,7 @@ def refresh_saved_playlist(
         min_score=min_score_override if min_score_override is not None else definition.min_score,
         analysis_cache_path=analysis_cache_path,
     )
-    refresh_diff = _build_refresh_diff(previous, report)
+    refresh_diff = _build_refresh_diff(previous, report, library_root=resolved_library_root)
     latest = SavedPlaylistLatestResult(
         playlist_id=definition.playlist_id,
         refreshed_at=now.isoformat(),
@@ -324,6 +385,9 @@ def refresh_saved_playlist(
             "removed_files": len(refresh_summary.changes.removed_files),
             "unchanged_files": len(refresh_summary.changes.unchanged_files),
         },
+        schema_version=SAVED_PLAYLIST_LATEST_RESULT_SCHEMA_VERSION,
+        path_identity_mode=SAVED_PLAYLIST_PATH_IDENTITY_MODE,
+        library_root=None if resolved_library_root is None else str(resolved_library_root),
         refresh_diff=refresh_diff,
     )
     definition.last_refreshed_at = latest.refreshed_at

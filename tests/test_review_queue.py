@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import unittest
@@ -222,6 +223,66 @@ class ReviewQueueTests(unittest.TestCase):
         right = build_review_queue(list(reversed(records)), health_report=health_report, duplicate_report=duplicate_report)
 
         self.assertEqual([item.item_id for item in left.items], [item.item_id for item in right.items])
+
+    def test_legacy_absolute_item_ids_are_migrated_to_current_queue_items(self) -> None:
+        first = self.music / "dup-a.mp3"
+        second = self.music / "dup-b.flac"
+        first.write_bytes(b"dup" * 256)
+        second.write_bytes(b"dup" * 256)
+        records = [
+            _track(first, title="Track", artist="Artist", album="Album", duration=180.0, cover=False),
+            _track(second, title="Track", artist="Artist", album="Album", duration=180.0, cover=True),
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(2, 1, 2, 0, 0),
+            exact_duplicates=[
+                ExactDuplicateGroup(
+                    group_id="exact-001",
+                    content_hash="hash-a",
+                    files=[_dup_info(first, size=first.stat().st_size), _dup_info(second, size=second.stat().st_size, cover=True)],
+                    preferred=PreferredCopyRecommendation(path=str(second), reasons=["preferred_lossless_format"]),
+                )
+            ],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        current_review = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        current_exact_item = next(item for item in current_review.items if item.item_type == "exact_duplicate_group")
+        legacy_root = self.root / "legacy-music"
+        legacy_paths = sorted([str(legacy_root / first.name), str(legacy_root / second.name)])
+        legacy_payload = json.dumps(
+            ["exact_duplicate_group", legacy_paths],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        legacy_item_id = f"exact_duplicate_group-{hashlib.sha1(legacy_payload.encode('utf-8')).hexdigest()[:12]}"
+        state = ReviewStateStore(
+            items={
+                legacy_item_id: ReviewStateEntry(
+                    item_id=legacy_item_id,
+                    status="ignored",
+                    updated_at="2026-03-01T00:00:00+00:00",
+                    item_type="exact_duplicate_group",
+                    summary=current_exact_item.summary,
+                )
+            }
+        )
+
+        review = build_review_queue(
+            records,
+            health_report=health_report,
+            duplicate_report=duplicate_report,
+            review_state=state,
+            include_ignored=True,
+        )
+
+        exact_item = next(item for item in review.items if item.item_type == "exact_duplicate_group")
+        self.assertNotEqual(exact_item.item_id, legacy_item_id)
+        self.assertEqual(exact_item.item_id, current_exact_item.item_id)
+        self.assertEqual(exact_item.review_status, "ignored")
+        self.assertIn(exact_item.item_id, state.items)
+        self.assertNotIn(legacy_item_id, state.items)
 
     def test_large_reclaimable_exact_duplicates_rank_higher(self) -> None:
         big_a = self.music / "big-a.mp3"

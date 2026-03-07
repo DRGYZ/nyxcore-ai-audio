@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 REVIEW_STATUSES = {"new", "seen", "snoozed", "ignored", "resolved"}
+REVIEW_STATE_SCHEMA_VERSION = 2
 
 
 def utc_now() -> datetime:
@@ -38,7 +39,7 @@ class ReviewStateEntry:
 
 @dataclass(slots=True)
 class ReviewStateStore:
-    schema_version: int = 1
+    schema_version: int = REVIEW_STATE_SCHEMA_VERSION
     items: dict[str, ReviewStateEntry] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -50,7 +51,7 @@ class ReviewStateStore:
     @classmethod
     def from_dict(cls, data: dict) -> "ReviewStateStore":
         return cls(
-            schema_version=int(data.get("schema_version", 1)),
+            schema_version=max(int(data.get("schema_version", 1)), REVIEW_STATE_SCHEMA_VERSION),
             items={item_id: ReviewStateEntry.from_dict(entry) for item_id, entry in data.get("items", {}).items()},
         )
 
@@ -70,6 +71,53 @@ def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value)
+
+
+def _prefer_review_state_entry(
+    left: ReviewStateEntry | None,
+    right: ReviewStateEntry | None,
+) -> ReviewStateEntry | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    left_at = _parse_iso(left.updated_at) or datetime.min.replace(tzinfo=UTC)
+    right_at = _parse_iso(right.updated_at) or datetime.min.replace(tzinfo=UTC)
+    preferred = right if right_at >= left_at else left
+    fallback = left if preferred is right else right
+    return ReviewStateEntry(
+        item_id=preferred.item_id,
+        status=preferred.status,
+        updated_at=preferred.updated_at,
+        snooze_until=preferred.snooze_until,
+        item_type=preferred.item_type or fallback.item_type,
+        summary=preferred.summary or fallback.summary,
+    )
+
+
+def migrate_review_state_aliases(
+    state: ReviewStateStore,
+    *,
+    canonical_item_ids_by_alias: dict[str, str],
+) -> bool:
+    changed = False
+    for alias, canonical in sorted(canonical_item_ids_by_alias.items()):
+        if alias == canonical:
+            continue
+        alias_entry = state.items.get(alias)
+        if alias_entry is None:
+            continue
+        merged = _prefer_review_state_entry(state.items.get(canonical), alias_entry)
+        if merged is None:
+            continue
+        merged.item_id = canonical
+        state.items[canonical] = merged
+        if alias in state.items:
+            del state.items[alias]
+        changed = True
+    if changed:
+        state.schema_version = REVIEW_STATE_SCHEMA_VERSION
+    return changed
 
 
 def normalize_review_state(
@@ -128,4 +176,3 @@ def apply_review_action(
             entry.item_type = item_type_by_id[item_id]
         if summary_by_id is not None and item_id in summary_by_id:
             entry.summary = summary_by_id[item_id]
-

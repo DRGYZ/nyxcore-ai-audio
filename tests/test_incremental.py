@@ -9,6 +9,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from nyxcore.cli import app
+from nyxcore.core.track import TrackRecord
 from nyxcore.incremental.service import (
     ChangeSet,
     FileSnapshot,
@@ -104,6 +105,54 @@ class IncrementalTests(unittest.TestCase):
         self.assertEqual(second.summary.changes.modified_files, [str(keep)])
         self.assertEqual(second.summary.changes.unchanged_files, [])
         self.assertEqual(sorted(record.path for record in second.records), sorted([str(added), str(keep)]))
+
+    def test_v1_state_migrates_to_relative_keys_and_current_root(self) -> None:
+        state_path = self.out / "state.json"
+        old_root = self.root / "old-music"
+        new_root = self.root / "new-music"
+        relative = Path("album") / "track.mp3"
+        old_root.mkdir()
+        (new_root / relative.parent).mkdir(parents=True, exist_ok=True)
+        current_file = new_root / relative
+        current_file.write_bytes(b"same-bytes")
+
+        legacy_path = old_root / relative
+        payload = {
+            "root": str(old_root),
+            "files": {
+                str(legacy_path): {
+                    "path": str(legacy_path),
+                    "size": current_file.stat().st_size,
+                    "mtime_ns": current_file.stat().st_mtime_ns,
+                }
+            },
+            "records": {
+                str(legacy_path): TrackRecord(
+                    path=str(legacy_path),
+                    file_size_bytes=current_file.stat().st_size,
+                    mtime_iso="",
+                    tags={},
+                    has_cover_art=False,
+                    duration_seconds=None,
+                    warnings=[],
+                ).to_dict()
+            },
+        }
+        state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+        refreshed = refresh_incremental_state(new_root, state_path)
+
+        self.assertEqual(refreshed.summary.mode, "incremental")
+        self.assertEqual(refreshed.summary.rescanned_files, 0)
+        self.assertEqual(refreshed.summary.changes.unchanged_files, [str(current_file)])
+        self.assertEqual([record.path for record in refreshed.records], [str(current_file)])
+
+        stored = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["schema_version"], 2)
+        self.assertEqual(stored["path_mode"], "library_relative")
+        self.assertEqual(list(stored["files"].keys()), ["album/track.mp3"])
+        self.assertEqual(list(stored["records"].keys()), ["album/track.mp3"])
+        self.assertEqual(stored["records"]["album/track.mp3"]["path"], "album/track.mp3")
 
     @patch("nyxcore.core.scanner._has_cover_art", return_value=False)
     @patch("nyxcore.core.scanner.MutagenFile", return_value=None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -11,7 +12,7 @@ from nyxcore.config import HealthConfig, ReviewConfig
 from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.duplicates.service import DuplicateAnalysisReport, ExactDuplicateGroup, LikelyDuplicateGroup
 from nyxcore.health.service import HealthReport
-from nyxcore.review_queue.state import ReviewStateStore, normalize_review_state
+from nyxcore.review_queue.state import ReviewStateStore, migrate_review_state_aliases, normalize_review_state
 
 REVIEW_ITEM_TYPES = {
     "exact_duplicate_group",
@@ -44,6 +45,26 @@ def _is_placeholder(value: str | None, settings: HealthConfig) -> bool:
 
 def _sample_paths(paths: set[str] | list[str], limit: int) -> list[str]:
     return sorted(paths)[:limit]
+
+
+def _canonical_path_identity(path_value: str, *, library_root: Path | None) -> str:
+    path = Path(path_value)
+    if library_root is not None and path.is_absolute():
+        try:
+            return path.relative_to(library_root).as_posix()
+        except ValueError:
+            return str(path)
+    return str(path)
+
+
+def _infer_library_root(records: list[TrackRecord]) -> Path | None:
+    parent_paths = [str(Path(record.path).parent) for record in records if Path(record.path).is_absolute()]
+    if not parent_paths:
+        return None
+    try:
+        return Path(os.path.commonpath(parent_paths))
+    except ValueError:
+        return None
 
 
 def _stable_item_id(item_type: str, *parts: object) -> str:
@@ -92,6 +113,20 @@ def _filter_items(
     if max_items is not None:
         filtered = filtered[:max_items]
     return filtered
+
+
+def _signature_alias_map(items: list["ReviewQueueItem"], state_store: ReviewStateStore) -> dict[str, str]:
+    canonical_by_signature: dict[tuple[str, str], str] = {}
+    for item in items:
+        canonical_by_signature[(item.item_type, item.summary)] = item.item_id
+    aliases: dict[str, str] = {}
+    for item_id, entry in state_store.items.items():
+        if entry.item_type is None or entry.summary is None:
+            continue
+        canonical = canonical_by_signature.get((entry.item_type, entry.summary))
+        if canonical is not None and canonical != item_id:
+            aliases[item_id] = canonical
+    return aliases
 
 
 @dataclass(slots=True)
@@ -166,9 +201,33 @@ class ReviewQueueBuilder:
         *,
         review_settings: ReviewConfig | None = None,
         health_settings: HealthConfig | None = None,
+        library_root: Path | None = None,
     ) -> None:
         self.review_settings = review_settings or ReviewConfig()
         self.health_settings = health_settings or HealthConfig()
+        self.library_root = library_root
+        self._legacy_item_ids_by_item_id: dict[str, set[str]] = {}
+
+    def _register_legacy_alias(self, item_id: str, legacy_item_id: str | None) -> str:
+        if legacy_item_id and legacy_item_id != item_id:
+            self._legacy_item_ids_by_item_id.setdefault(item_id, set()).add(legacy_item_id)
+        return item_id
+
+    def _path_item_id(self, item_type: str, paths: list[str] | set[str]) -> str:
+        raw_paths = sorted(str(path) for path in paths)
+        canonical_paths = sorted(
+            _canonical_path_identity(path, library_root=self.library_root)
+            for path in raw_paths
+        )
+        item_id = _stable_item_id(item_type, canonical_paths)
+        legacy_item_id = _stable_item_id(item_type, raw_paths)
+        return self._register_legacy_alias(item_id, legacy_item_id)
+
+    def _folder_item_id(self, folder: str) -> str:
+        canonical_folder = _canonical_path_identity(folder, library_root=self.library_root)
+        item_id = _stable_item_id("folder_hotspot", canonical_folder)
+        legacy_item_id = _stable_item_id("folder_hotspot", folder)
+        return self._register_legacy_alias(item_id, legacy_item_id)
 
     def build(
         self,
@@ -188,6 +247,9 @@ class ReviewQueueBuilder:
         include_resolved: bool = False,
         only_unresolved: bool = False,
     ) -> ReviewQueueReport:
+        if self.library_root is None:
+            self.library_root = _infer_library_root(records)
+        self._legacy_item_ids_by_item_id = {}
         items: list[ReviewQueueItem] = []
         items.extend(self._exact_duplicate_items(duplicate_report))
         items.extend(self._likely_duplicate_items(duplicate_report))
@@ -196,6 +258,18 @@ class ReviewQueueBuilder:
         items.extend(self._quality_items(records, health_report))
         items.extend(self._folder_hotspot_items(health_report))
         state_store = review_state or ReviewStateStore()
+        migrate_review_state_aliases(
+            state_store,
+            canonical_item_ids_by_alias={
+                legacy_item_id: item_id
+                for item_id, legacy_item_ids in self._legacy_item_ids_by_item_id.items()
+                for legacy_item_id in legacy_item_ids
+            },
+        )
+        migrate_review_state_aliases(
+            state_store,
+            canonical_item_ids_by_alias=_signature_alias_map(items, state_store),
+        )
         normalize_review_state(state_store, active_item_ids={item.item_id for item in items})
         for item in items:
             entry = state_store.items.get(item.item_id)
@@ -263,10 +337,7 @@ class ReviewQueueBuilder:
             ]
             items.append(
                 ReviewQueueItem(
-                    item_id=_stable_item_id(
-                        "exact_duplicate_group",
-                        sorted(item.path for item in group.files),
-                    ),
+                    item_id=self._path_item_id("exact_duplicate_group", [item.path for item in group.files]),
                     item_type="exact_duplicate_group",
                     priority_score=score,
                     priority_band=_priority_band(score, self.review_settings),
@@ -304,10 +375,7 @@ class ReviewQueueBuilder:
             score = round(score, 3)
             items.append(
                 ReviewQueueItem(
-                    item_id=_stable_item_id(
-                        "likely_duplicate_group",
-                        sorted(item.path for item in group.files),
-                    ),
+                    item_id=self._path_item_id("likely_duplicate_group", [item.path for item in group.files]),
                     item_type="likely_duplicate_group",
                     priority_score=score,
                     priority_band=_priority_band(score, self.review_settings),
@@ -361,7 +429,7 @@ class ReviewQueueBuilder:
             score = round(min(score, 99.0), 3)
             items.append(
                 ReviewQueueItem(
-                    item_id=_stable_item_id("missing_metadata", sorted(impacted)),
+                    item_id=self._path_item_id("missing_metadata", impacted),
                     item_type="missing_metadata",
                     priority_score=score,
                     priority_band=_priority_band(score, self.review_settings),
@@ -391,7 +459,7 @@ class ReviewQueueBuilder:
             score = round(min(score, 99.0), 3)
             items.append(
                 ReviewQueueItem(
-                    item_id=_stable_item_id("weak_or_placeholder_metadata", sorted(placeholder)),
+                    item_id=self._path_item_id("weak_or_placeholder_metadata", placeholder),
                     item_type="weak_or_placeholder_metadata",
                     priority_score=score,
                     priority_band=_priority_band(score, self.review_settings),
@@ -419,7 +487,7 @@ class ReviewQueueBuilder:
         score = round(min(score, 99.0), 3)
         return [
             ReviewQueueItem(
-                item_id=_stable_item_id("artwork_missing", sorted(missing_art)),
+                item_id=self._path_item_id("artwork_missing", missing_art),
                 item_type="artwork_missing",
                 priority_score=score,
                 priority_band=_priority_band(score, self.review_settings),
@@ -461,7 +529,7 @@ class ReviewQueueBuilder:
         score = round(min(score, 99.0), 3)
         return [
             ReviewQueueItem(
-                item_id=_stable_item_id("low_quality_audio", sorted(low_quality)),
+                item_id=self._path_item_id("low_quality_audio", low_quality),
                 item_type="low_quality_audio",
                 priority_score=score,
                 priority_band=_priority_band(score, self.review_settings),
@@ -494,7 +562,7 @@ class ReviewQueueBuilder:
             score = round(min(score, 99.0), 3)
             items.append(
                 ReviewQueueItem(
-                    item_id=_stable_item_id("folder_hotspot", folder_issue.folder),
+                    item_id=self._folder_item_id(folder_issue.folder),
                     item_type="folder_hotspot",
                     priority_score=score,
                     priority_band=_priority_band(score, self.review_settings),
@@ -531,6 +599,7 @@ def build_review_queue(
     include_snoozed: bool = False,
     include_resolved: bool = False,
     only_unresolved: bool = False,
+    library_root: Path | None = None,
 ) -> ReviewQueueReport:
     if min_priority_band is not None and min_priority_band not in PRIORITY_BAND_ORDER:
         raise ValueError(f"Unknown priority band: {min_priority_band}")
@@ -538,7 +607,11 @@ def build_review_queue(
     unknown_types = sorted(item for item in invalid_types if item not in REVIEW_ITEM_TYPES)
     if unknown_types:
         raise ValueError(f"Unknown review item type(s): {', '.join(unknown_types)}")
-    return ReviewQueueBuilder(review_settings=review_settings, health_settings=health_settings).build(
+    return ReviewQueueBuilder(
+        review_settings=review_settings,
+        health_settings=health_settings,
+        library_root=library_root,
+    ).build(
         records,
         health_report=health_report,
         duplicate_report=duplicate_report,
