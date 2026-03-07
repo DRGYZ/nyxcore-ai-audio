@@ -4,6 +4,9 @@ from pathlib import Path
 
 from mutagen.id3 import ID3, ID3NoHeaderError, TXXX
 
+# NYX_* custom metadata writes remain ID3/TXXX-based in this pass.
+# They are intentionally limited to files where ID3 metadata is available.
+
 _FIELD_TO_DESC = {
     "energy": "NYX_ENERGY",
     "bpm": "NYX_BPM",

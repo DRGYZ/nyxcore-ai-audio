@@ -1,0 +1,1 @@
+"""Collection health reporting helpers."""

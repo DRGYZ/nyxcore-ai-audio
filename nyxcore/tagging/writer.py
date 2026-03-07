@@ -3,7 +3,28 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from mutagen.mp3 import EasyMP3
+from mutagen import File as MutagenFile
+
+
+class TagWriteError(RuntimeError):
+    """Raised when basic metadata cannot be safely written for a file."""
+
+
+def _load_mutagen_writer(path: Path):
+    audio = MutagenFile(path, easy=True)
+    if audio is None:
+        raise TagWriteError(f"Unsupported or unreadable audio file: {path}")
+    if audio.tags is None:
+        add_tags = getattr(audio, "add_tags", None)
+        if add_tags is None:
+            raise TagWriteError(f"Audio format does not support safe generic tag writing: {path.suffix.lower()}")
+        try:
+            add_tags()
+        except Exception as exc:
+            raise TagWriteError(
+                f"Failed to initialize tags for audio format: {path.suffix.lower()}"
+            ) from exc
+    return audio
 
 
 def backup_file(src: Path, backup_dir: Path) -> Path:
@@ -30,9 +51,7 @@ def write_tags(
     album: str | None,
     fields: list[str],
 ) -> None:
-    audio = EasyMP3(path)
-    if audio.tags is None:
-        audio.add_tags()
+    audio = _load_mutagen_writer(path)
 
     if "title" in fields and title and title.upper() != "UNKNOWN":
         audio["title"] = [title]

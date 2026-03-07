@@ -35,8 +35,20 @@ class TrackRecord:
         data["warnings"] = [code.value for code in self.warnings]
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "TrackRecord":
+        warnings = [WarningCode(item) for item in data.get("warnings", [])]
+        return cls(
+            path=str(data["path"]),
+            file_size_bytes=int(data.get("file_size_bytes", 0)),
+            mtime_iso=str(data.get("mtime_iso", "")),
+            tags=dict(data.get("tags", {})),
+            has_cover_art=bool(data.get("has_cover_art", False)),
+            duration_seconds=data.get("duration_seconds"),
+            warnings=warnings,
+        )
+
 
 def warn(track: TrackRecord, code: WarningCode) -> None:
     if code not in track.warnings:
         track.warnings.append(code)
-

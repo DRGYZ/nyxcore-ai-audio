@@ -1,7 +1,7 @@
 [project]
 name = "nyxcore"
 version = "0.2.0"
-description = "Local-first music library auditor"
+description = "Local-first music library review and cleanup toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -11,7 +11,25 @@ dependencies = [
   "openai>=1.0.0",
   "aiohttp>=3.9.0",
   "sqlmodel>=0.0.22",
+  "pydantic>=2.0.0",
   "PyYAML>=6.0.0",
+]
+
+[project.optional-dependencies]
+clap = [
+  "torch",
+  "torchaudio",
+  "laion-clap",
+]
+audio-analysis = [
+  "essentia",
+]
+web = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+]
+dev = [
+  "pytest>=8.0.0",
 ]
 
 [build-system]
@@ -19,14 +37,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = [
-  "nyxcore",
-  "nyxcore.core",
-  "nyxcore.normalize",
-  "nyxcore.tagging",
-  "nyxcore.audio",
-  "nyxcore.audio.backends",
-  "nyxcore.llm",
-  "nyxcore.judge",
-  "nyxcore.rename",
-]
+[tool.setuptools.packages.find]
+include = ["nyxcore*"]
+
+[tool.setuptools.package-data]
+nyxcore = ["resources/*.yaml"]

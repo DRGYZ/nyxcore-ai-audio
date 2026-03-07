@@ -3,6 +3,17 @@ nyxcore.egg-info/
 __pycache__/
 *.pyc
 
+web/node_modules/
+web/dist/
+web/*.js
+web/*.d.ts
+web/*.tsbuildinfo
+
+tests/_runtime_*/
+tests/tmp*/
+
+stitch_neurodesk_focus_workspace/
+
 music/
 Music/
 *.mp3

@@ -1,364 +1,427 @@
-# 🧠🎧 NyxCore
+# NyxCore
 
-Local-first AI-powered music intelligence engine.  
-Clean metadata. Analyze audio. Write structured AI tags. Generate smart playlists.
+NyxCore is a local-first music library review and cleanup toolkit for people who manage folders of audio files, not streaming playlists. It scans a library, finds duplicates and metadata problems, builds a review queue, generates explicit action plans, records reversible history, and supports saved playlists from natural-language queries through a CLI, a FastAPI backend, and a local React UI.
 
-## 📦 Installation
+Everything runs against local files and local state. NyxCore does not require a cloud account, a remote media server, or a hosted database.
 
-Requirements:
+Current release version: `0.2.0`
 
-- Python 3.11+ (3.12 recommended)
-- `ffmpeg` available on PATH
-- Dependencies include `aiohttp`, `sqlmodel`, and `PyYAML`
+## Why This Exists
 
-Setup:
+Music folders accumulate drift:
+
+- exact duplicate files across imports, downloads, and archive folders
+- likely duplicates across transcodes and rename variants
+- missing or placeholder metadata
+- weak artwork coverage
+- low-quality files mixed into otherwise clean collections
+- manual cleanup steps with poor reversibility
+
+NyxCore exists to turn that mess into a review-first workflow instead of a pile of one-off scripts.
+
+## Who It Is For
+
+- collectors maintaining a local archive
+- DJs and curators cleaning mixed-source folders
+- developers building local music-library tooling
+- anyone who wants a demoable local-first metadata and duplicate-review stack
+
+## Main Surfaces
+
+- CLI: scan, duplicates, health, review, plans, history, rename, analysis, tagging, and playlists
+- API: FastAPI layer in `nyxcore.webapi` that exposes the same service modules to the frontend
+- Web UI: React + Vite app in `web/` for Mission Control, Review Inbox, Saved Playlists, History, Duplicates, and Health
+
+## Start Here
+
+If you want the fastest safe first run, use the built-in demo fixture generator instead of pointing NyxCore at a real library immediately.
+
+### 1-Minute Quickstart
 
 ```bash
 python -m venv .venv
-# Windows PowerShell:
+# Windows PowerShell
 # .venv\Scripts\Activate.ps1
-# Linux/macOS:
+# Linux/macOS
 # source .venv/bin/activate
 
+python -m pip install --upgrade pip
+pip install -e ".[web]"
+
+python demo/create_demo_library.py --force
+python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
+python -m nyxcore.cli health demo/generated/sample-library --out data/reports
+python -m nyxcore.cli review demo/generated/sample-library --out data/reports
+```
+
+Then start the API and frontend:
+
+```bash
+# Bash / zsh
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+uvicorn nyxcore.webapi.app:app --reload
+```
+
+```powershell
+$env:NYXCORE_WEB_MUSIC_DIR = (Resolve-Path "demo/generated/sample-library").Path
+$env:NYXCORE_WEB_OUT_DIR = (Resolve-Path "data/reports").Path
+uvicorn nyxcore.webapi.app:app --reload
+```
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open:
+
+- API: `http://127.0.0.1:8000`
+- Frontend: `http://127.0.0.1:5173`
+
+## Demo Library
+
+NyxCore ships a documented fixture path instead of committing binary audio to Git.
+
+Generator:
+
+- `demo/create_demo_library.py`
+
+Fixture docs:
+
+- `demo/README.md`
+
+Default generated output:
+
+- `demo/generated/sample-library/`
+
+The generated library is intentionally tiny and designed to surface:
+
+- one exact duplicate group
+- one likely duplicate group
+- missing metadata
+- weak or placeholder metadata
+- missing artwork
+- low-bitrate audio
+- saved-playlist candidates for a query like `ambient focus instrumental`
+
+## Install
+
+Requirements:
+
+- Python 3.11+
+- `ffmpeg` on `PATH`
+- Node.js 18+ for the web frontend
+
+Base install:
+
+```bash
+python -m venv .venv
 python -m pip install --upgrade pip
 pip install -e .
 ```
 
-## 🚀 Overview
-
-NyxCore is a local CLI tool that transforms a messy MP3 library into a structured, AI-enhanced music system.
-
-It combines:
-
-- 🔎 Metadata normalization
-- 🎼 Signal-based audio analysis (Essentia)
-- 🤖 Semantic AI tagging (CLAP)
-- 🏷 Safe ID3 TXXX frame writing
-- 📂 Smart playlist generation
-- 💾 Persistent caching
-
-
-## ⚡ Quickstart
+Optional extras:
 
 ```bash
-python -m nyxcore.cli scan music --out data/reports
-python -m nyxcore.cli analyze music --backend hybrid --out data/reports
-python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --concurrency 10
-python -m nyxcore.cli apply-judge music --in data/reports/judge_preview.jsonl --backup-dir data/backups --dry-run
-python -m nyxcore.cli playlists music --from-cache --out data/playlists
+pip install -e ".[audio-analysis]"
+pip install -e ".[clap]"
+pip install -e ".[web]"
+pip install -e ".[dev]"
+pip install -e ".[audio-analysis,clap,web,dev]"
 ```
 
-## 🏗 Architecture
+## Local Run Guide
 
-NyxCore uses a modular backend system:
-
-### 1️⃣ Essentia (Signal Analysis)
-
-Extracts:
-
-- `energy_0_10`
-- `bpm`
-
-Based on digital signal processing (DSP), with objective acoustic measurements.
-
-### 2️⃣ CLAP (AI Semantic Model)
-
-Generates:
-
-- `tags` (mood labels)
-- `genre_top`
-
-Uses pretrained contrastive audio-text embeddings and matches audio against descriptive prompts.
-
-### 3️⃣ Hybrid Backend
-
-Combines both:
-
-- Physical features (Essentia)
-- Semantic understanding (CLAP)
-
-## 🧩 Features
-
-### Phase 1 — Scan
-
-Recursive MP3 scanning with:
-
-- Missing metadata detection
-- Cover art detection
-- Bitrate checks
-- Safe read-only mode
+### CLI-Only Workflow
 
 ```bash
-python -m nyxcore.cli scan music --out data/reports
+python -m nyxcore.cli scan <music-dir> --out data/reports
+python -m nyxcore.cli duplicates <music-dir> --out data/reports
+python -m nyxcore.cli health <music-dir> --out data/reports
+python -m nyxcore.cli review <music-dir> --out data/reports
 ```
 
-### Phase 2 — Normalize → Review → Apply
+### Web API
 
-#### Normalize
+NyxCore's web API defaults to:
 
-Generates preview of proposed metadata changes.
+- music path: `music`
+- output path: `data/reports`
+
+For the demo library or any non-default folder, set:
+
+- `NYXCORE_WEB_MUSIC_DIR`
+- `NYXCORE_WEB_OUT_DIR`
+
+Example:
 
 ```bash
-python -m nyxcore.cli normalize music --out data/reports --strategy smart
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+uvicorn nyxcore.webapi.app:app --reload
 ```
 
-Outputs:
-
-- `normalize_preview.jsonl`
-- `normalize_preview.csv`
-- `normalize_preview.md`
-
-#### Apply (Safe ID3 Write)
-
-Writes only selected fields with backups.
+### Frontend
 
 ```bash
-python -m nyxcore.cli apply music \
-  --in data/reports/normalize_preview.jsonl \
-  --fields album \
-  --backup-dir data/backups
+cd web
+npm install
+npm run dev
 ```
 
-### Phase 3 — AI Audio Analysis
+The frontend talks to `http://127.0.0.1:8000/api` by default.
 
-#### Analyze (Hybrid AI)
+### CLI + Web First-Run Path
+
+Use this sequence when you want the UI to show live data immediately instead of mock fallback:
+
+1. Generate the demo library with `python demo/create_demo_library.py --force`
+2. Run `duplicates`, `health`, and `review` against `demo/generated/sample-library`
+3. Start the API with `NYXCORE_WEB_MUSIC_DIR` pointing to the generated demo library
+4. Start the frontend with `npm run dev`
+5. Open the web UI and verify that the header shows live API mode, not mock fallback
+
+## 5-Minute Guided Demo
+
+### Step 1: Generate a safe sample library
 
 ```bash
-python -m nyxcore.cli analyze music \
-  --out data/reports \
-  --backend hybrid
+python demo/create_demo_library.py --force
 ```
 
-Outputs:
+What you should see:
 
-- `analysis_preview.jsonl`
-- `analysis_summary.md`
-- SQLite cache (persistent)
+- a small library under `demo/generated/sample-library`
+- a generated manifest and README inside that folder
 
-#### Apply AI Tags (Safe)
-
-Writes only custom ID3 frames:
-
-- `TXXX:NYX_ENERGY`
-- `TXXX:NYX_BPM`
-- `TXXX:NYX_TAGS`
-- `TXXX:NYX_GENRE_TOP`
+### Step 2: Build the core reports
 
 ```bash
-python -m nyxcore.cli apply-ai music \
-  --in data/reports/analysis_preview.jsonl \
-  --fields energy,bpm,tags,genre \
-  --backup-dir data/backups
+python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
+python -m nyxcore.cli health demo/generated/sample-library --out data/reports
+python -m nyxcore.cli review demo/generated/sample-library --out data/reports
 ```
 
-Safety guarantees:
+What you should see:
 
-- Does NOT modify title
-- Does NOT modify artist
-- Does NOT modify album
-- Does NOT modify cover art
+- exact duplicates around `Blue Hour`
+- a likely duplicate FLAC vs MP3 pair for `Night Drift Ambient`
+- missing metadata and placeholder metadata findings from `imports/legacy`
+- artwork coverage problems and low-bitrate warnings
 
-### Phase 3.5 — LLM Judge (DeepSeek-V3.2)
-
-Uses an OpenAI-compatible DeepSeek endpoint to refine mood tags and genre from hybrid analysis.
-
-Required environment variables:
+### Step 3: Create a saved playlist example
 
 ```bash
-# default base URL is https://api.deepseek.com if not set
-# both are accepted:
-# - https://api.deepseek.com
-# - https://api.deepseek.com/v1
-export DEEPSEEK_API_KEY="your_key_here"
-export DEEPSEEK_BASE_URL="https://api.deepseek.com"
-# backward compatible:
-# export NYX_DEEPSEEK_API_KEY="your_key_here"
-# export NYX_DEEPSEEK_BASE_URL="https://api.deepseek.com"
+python -m nyxcore.cli save-playlist demo/generated/sample-library --out data/reports --name "Ambient Focus" --query "ambient focus instrumental"
+python -m nyxcore.cli list-playlists --out data/reports
 ```
 
-Windows PowerShell:
+What you should see:
 
-```powershell
-$env:DEEPSEEK_API_KEY="your_key_here"
-$env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
-# backward compatible:
-# $env:NYX_DEEPSEEK_API_KEY="your_key_here"
-# $env:NYX_DEEPSEEK_BASE_URL="https://api.deepseek.com"
-```
+- a saved playlist entry with a deterministic playlist id
+- tracks ranked from the demo library's ambient/focus candidates
 
-Model mapping:
-
-- `deepseek-chat` = DeepSeek-V3.2 non-thinking
-- `deepseek-reasoner` = DeepSeek-V3.2 thinking
-
-Judge preview (cached in `data/cache/judge.sqlite`):
+### Step 4: Launch the API and web UI
 
 ```bash
-python -m nyxcore.cli judge music \
-  --analysis data/reports/analysis_preview.jsonl \
-  --out data/reports \
-  --provider deepseek \
-  --model deepseek-chat \
-  --concurrency 10 \
-  --limit 50
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+uvicorn nyxcore.webapi.app:app --reload
 ```
-
-Concurrency notes:
-
-- `--concurrency` default is `10`
-- allowed range is `1-20`
-
-Apply judge tags safely (NYX_* TXXX only):
 
 ```bash
-python -m nyxcore.cli apply-judge music \
-  --in data/reports/judge_preview.jsonl \
-  --backup-dir data/backups \
-  --limit 50 \
-  --dry-run
+cd web
+npm install
+npm run dev
 ```
 
-Recommended full flow:
+What you should see:
+
+- Dashboard with live report counts
+- Review Inbox populated from the generated demo data
+- Saved Playlists showing the `Ambient Focus` result
+- Health and Duplicates pages populated from the same library
+
+### Step 5: Populate history with one safe batch
+
+Generate a plan from an exact duplicate item:
 
 ```bash
-python -m nyxcore.cli analyze music --backend hybrid --out data/reports
-python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --provider deepseek --model deepseek-chat
-python -m nyxcore.cli apply-judge music --in data/reports/judge_preview.jsonl --backup-dir data/backups
-python -m nyxcore.cli playlists music --from-cache --out data/playlists
+python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <exact-duplicate-item-id>
+python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --out data/reports
+python -m nyxcore.cli history --out data/reports
 ```
 
-Quick judge smoke test:
+How to get the item id:
 
-```bash
-export DEEPSEEK_API_KEY=...
-python -m nyxcore.cli judge music --analysis data/reports/analysis_preview.jsonl --out data/reports --model deepseek-chat --limit 5 --force
-```
+- open `data/reports/review.json`
+- copy the `item_id` for an `exact_duplicate_group`
 
-### Phase 3.6 — Smart Rename (Preview → Apply → Undo)
+What you should see:
 
-Smart filename cleanup for `.mp3` files only.
-Folders are preserved; only filenames are changed.
+- one reversible history batch in `history`
+- the History page populated once the API is refreshed
 
-Safe rename workflow:
+## Outputs and Local State
 
-1. Deterministic dry-run (no LLM), limited sample:
+When you use `--out data/reports`, NyxCore writes report outputs and persisted state under that root.
 
-```bash
-python -m nyxcore.cli rename music --dry-run --no-llm --limit 50
-```
+Common reports:
 
-2. Dry-run with optional LLM refinement:
+- `scan.json`
+- `scan.md`
+- `duplicates.json`
+- `duplicates.md`
+- `health.json`
+- `health.md`
+- `review.json`
+- `review.md`
+- `review_plan.json`
+- `review_apply.json`
+- `playlist_query.json`
+- `playlist_query.md`
 
-```bash
-python -m nyxcore.cli rename music --dry-run --limit 50 --concurrency 10
-```
+Persisted state:
 
-3. Apply full rename and write map to reports folder:
+- `review_state.json`
+- `review_history.json`
+- `library_state.json`
+- `saved_playlists/saved_playlists.json`
+- `saved_playlists/playlists/<playlist-id>/latest_result.json`
+- `saved_playlists/playlists/<playlist-id>/latest_tracks.json`
+- `saved_playlists/playlists/<playlist-id>/latest.m3u`
 
-```bash
-python -m nyxcore.cli rename music --apply --out data/reports --concurrency 10
-```
+## Project Structure
 
-4. Undo from saved map:
+Core runtime:
 
-```bash
-python -m nyxcore.cli rename-undo --map data/reports/rename_map.jsonl --dry-run
-python -m nyxcore.cli rename-undo --map data/reports/rename_map.jsonl
-```
+- `nyxcore/core`: scanner, track models, JSONL utilities, low-level helpers
+- `nyxcore/duplicates`: duplicate analysis
+- `nyxcore/health`: metadata, quality, naming, and duplicate-impact reporting
+- `nyxcore/review_queue`: review item generation and triage state
+- `nyxcore/action_plan`: plan generation, apply, quarantine, and ledger/history handling
+- `nyxcore/saved_playlists`: saved-playlist definitions and refresh tracking
+- `nyxcore/playlist_query`: natural-language playlist ranking
+- `nyxcore/webapi`: FastAPI layer
+- `web/src`: React frontend
+- `tests`: unit and smoke coverage for backend workflows
+- `demo`: demo-library generator and fixture notes
+- `docs/assets/screenshots`: screenshot location and capture checklist
 
-Rename safety notes:
+## CLI Command Families
 
-- Default mode is preview (`--dry-run`)
-- Windows-safe filename sanitization is applied
-- Collision handling appends ` - 2`, ` - 3`, etc.
-- No directory moves; rename stays within the same folder
-- Writes a rename map JSONL into the reports folder
+Current command families include:
 
-## 🗒 Release Notes
+- `scan`
+- `duplicates`
+- `health`
+- `review`
+- `review-plan`
+- `apply-review-plan`
+- `history`
+- `show-history`
+- `restore-review-action`
+- `undo-review-action`
+- `playlist`
+- `save-playlist`
+- `list-playlists`
+- `show-playlist`
+- `rename-playlist`
+- `edit-playlist`
+- `delete-playlist`
+- `refresh-playlist`
+- `refresh-all-playlists`
+- `normalize`
+- `apply`
+- `rename`
+- `rename-undo`
+- `analyze`
+- `judge`
+- `apply-judge`
+- `apply-ai`
 
-### 2026-02-20
+Legacy note:
 
-- Refactored judge logic into `JudgeService` with cleaner CLI orchestration.
-- Added deterministic local conflict scoring with debug-only `conflicts_llm`.
-- Hardened judge reason cleanup and reduced noisy BPM mismatch wording.
-- Added async concurrent DeepSeek judge requests with semaphore control.
-- Introduced YAML config loading and dependency injection for judge prompts/rules.
-- Added smart rename preview/apply/undo workflow with optional LLM refinement.
+- `python -m nyxcore.cli playlists ...` still exists for compatibility
+- it is the older bucketed M3U export workflow
+- prefer `playlist` plus saved-playlist commands for the current workflow
 
-## 🎶 Smart Playlists
+## Web UI
 
-Generate playlists from AI data:
+Primary routes:
 
-```bash
-python -m nyxcore.cli playlists music --from-cache --out data/playlists
-```
+- `/` Mission Control
+- `/review` Review Inbox
+- `/playlists` Saved Playlists
+- `/history` Operation History
+- `/duplicates` Duplicates
+- `/health` Health
 
-Examples:
+The UI uses live FastAPI responses when available and falls back to local mock data for development. Mutation actions remain disabled in fallback mode.
 
-- `energy_8_10.m3u`
-- `bpm_120_140.m3u`
-- `mood_chill.m3u`
-- `mood_dark.m3u`
+## API Surface
 
-## 🛡 Safety Design
+Route groups:
 
-- Read-only scanning by default
-- Preview-first workflow
-- Confidence filtering
-- Field-level write control
-- Backup directory support
-- No destructive overwrites
-- AI metadata isolated in `NYX_*` custom frames
+- status: `GET /api/status`
+- reports: `GET /api/duplicates`, `GET /api/health`, `GET /api/review`
+- review mutations: `POST /api/review/state`, `POST /api/review/plan`, `POST /api/review/plan/apply`
+- saved playlists: `GET /api/playlists`
+- history: `GET /api/history`, `POST /api/history/{batch_id}/restore`, `POST /api/history/{batch_id}/undo`
 
-## ⚙️ Tech Stack
+The API is intentionally thin. It uses the same service modules as the CLI.
 
-- Python 3.12
-- Typer + Rich (CLI UX)
-- Mutagen (ID3 handling)
-- Essentia (audio DSP)
-- LAION CLAP (audio-text model)
-- SQLite caching
-- FFmpeg fallback decoding
+## Configuration
 
-## 🧠 Why This Project Matters
+NyxCore ships a packaged default YAML config in `nyxcore/resources/default.yaml`.
 
-NyxCore demonstrates:
+Built-in profiles:
 
-- Multi-backend architecture
-- AI inference pipelines
-- Audio signal processing
-- Safe metadata engineering
-- Local-first system design
-- Cache-aware computation
-- Real-world data normalization
+- `default`
+- `collector`
+- `dj`
+- `casual`
+- `archivist`
 
-It bridges:
+Commands that depend on tuning typically accept `--config` and `--profile`, including `duplicates`, `health`, `review`, `playlist`, and `watch`.
 
-Low-level audio processing + modern AI embeddings + robust CLI tooling.
+## Screenshots and Showcase Assets
 
-## 🔮 Future Vision
+Store repo-local showcase assets here:
 
-Planned expansions:
+- `docs/assets/screenshots/README.md`
 
-- Prompt-optimized genre detection
-- Confidence-aware tagging
-- Parallel analysis
-- GPU acceleration
-- Web dashboard (NeuroDesk integration)
-- Context-aware music modes (Focus, Gym, Night)
+Preferred captures:
 
-## 🧪 Status
+- Dashboard
+- Review Inbox
+- History
+- Saved Playlists
 
-- ✔ Phase 1 — Scan
-- ✔ Phase 2 — Normalize & Apply
-- ✔ Phase 3 — Hybrid AI + Tag Writing
-- ✔ Playlist generation
-- 🔜 UX layer & dashboard integration
+If screenshots are not in the repo yet, use the checklist in that folder before publishing the README or portfolio page.
 
-## 👤 Author
+## Safety Model
 
-Built as a local-first AI systems experiment combining:
+- review-first reporting by default
+- explicit apply step for action plans
+- backups for supported mutation paths
+- no silent overwrite on restore paths
+- local persisted state for review, history, incremental refresh, and saved playlists
 
-- Audio intelligence
-- Metadata engineering
-- Modular backend architecture
+Current compatibility note:
+
+- `restore-review-action` and `undo-review-action` currently use the same safe history-batch reversal path
+- both names remain available for compatibility
+
+## Development Notes
+
+- frontend source: `web/src`
+- backend API source: `nyxcore/webapi`
+- demo fixture generator: `demo/create_demo_library.py`
+- cleanup validation entry used during the repo polish work: `python -m unittest tests.test_web_api`
+
+## WSL
+
+For Windows + WSL2 setup, see [INSTALL_WSL.md](INSTALL_WSL.md).

@@ -5,6 +5,8 @@ from pathlib import Path
 
 from mutagen import File as MutagenFile
 
+from nyxcore.core.audio_files import iter_audio_files
+
 from .rules import (
     clean_artist_hygiene,
     cleaned_filename_stem,
@@ -87,10 +89,13 @@ def _build_artist_hygiene_record(
 
 
 def build_normalize_preview(root: Path, *, strategy: str = "smart") -> list[NormalizePreviewRecord]:
-    records: list[NormalizePreviewRecord] = []
-    mp3_files = [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".mp3"]
+    return build_normalize_preview_for_paths(iter_audio_files(root), strategy=strategy)
 
-    for path in mp3_files:
+
+def build_normalize_preview_for_paths(paths: list[Path] | tuple[Path, ...] | object, *, strategy: str = "smart") -> list[NormalizePreviewRecord]:
+    records: list[NormalizePreviewRecord] = []
+
+    for path in sorted((Path(path) for path in paths), key=lambda item: str(item)):
         reasons: list[str] = []
         current_title: str | None = None
         current_artist: str | None = None

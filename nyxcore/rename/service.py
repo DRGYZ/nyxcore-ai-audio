@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from nyxcore.core.audio_files import iter_audio_files
 from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.rename.rules import RenameProposal, deterministic_cleanup
 
@@ -23,8 +24,8 @@ class RenameResult:
     changed: bool
 
 
-def iter_mp3_files(root: Path) -> list[Path]:
-    return [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".mp3"]
+def iter_library_audio_files(root: Path) -> list[Path]:
+    return iter_audio_files(root)
 
 
 def _tokenize(text: str) -> set[str]:
@@ -42,7 +43,7 @@ def _valid_llm_output(raw_stem: str, deterministic: str, candidate: str) -> bool
     c = candidate.strip().strip(".")
     if not c:
         return False
-    if c.lower().endswith(".mp3"):
+    if Path(c).suffix:
         return False
     if not _same_script_family(raw_stem, c):
         return False
@@ -138,7 +139,7 @@ async def propose_rename_for_file(
     should_use_llm = use_llm and (force or proposal.messy)
     if should_use_llm and api_key:
         llm_system = (
-            "You clean MP3 filenames. Return STRICT JSON only: {\"new_base\":\"...\"}. "
+            "You clean audio filenames. Return STRICT JSON only: {\"new_base\":\"...\"}. "
             "Do not add information not present in source. Preserve original language and intent."
         )
         llm_user = (

@@ -15,25 +15,65 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from nyxcore.action_plan.service import (
+    ActionPlanReport,
+    AppliedPlanResult,
+    apply_action_plan_report,
+    build_action_plan_report,
+)
+from nyxcore.action_plan.ledger import (
+    OperationBatch,
+    OperationLedger,
+    append_operation_batch,
+    find_batch,
+    load_operation_ledger,
+    save_operation_ledger,
+    undo_operation_batch,
+)
 from nyxcore.audio.backends.base import AudioBackend
 from nyxcore.audio.backends.dummy_backend import DummyBackend
-from nyxcore.audio.backends.essentia_backend import EssentiaBackend
 from nyxcore.audio.cache import AnalysisCache
 from nyxcore.audio.models import AnalysisResult
-from nyxcore.config import DEFAULT_CONFIG_PATH, load_config
+from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
 from nyxcore.core.track import TrackRecord
 from nyxcore.core.jsonl import read_jsonl, write_jsonl
-from nyxcore.core.utils import ensure_out_dir
+from nyxcore.core.utils import compute_stats, ensure_out_dir
+from nyxcore.duplicates.service import DuplicateAnalysisReport
+from nyxcore.health.service import HealthReport
+from nyxcore.incremental.service import ChangeSet, RefreshSummary, refresh_incremental_state, watch_incremental_state
 from nyxcore.judge.service import JudgeService
 from nyxcore.llm.cache import JudgeCache
 from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.llm.models import JudgeResult
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview
 from nyxcore.normalize.rules import is_missing
+from nyxcore.playlist_query.service import PlaylistReport, build_playlist_report
+from nyxcore.report_pipeline import build_duplicate_health_reports, build_duplicate_report, build_review_pipeline
+from nyxcore.review_queue.service import REVIEW_ITEM_TYPES, ReviewQueueReport
+from nyxcore.review_queue.state import (
+    ReviewStateStore,
+    apply_review_action,
+    load_review_state,
+    save_review_state,
+)
+from nyxcore.saved_playlists.service import (
+    SavedPlaylistDefinition,
+    SavedPlaylistLatestResult,
+    create_saved_playlist_definition,
+    delete_saved_playlist_definition,
+    edit_saved_playlist_definition,
+    export_saved_playlist_json,
+    export_saved_playlist_m3u,
+    load_saved_playlist_store,
+    read_saved_playlist_latest_result,
+    rename_saved_playlist_definition,
+    refresh_saved_playlist,
+    save_saved_playlist_definition,
+)
 from nyxcore.rename.service import (
     apply_rename,
-    iter_mp3_files,
+    iter_library_audio_files,
     propose_rename_for_file,
     undo_rename,
 )
@@ -45,7 +85,7 @@ from nyxcore.tagging.ai_writer import (
 )
 from nyxcore.tagging.writer import backup_file, write_tags
 
-app = typer.Typer(help="nyxcore - local-first music library auditor")
+app = typer.Typer(help="nyxcore - local-first music library review and cleanup toolkit")
 console = Console()
 
 
@@ -54,7 +94,14 @@ def main() -> None:
     """nyxcore CLI entrypoint."""
 
 
-def _write_scan_json(out_dir: Path, source: Path, records: list[TrackRecord], stats: dict) -> Path:
+def _write_scan_json(
+    out_dir: Path,
+    source: Path,
+    records: list[TrackRecord],
+    stats: dict,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+) -> Path:
     output_path = out_dir / "scan.json"
     payload = {
         "scanned_at": datetime.now(tz=UTC).isoformat(),
@@ -62,6 +109,8 @@ def _write_scan_json(out_dir: Path, source: Path, records: list[TrackRecord], st
         "tracks": [r.to_dict() for r in records],
         "stats": stats,
     }
+    if refresh_summary is not None:
+        payload["refresh"] = refresh_summary.to_dict()
     output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return output_path
 
@@ -78,21 +127,31 @@ def _markdown_top_list(rows: list[tuple[str, int]], title: str) -> list[str]:
     return lines
 
 
-def _write_scan_md(out_dir: Path, stats: dict) -> Path:
+def _write_scan_md(out_dir: Path, stats: dict, *, refresh_summary: RefreshSummary | None = None) -> Path:
     output_path = out_dir / "scan.md"
-    lines: list[str] = [
-        "# nyxcore scan report",
-        "",
-        "## Summary",
-        "",
-        f"- Total tracks scanned: **{stats['total_tracks']}**",
-        f"- Missing title: **{stats['missing_title']}**",
-        f"- Missing artist: **{stats['missing_artist']}**",
-        f"- Missing album: **{stats['missing_album']}**",
-        f"- Cover art present: **{stats['cover_art_present']}**",
-        f"- Cover art missing: **{stats['cover_art_missing']}**",
-        "",
-    ]
+    lines: list[str] = ["# nyxcore scan report", "", "## Summary", ""]
+    if refresh_summary is not None:
+        lines.extend(
+            [
+                f"- Refresh mode: **{refresh_summary.mode}**",
+                f"- Added files: **{len(refresh_summary.changes.added_files)}**",
+                f"- Modified files: **{len(refresh_summary.changes.modified_files)}**",
+                f"- Removed files: **{len(refresh_summary.changes.removed_files)}**",
+                f"- Unchanged files reused: **{len(refresh_summary.changes.unchanged_files)}**",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"- Total tracks scanned: **{stats['total_tracks']}**",
+            f"- Missing title: **{stats['missing_title']}**",
+            f"- Missing artist: **{stats['missing_artist']}**",
+            f"- Missing album: **{stats['missing_album']}**",
+            f"- Cover art present: **{stats['cover_art_present']}**",
+            f"- Cover art missing: **{stats['cover_art_missing']}**",
+            "",
+        ]
+    )
 
     lines.extend(_markdown_top_list(stats["top_artists"], "Top 15 artists by count"))
     lines.extend(_markdown_top_list(stats["top_albums"], "Top 15 albums by count"))
@@ -131,6 +190,733 @@ def _summary_table(stats: dict) -> Table:
     table.add_row("Missing album", str(stats["missing_album"]))
     table.add_row("Cover art present", str(stats["cover_art_present"]))
     table.add_row("Cover art missing", str(stats["cover_art_missing"]))
+    return table
+
+
+def _write_duplicates_json(
+    out_dir: Path,
+    source: Path,
+    report: DuplicateAnalysisReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "duplicates.json"
+    payload = {
+        "source": str(source),
+        "summary": report.summary.to_dict(),
+        "exact_duplicates": [group.to_dict() for group in report.exact_duplicates],
+        "likely_duplicates": [group.to_dict() for group in report.likely_duplicates],
+    }
+    if refresh_summary is not None:
+        payload["refresh"] = refresh_summary.to_dict()
+    if config_meta is not None:
+        payload["config"] = config_meta
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_duplicates_md(
+    out_dir: Path,
+    report: DuplicateAnalysisReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "duplicates.md"
+    lines = ["# nyxcore duplicate analysis", "", "## Summary", ""]
+    if refresh_summary is not None:
+        lines.extend(
+            [
+                f"- Refresh mode: **{refresh_summary.mode}**",
+                f"- Added files: **{len(refresh_summary.changes.added_files)}**",
+                f"- Modified files: **{len(refresh_summary.changes.modified_files)}**",
+                f"- Removed files: **{len(refresh_summary.changes.removed_files)}**",
+                "",
+            ]
+        )
+    if config_meta is not None:
+        lines.extend([f"- Active profile: **{config_meta['active_profile']}**", ""])
+    lines.extend(
+        [
+            f"- Total tracks analyzed: **{report.summary.total_tracks}**",
+            f"- Exact duplicate groups: **{report.summary.exact_group_count}**",
+            f"- Exact duplicate files: **{report.summary.exact_duplicate_file_count}**",
+            f"- Likely duplicate groups: **{report.summary.likely_group_count}**",
+            f"- Likely duplicate files: **{report.summary.likely_duplicate_file_count}**",
+            "",
+            "## Exact duplicates",
+            "",
+        ]
+    )
+    if not report.exact_duplicates:
+        lines.append("- _None_")
+    else:
+        for group in report.exact_duplicates[:20]:
+            lines.append(f"### {group.group_id}")
+            lines.append("")
+            lines.append(f"- Preferred: `{group.preferred.path}`")
+            lines.append(f"- Reason: `{', '.join(group.preferred.reasons)}`")
+            lines.append(f"- Hash: `{group.content_hash}`")
+            lines.append("")
+            for item in group.files:
+                lines.append(f"- `{item.path}`")
+            lines.append("")
+    lines.extend(["## Likely duplicates", ""])
+    if not report.likely_duplicates:
+        lines.append("- _None_")
+    else:
+        for group in report.likely_duplicates[:20]:
+            lines.append(f"### {group.group_id}")
+            lines.append("")
+            lines.append(f"- Confidence: **{group.confidence:.2f}**")
+            lines.append(f"- Preferred: `{group.preferred.path}`")
+            lines.append(f"- Group reasons: `{', '.join(group.reasons)}`")
+            lines.append("")
+            for item in group.files:
+                lines.append(f"- `{item.path}`")
+            lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _duplicates_summary_table(report: DuplicateAnalysisReport) -> Table:
+    table = Table(title="Duplicate Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Tracks analyzed", str(report.summary.total_tracks))
+    table.add_row("Exact groups", str(report.summary.exact_group_count))
+    table.add_row("Exact duplicate files", str(report.summary.exact_duplicate_file_count))
+    table.add_row("Likely groups", str(report.summary.likely_group_count))
+    table.add_row("Likely duplicate files", str(report.summary.likely_duplicate_file_count))
+    return table
+
+
+def _write_health_json(
+    out_dir: Path,
+    source: Path,
+    report: HealthReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "health.json"
+    payload = {
+        "source": str(source),
+        **report.to_dict(),
+    }
+    if refresh_summary is not None:
+        payload["refresh"] = refresh_summary.to_dict()
+    if config_meta is not None:
+        payload["config"] = config_meta
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_health_md(
+    out_dir: Path,
+    report: HealthReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "health.md"
+    lines = ["# nyxcore library health report", "", "## Overview", ""]
+    if refresh_summary is not None:
+        lines.extend(
+            [
+                f"- Refresh mode: **{refresh_summary.mode}**",
+                f"- Added files: **{len(refresh_summary.changes.added_files)}**",
+                f"- Modified files: **{len(refresh_summary.changes.modified_files)}**",
+                f"- Removed files: **{len(refresh_summary.changes.removed_files)}**",
+                f"- Unchanged files reused: **{len(refresh_summary.changes.unchanged_files)}**",
+                "",
+            ]
+        )
+    if config_meta is not None:
+        lines.extend([f"- Active profile: **{config_meta['active_profile']}**", ""])
+    lines.extend(
+        [
+            f"- Total audio files: **{report.overview.total_audio_files}**",
+            f"- Total folders touched: **{report.overview.total_folders_touched}**",
+            f"- Total library size (bytes): **{report.overview.total_library_size_bytes}**",
+            f"- Exact duplicate groups: **{report.overview.duplicate_exact_groups}**",
+            f"- Likely duplicate groups: **{report.overview.duplicate_likely_groups}**",
+            "",
+            "## Metadata",
+            "",
+            f"- Missing title: **{report.metadata.missing_title.count}**",
+            f"- Missing artist: **{report.metadata.missing_artist.count}**",
+            f"- Missing album: **{report.metadata.missing_album.count}**",
+            f"- Placeholder metadata: **{report.metadata.placeholder_metadata.count}**",
+            "",
+            "## Artwork",
+            "",
+            f"- With artwork: **{report.artwork.with_artwork}**",
+            f"- Without artwork: **{report.artwork.without_artwork}**",
+            f"- Coverage: **{report.artwork.coverage_percent:.2f}%**",
+            "",
+            "## Quality",
+            "",
+            f"- Low bitrate files: **{report.quality.low_bitrate_files.count}**",
+            f"- Duration outliers: **{report.quality.duration_outliers.count}**",
+            f"- Unreadable or unparseable files: **{report.quality.unreadable_or_unparseable_files.count}**",
+            "",
+            "## Duplicates",
+            "",
+            f"- Files involved in duplicates: **{report.duplicates.total_files_in_duplicates}**",
+            f"- Reclaimable exact-duplicate bytes: **{report.duplicates.reclaimable_bytes_exact}**",
+            "",
+            "## Priority Recommendations",
+            "",
+        ]
+    )
+    if not report.priorities.recommended_actions:
+        lines.append("- _No urgent issues detected_")
+    else:
+        for action in report.priorities.recommended_actions:
+            lines.append(f"- {action}")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _health_summary_table(report: HealthReport) -> Table:
+    table = Table(title="Health Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Audio files", str(report.overview.total_audio_files))
+    table.add_row("Folders", str(report.overview.total_folders_touched))
+    table.add_row("Exact duplicate groups", str(report.duplicates.exact_duplicate_groups))
+    table.add_row("Likely duplicate groups", str(report.duplicates.likely_duplicate_groups))
+    table.add_row("Missing artist", str(report.metadata.missing_artist.count))
+    table.add_row("Placeholder metadata", str(report.metadata.placeholder_metadata.count))
+    table.add_row("Low bitrate files", str(report.quality.low_bitrate_files.count))
+    table.add_row("Artwork coverage", f"{report.artwork.coverage_percent:.2f}%")
+    return table
+
+
+def _write_review_json(
+    out_dir: Path,
+    source: Path,
+    report: ReviewQueueReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "review.json"
+    payload = {"source": str(source), **report.to_dict()}
+    if refresh_summary is not None:
+        payload["refresh"] = refresh_summary.to_dict()
+    if config_meta is not None:
+        payload["config"] = config_meta
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_review_md(
+    out_dir: Path,
+    report: ReviewQueueReport,
+    *,
+    refresh_summary: RefreshSummary | None = None,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "review.md"
+    lines = ["# nyxcore review queue", "", "## Summary", ""]
+    if refresh_summary is not None:
+        lines.extend(
+            [
+                f"- Refresh mode: **{refresh_summary.mode}**",
+                f"- Added files: **{len(refresh_summary.changes.added_files)}**",
+                f"- Modified files: **{len(refresh_summary.changes.modified_files)}**",
+                f"- Removed files: **{len(refresh_summary.changes.removed_files)}**",
+                f"- Unchanged files reused: **{len(refresh_summary.changes.unchanged_files)}**",
+                "",
+            ]
+        )
+    if config_meta is not None:
+        lines.extend([f"- Active profile: **{config_meta['active_profile']}**", ""])
+    lines.extend(
+        [
+            f"- Queue items: **{report.summary.total_items}**",
+            f"- Files referenced: **{report.summary.total_files_referenced}**",
+            f"- Generation mode: **{report.metadata.generation_mode}**",
+            "",
+            "## Counts By Type",
+            "",
+            "| Type | Count |",
+            "| --- | ---: |",
+        ]
+    )
+    if not report.summary.counts_by_type:
+        lines.append("| _None_ | 0 |")
+    else:
+        for item_type, count in report.summary.counts_by_type.items():
+            lines.append(f"| `{item_type}` | {count} |")
+    lines.extend(["", "## Counts By State", "", "| State | Count |", "| --- | ---: |"])
+    if not report.summary.counts_by_state:
+        lines.append("| _None_ | 0 |")
+    else:
+        for state_name, count in report.summary.counts_by_state.items():
+            lines.append(f"| `{state_name}` | {count} |")
+    lines.extend(["", "## Review Items", ""])
+    if not report.items:
+        lines.append("- _No items matched the current filters_")
+    else:
+        for item in report.items:
+            lines.append(f"### {item.item_id} · {item.priority_band.upper()} · {item.priority_score:.1f}")
+            lines.append("")
+            lines.append(f"- Type: `{item.item_type}`")
+            lines.append(f"- State: `{item.review_status}`")
+            if item.state_updated_at is not None:
+                lines.append(f"- State updated: `{item.state_updated_at}`")
+            if item.snooze_until is not None:
+                lines.append(f"- Snooze until: `{item.snooze_until}`")
+            lines.append(f"- Summary: {item.summary}")
+            lines.append(f"- Reason: {item.reason_summary}")
+            if item.preferred_path is not None:
+                lines.append(f"- Preferred copy: `{item.preferred_path}`")
+            if item.reclaimable_bytes is not None:
+                lines.append(f"- Reclaimable bytes: **{item.reclaimable_bytes}**")
+            if item.confidence is not None:
+                lines.append(f"- Confidence: **{item.confidence:.3f}**")
+            if item.folder is not None:
+                lines.append(f"- Folder: `{item.folder}`")
+            if item.sample_paths:
+                lines.append("- Samples:")
+                for sample_path in item.sample_paths:
+                    lines.append(f"  - `{sample_path}`")
+            lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _review_summary_table(report: ReviewQueueReport) -> Table:
+    table = Table(title="Review Queue Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Queue items", str(report.summary.total_items))
+    table.add_row("Files referenced", str(report.summary.total_files_referenced))
+    table.add_row("High priority", str(report.summary.counts_by_priority_band.get("high", 0)))
+    table.add_row("Medium priority", str(report.summary.counts_by_priority_band.get("medium", 0)))
+    table.add_row("Low priority", str(report.summary.counts_by_priority_band.get("low", 0)))
+    table.add_row("New", str(report.summary.counts_by_state.get("new", 0)))
+    table.add_row("Seen", str(report.summary.counts_by_state.get("seen", 0)))
+    return table
+
+
+def _write_action_plan_json(
+    out_dir: Path,
+    source: Path,
+    report: ActionPlanReport,
+    *,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "review_plan.json"
+    payload = {"source": str(source), **report.to_dict()}
+    if config_meta is not None:
+        payload["config"] = config_meta
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_action_plan_md(
+    out_dir: Path,
+    report: ActionPlanReport,
+    *,
+    config_meta: dict | None = None,
+) -> Path:
+    path = out_dir / "review_plan.md"
+    lines = ["# nyxcore review action plan", "", "## Summary", ""]
+    if config_meta is not None:
+        lines.extend([f"- Active profile: **{config_meta['active_profile']}**", ""])
+    lines.extend(
+        [
+            f"- Requested review items: **{report.summary.requested_item_count}**",
+            f"- Plans generated: **{report.summary.generated_plan_count}**",
+            f"- Apply-capable plans: **{report.summary.apply_supported_plan_count}**",
+            f"- Unsupported items: **{report.summary.unsupported_item_count}**",
+            "",
+            "## Plans",
+            "",
+        ]
+    )
+    if not report.plans:
+        lines.append("- _No plans generated_")
+    else:
+        for plan in report.plans:
+            lines.append(f"### {plan.plan_id}")
+            lines.append("")
+            lines.append(f"- Type: `{plan.action_type}`")
+            lines.append(f"- Safety: `{plan.safety_level}`")
+            lines.append(f"- Apply supported: `{plan.apply_supported}`")
+            lines.append(f"- Confidence: `{plan.confidence:.3f}`")
+            lines.append(f"- Source review items: `{plan.source_review_item_ids}`")
+            if plan.reasons:
+                lines.append(f"- Reasons: `{', '.join(plan.reasons)}`")
+            if plan.notes:
+                lines.append(f"- Notes: `{'; '.join(plan.notes)}`")
+            if plan.proposed_operations:
+                lines.append("- Operations:")
+                for operation in plan.proposed_operations:
+                    summary = operation.path or operation.destination_path or operation.operation_type
+                    lines.append(f"  - `{operation.operation_type}` -> `{summary}`")
+            lines.append("")
+    if report.unsupported_items:
+        lines.extend(["## Unsupported", ""])
+        for item in report.unsupported_items:
+            lines.append(f"- `{item.source_review_item_id}`: {item.reason}")
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _write_applied_plan_json(out_dir: Path, results: list[AppliedPlanResult]) -> Path:
+    path = out_dir / "review_apply.json"
+    payload = {
+        "applied_at": datetime.now(tz=UTC).isoformat(),
+        "results": [result.to_dict() for result in results],
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_applied_plan_md(out_dir: Path, results: list[AppliedPlanResult]) -> Path:
+    path = out_dir / "review_apply.md"
+    lines = ["# nyxcore applied review plan", "", "## Results", ""]
+    if not results:
+        lines.append("- _No plan results_")
+    else:
+        for result in results:
+            lines.append(f"### {result.plan_id}")
+            lines.append("")
+            lines.append(f"- Action type: `{result.action_type}`")
+            lines.append(f"- Status: `{result.status}`")
+            if result.resolved_review_item_ids:
+                lines.append(f"- Resolved review items: `{result.resolved_review_item_ids}`")
+            if result.operation_results:
+                lines.append("- Operations:")
+                for operation in result.operation_results:
+                    summary = operation.path or operation.destination_path or operation.operation_type
+                    lines.append(f"  - `{operation.status}` `{operation.operation_type}` -> `{summary}`")
+            lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _action_plan_summary_table(report: ActionPlanReport) -> Table:
+    table = Table(title="Action Plan Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Requested items", str(report.summary.requested_item_count))
+    table.add_row("Plans generated", str(report.summary.generated_plan_count))
+    table.add_row("Apply-capable plans", str(report.summary.apply_supported_plan_count))
+    table.add_row("Unsupported items", str(report.summary.unsupported_item_count))
+    return table
+
+
+def _write_history_json(out_dir: Path, ledger: OperationLedger) -> Path:
+    path = out_dir / "review_history_snapshot.json"
+    path.write_text(json.dumps(ledger.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _history_table(ledger: OperationLedger) -> Table:
+    table = Table(title="Review History")
+    table.add_column("Batch ID", style="cyan")
+    table.add_column("Applied At")
+    table.add_column("Plans", justify="right", style="magenta")
+    table.add_column("Ops", justify="right", style="magenta")
+    table.add_column("Reversible", justify="right", style="magenta")
+    for batch in sorted(ledger.batches, key=lambda item: item.applied_at):
+        reversible = sum(1 for operation in batch.operations if operation.reversible)
+        table.add_row(batch.batch_id, batch.applied_at, str(len(batch.source_plan_ids)), str(len(batch.operations)), str(reversible))
+    if not ledger.batches:
+        table.add_row("_None_", "_None_", "0", "0", "0")
+    return table
+
+
+def _history_detail_table(batch: OperationBatch) -> Table:
+    table = Table(title=f"History Detail: {batch.batch_id}")
+    table.add_column("Operation", style="cyan")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Undo")
+    table.add_column("Path")
+    for operation in batch.operations:
+        table.add_row(
+            operation.operation_id,
+            operation.operation_type,
+            operation.status,
+            operation.undo_status,
+            operation.current_path or operation.original_path or "",
+        )
+    if not batch.operations:
+        table.add_row("_None_", "_None_", "_None_", "_None_", "_None_")
+    return table
+
+
+def _write_playlist_json(out_dir: Path, source: Path, report: PlaylistReport, *, config_meta: dict | None = None) -> Path:
+    path = out_dir / "playlist_query.json"
+    payload = {"source": str(source), **report.to_dict()}
+    if config_meta is not None:
+        payload["config"] = config_meta
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_playlist_md(out_dir: Path, report: PlaylistReport, *, config_meta: dict | None = None) -> Path:
+    path = out_dir / "playlist_query.md"
+    lines = [
+        "# nyxcore playlist query",
+        "",
+        "## Query",
+        "",
+        f"- Original query: **{report.original_query}**",
+        f"- Tracks selected: **{report.summary.track_count}**",
+        f"- Estimated total duration (seconds): **{report.summary.estimated_total_duration_seconds:.3f}**",
+    ]
+    if config_meta is not None:
+        lines.append(f"- Active profile: **{config_meta['active_profile']}**")
+    if report.summary.average_bpm is not None:
+        lines.append(f"- Average BPM: **{report.summary.average_bpm:.2f}**")
+    if report.summary.average_energy_0_10 is not None:
+        lines.append(f"- Average energy: **{report.summary.average_energy_0_10:.2f}**")
+    lines.extend(["", "## Parsed Intent", ""])
+    parsed = report.parsed_query.to_dict()
+    for key in ("moods", "genres", "keywords", "negative_keywords", "cultural_hints", "instrumental_preference"):
+        value = parsed.get(key)
+        if value:
+            lines.append(f"- {key}: `{value}`")
+    if parsed.get("bpm_min") is not None or parsed.get("bpm_max") is not None:
+        lines.append(f"- bpm_range: `{parsed.get('bpm_min')}..{parsed.get('bpm_max')}`")
+    if parsed.get("max_duration_seconds") is not None:
+        lines.append(f"- max_duration_seconds: `{parsed.get('max_duration_seconds')}`")
+    if report.unsupported_request_aspects:
+        lines.extend(["", "## Unsupported / Partial Aspects", ""])
+        for item in report.unsupported_request_aspects:
+            lines.append(f"- {item}")
+    lines.extend(["", "## Ranked Tracks", "", "| Score | Path | Reasons |", "| ---: | --- | --- |"])
+    if not report.ranked_tracks:
+        lines.append("| 0.0 | _None_ | _None_ |")
+    else:
+        for track in report.ranked_tracks:
+            lines.append(
+                f"| {track.score:.3f} | `{track.path.replace('|', '\\|')}` | `{', '.join(track.reasons) or 'none'}` |"
+            )
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _playlist_summary_table(report: PlaylistReport) -> Table:
+    table = Table(title="Playlist Query Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Tracks selected", str(report.summary.track_count))
+    table.add_row("Total duration (sec)", f"{report.summary.estimated_total_duration_seconds:.3f}")
+    table.add_row("Unsupported aspects", str(len(report.unsupported_request_aspects)))
+    if report.summary.average_bpm is not None:
+        table.add_row("Avg BPM", f"{report.summary.average_bpm:.2f}")
+    if report.summary.average_energy_0_10 is not None:
+        table.add_row("Avg energy", f"{report.summary.average_energy_0_10:.2f}")
+    return table
+
+
+def _saved_playlist_table(definitions: list[SavedPlaylistDefinition]) -> Table:
+    table = Table(title="Saved Playlists")
+    table.add_column("Playlist ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Profile")
+    table.add_column("Last Refresh")
+    table.add_column("Track Count", justify="right")
+    for definition in definitions:
+        table.add_row(
+            definition.playlist_id,
+            definition.name,
+            definition.profile,
+            definition.last_refreshed_at or "",
+            str(definition.last_refresh_summary.get("track_count", 0)),
+        )
+    if not definitions:
+        table.add_row("_None_", "_None_", "_None_", "_None_", "0")
+    return table
+
+
+def _saved_playlist_detail_table(definition: SavedPlaylistDefinition, latest: SavedPlaylistLatestResult | None) -> Table:
+    table = Table(title=f"Saved Playlist: {definition.playlist_id}")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+    table.add_row("Name", definition.name)
+    table.add_row("Query", definition.query)
+    table.add_row("Profile", definition.profile)
+    table.add_row("Max tracks", "" if definition.max_tracks is None else str(definition.max_tracks))
+    table.add_row("Min score", "" if definition.min_score is None else str(definition.min_score))
+    table.add_row("Created", definition.created_at)
+    table.add_row("Updated", definition.updated_at or "")
+    table.add_row("Last refresh", definition.last_refreshed_at or "")
+    if latest is not None:
+        table.add_row("Latest track count", str(latest.summary.get("track_count", 0)))
+        table.add_row("Latest refresh mode", latest.refresh_mode)
+        table.add_row("Tracks added", str(len(latest.refresh_diff.get("tracks_added", []))))
+        table.add_row("Tracks removed", str(len(latest.refresh_diff.get("tracks_removed", []))))
+        table.add_row("Track count delta", str(latest.refresh_diff.get("track_count_delta", 0)))
+        duration_delta = float(latest.refresh_diff.get("estimated_duration_delta_seconds", 0.0))
+        table.add_row("Duration delta (sec)", f"{duration_delta:.3f}")
+        table.add_row("Rank changes", str(len(latest.refresh_diff.get("rank_changes", []))))
+    return table
+
+
+def _default_state_path(out_dir: Path) -> Path:
+    return out_dir / "library_state.json"
+
+
+def _default_review_state_path(out_dir: Path) -> Path:
+    return out_dir / "review_state.json"
+
+
+def _default_history_path(out_dir: Path) -> Path:
+    return out_dir / "review_history.json"
+
+
+def _default_saved_playlists_root(out_dir: Path) -> Path:
+    return out_dir / "saved_playlists"
+
+
+def _saved_playlist_diff_table(latest: SavedPlaylistLatestResult | None) -> Table:
+    table = Table(title="Saved Playlist Refresh Diff")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+    if latest is None:
+        table.add_row("Status", "No refresh result saved yet")
+        return table
+    refresh_diff = latest.refresh_diff
+    table.add_row("Has previous result", "yes" if refresh_diff.get("has_previous_result") else "no")
+    table.add_row("Tracks added", str(len(refresh_diff.get("tracks_added", []))))
+    table.add_row("Tracks removed", str(len(refresh_diff.get("tracks_removed", []))))
+    table.add_row("Track count delta", str(refresh_diff.get("track_count_delta", 0)))
+    table.add_row(
+        "Duration delta (sec)",
+        f"{float(refresh_diff.get('estimated_duration_delta_seconds', 0.0)):.3f}",
+    )
+    rank_changes = refresh_diff.get("rank_changes", [])
+    table.add_row("Rank changes", str(len(rank_changes)))
+    if rank_changes:
+        top_change = rank_changes[0]
+        table.add_row(
+            "Top rank move",
+            f"{top_change['path']} ({top_change['old_rank']} -> {top_change['new_rank']})",
+        )
+    return table
+
+
+def _full_refresh_summary(records: list[TrackRecord]) -> RefreshSummary:
+    current_paths = sorted(record.path for record in records)
+    return RefreshSummary(
+        mode="full",
+        changes=ChangeSet(
+            added_files=current_paths,
+            modified_files=[],
+            removed_files=[],
+            unchanged_files=[],
+        ),
+        rescanned_files=len(records),
+    )
+
+
+def _load_library_records(
+    music: Path,
+    *,
+    incremental: bool,
+    state_path: Path,
+) -> tuple[list[TrackRecord], RefreshSummary]:
+    if incremental:
+        refreshed = refresh_incremental_state(music, state_path)
+        return refreshed.records, refreshed.summary
+    records, _stats = scan_music_folder(music)
+    return records, _full_refresh_summary(records)
+
+
+def _build_review_report(
+    music: Path,
+    records: list[TrackRecord],
+    *,
+    refresh_summary: RefreshSummary,
+    app_config: NyxConfig,
+    review_state_store: ReviewStateStore,
+    max_items: int | None,
+    min_priority: str | None,
+    include_types: set[str] | None,
+    exclude_types: set[str] | None,
+    include_ignored: bool,
+    include_snoozed: bool,
+    include_resolved: bool,
+    only_unresolved: bool,
+) -> ReviewQueueReport:
+    return build_review_pipeline(
+        music,
+        records,
+        app_config=app_config,
+        review_state=review_state_store,
+        generation_mode=refresh_summary.mode,
+        max_items=max_items,
+        min_priority_band=min_priority,
+        include_types=include_types,
+        exclude_types=exclude_types,
+        include_ignored=include_ignored,
+        include_snoozed=include_snoozed,
+        include_resolved=include_resolved,
+        only_unresolved=only_unresolved,
+    ).review_report
+
+
+def _refresh_saved_playlist_definition(
+    music: Path,
+    definition: SavedPlaylistDefinition,
+    *,
+    store_root: Path,
+    app_config: NyxConfig,
+    incremental: bool,
+    state_path: Path,
+    analysis_cache: Path,
+    profile_override: str | None = None,
+    max_tracks_override: int | None = None,
+    min_score_override: float | None = None,
+) -> tuple[SavedPlaylistLatestResult, RefreshSummary]:
+    records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    latest = refresh_saved_playlist(
+        store_root,
+        definition,
+        records=records,
+        refresh_summary=refresh_summary,
+        app_config=app_config,
+        analysis_cache_path=analysis_cache if analysis_cache.exists() else None,
+        profile_override=profile_override,
+        max_tracks_override=max_tracks_override,
+        min_score_override=min_score_override,
+    )
+    return latest, refresh_summary
+
+
+def _review_states_table(review_state: ReviewStateStore) -> Table:
+    table = Table(title="Review State Store")
+    table.add_column("Item ID", style="cyan")
+    table.add_column("Status", style="magenta")
+    table.add_column("Type", style="green")
+    table.add_column("Snooze Until")
+    table.add_column("Updated")
+    entries = sorted(review_state.items.values(), key=lambda item: item.item_id)
+    if not entries:
+        table.add_row("_None_", "_None_", "_None_", "_None_", "_None_")
+        return table
+    for entry in entries:
+        table.add_row(
+            entry.item_id,
+            entry.status,
+            entry.item_type or "",
+            entry.snooze_until or "",
+            entry.updated_at,
+        )
     return table
 
 
@@ -289,6 +1075,8 @@ def _backend_for_name(name: str) -> AudioBackend:
     if normalized == "dummy":
         return DummyBackend()
     if normalized == "essentia":
+        from nyxcore.audio.backends.essentia_backend import EssentiaBackend
+
         return EssentiaBackend()
     if normalized == "clap":
         from nyxcore.audio.backends.clap_backend import ClapBackend
@@ -497,14 +1285,36 @@ def _safe_console_text(text: str) -> str:
     return text.encode(enc, errors="replace").decode(enc, errors="replace")
 
 
+def _load_app_config(config_path: Path | None, profile: str | None) -> NyxConfig:
+    try:
+        return load_config(config_path, profile=profile)
+    except Exception as exc:
+        raise typer.BadParameter(f"Failed to load config: {exc}") from exc
+
+
+def _config_meta(config: NyxConfig, *sections: str) -> dict:
+    meta = {"active_profile": config.profile}
+    thresholds: dict[str, dict] = {}
+    for section in sections:
+        value = getattr(config, section, None)
+        if value is not None and hasattr(value, "model_dump"):
+            thresholds[section] = value.model_dump()
+    if thresholds:
+        meta["thresholds"] = thresholds
+    return meta
+
+
 @app.command()
 def scan(
     music: Path = typer.Argument(Path("./music"), help="Folder to scan recursively"),
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for reports"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
 ) -> None:
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     ensure_out_dir(out)
+    state_path = state or _default_state_path(out)
     progress = Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -514,21 +1324,710 @@ def scan(
     )
     with progress:
         task = progress.add_task("Scanning MP3 files", total=1)
-
-        def on_progress(done: int, total: int, _: Path) -> None:
-            if progress.tasks[0].total != total:
-                progress.update(task, total=total)
-            progress.update(task, completed=done)
-
-        records, stats = scan_music_folder(music, on_progress=on_progress)
+        records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+        stats = compute_stats(records)
         if not records:
             progress.update(task, total=1, completed=1)
+        else:
+            progress.update(task, total=max(1, len(records)), completed=max(1, refresh_summary.rescanned_files))
 
-    json_path = _write_scan_json(out, music, records, stats)
-    md_path = _write_scan_md(out, stats)
+    json_path = _write_scan_json(out, music, records, stats, refresh_summary=refresh_summary)
+    md_path = _write_scan_md(out, stats, refresh_summary=refresh_summary)
     console.print(_summary_table(stats))
     console.print(f"[green]Wrote:[/green] {json_path}")
     console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("duplicates")
+def duplicates_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for duplicate reports"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    state_path = state or _default_state_path(out)
+    records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    report = build_duplicate_report(records, app_config=app_config)
+    meta = _config_meta(app_config, "duplicates")
+    json_path = _write_duplicates_json(out, music, report, refresh_summary=refresh_summary, config_meta=meta)
+    md_path = _write_duplicates_md(out, report, refresh_summary=refresh_summary, config_meta=meta)
+    console.print(_duplicates_summary_table(report))
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("health")
+def health_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for health reports"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    state_path = state or _default_state_path(out)
+    records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    report = build_duplicate_health_reports(music, records, app_config=app_config).health_report
+    meta = _config_meta(app_config, "health", "duplicates")
+    json_path = _write_health_json(out, music, report, refresh_summary=refresh_summary, config_meta=meta)
+    md_path = _write_health_md(out, report, refresh_summary=refresh_summary, config_meta=meta)
+    console.print(_health_summary_table(report))
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("playlist")
+def playlist_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    query: str = typer.Option(..., "--query", help="Natural-language playlist query"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for playlist query reports"),
+    max_tracks: int | None = typer.Option(None, "--max-tracks", help="Maximum ranked tracks to keep"),
+    min_score: float | None = typer.Option(None, "--min-score", help="Minimum score required for inclusion"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    analysis_cache: Path = typer.Option(
+        Path("data/cache/analysis.sqlite"),
+        "--analysis-cache",
+        help="Optional analysis cache path for BPM/energy/tag enrichment",
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    """Run the current natural-language playlist query workflow."""
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    if max_tracks is not None and max_tracks < 1:
+        raise typer.BadParameter("--max-tracks must be >= 1")
+
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    state_path = state or _default_state_path(out)
+    records, _refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    report = build_playlist_report(
+        records,
+        query=query,
+        settings=app_config.playlist,
+        max_tracks=max_tracks,
+        min_score=min_score,
+        analysis_cache_path=analysis_cache if analysis_cache.exists() else None,
+    )
+    meta = _config_meta(app_config, "playlist")
+    json_path = _write_playlist_json(out, music, report, config_meta=meta)
+    md_path = _write_playlist_md(out, report, config_meta=meta)
+    console.print(_playlist_summary_table(report))
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("save-playlist")
+def save_playlist_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    name: str = typer.Option(..., "--name", help="Human-readable saved playlist name"),
+    query: str = typer.Option(..., "--query", help="Natural-language playlist query"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+    max_tracks: int | None = typer.Option(None, "--max-tracks", help="Optional default max tracks for this saved playlist"),
+    min_score: float | None = typer.Option(None, "--min-score", help="Optional default minimum score for this saved playlist"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    analysis_cache: Path = typer.Option(Path("data/cache/analysis.sqlite"), "--analysis-cache", help="Optional analysis cache path"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+    export_m3u: bool = typer.Option(False, "--export-m3u", help="Export the refreshed saved playlist as M3U"),
+    export_json_tracks: bool = typer.Option(False, "--export-json-tracks", help="Export the refreshed saved playlist as JSON track list"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    if max_tracks is not None and max_tracks < 1:
+        raise typer.BadParameter("--max-tracks must be >= 1")
+    ensure_out_dir(out)
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    app_config = _load_app_config(config, profile)
+    definition = create_saved_playlist_definition(
+        name=name,
+        query=query,
+        profile=app_config.profile,
+        max_tracks=max_tracks,
+        min_score=min_score,
+    )
+    store.playlists[definition.playlist_id] = definition
+    state_path = state or _default_state_path(out)
+    latest, _refresh_summary = _refresh_saved_playlist_definition(
+        music,
+        definition,
+        store_root=store_root,
+        app_config=app_config,
+        incremental=incremental,
+        state_path=state_path,
+        analysis_cache=analysis_cache,
+    )
+    save_saved_playlist_definition(store_root, store)
+    if export_m3u:
+        export_saved_playlist_m3u(store_root, definition.playlist_id, latest)
+    if export_json_tracks:
+        export_saved_playlist_json(store_root, definition.playlist_id, latest)
+    console.print(_saved_playlist_detail_table(definition, latest))
+    console.print(_saved_playlist_diff_table(latest))
+
+
+@app.command("list-playlists")
+def list_playlists_cmd(
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+) -> None:
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    console.print(_saved_playlist_table(sorted(store.playlists.values(), key=lambda item: item.playlist_id)))
+
+
+@app.command("show-playlist")
+def show_playlist_cmd(
+    playlist_id: str = typer.Argument(..., help="Saved playlist id"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+) -> None:
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    definition = store.playlists.get(playlist_id)
+    if definition is None:
+        raise typer.BadParameter(f"Saved playlist not found: {playlist_id}")
+    latest = read_saved_playlist_latest_result(store_root, playlist_id)
+    console.print(_saved_playlist_detail_table(definition, latest))
+    console.print(_saved_playlist_diff_table(latest))
+
+
+@app.command("rename-playlist")
+def rename_playlist_cmd(
+    playlist_id: str = typer.Argument(..., help="Saved playlist id"),
+    name: str = typer.Option(..., "--name", help="New human-readable playlist name"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+) -> None:
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    definition = store.playlists.get(playlist_id)
+    if definition is None:
+        raise typer.BadParameter(f"Saved playlist not found: {playlist_id}")
+    rename_saved_playlist_definition(definition, name=name)
+    save_saved_playlist_definition(store_root, store)
+    latest = read_saved_playlist_latest_result(store_root, playlist_id)
+    console.print(_saved_playlist_detail_table(definition, latest))
+
+
+@app.command("edit-playlist")
+def edit_playlist_cmd(
+    playlist_id: str = typer.Argument(..., help="Saved playlist id"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+    query: str | None = typer.Option(None, "--query", help="Updated natural-language query"),
+    max_tracks: int | None = typer.Option(None, "--max-tracks", help="Updated default max tracks"),
+    clear_max_tracks: bool = typer.Option(False, "--clear-max-tracks", help="Clear the saved max-tracks override"),
+    min_score: float | None = typer.Option(None, "--min-score", help="Updated default minimum score"),
+    clear_min_score: bool = typer.Option(False, "--clear-min-score", help="Clear the saved min-score override"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Updated saved profile"),
+) -> None:
+    if max_tracks is not None and max_tracks < 1:
+        raise typer.BadParameter("--max-tracks must be >= 1")
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    definition = store.playlists.get(playlist_id)
+    if definition is None:
+        raise typer.BadParameter(f"Saved playlist not found: {playlist_id}")
+    resolved_profile = None
+    if profile is not None:
+        resolved_profile = _load_app_config(config, profile).profile
+    edit_saved_playlist_definition(
+        definition,
+        query=query,
+        max_tracks=max_tracks,
+        min_score=min_score,
+        profile=resolved_profile,
+        clear_max_tracks=clear_max_tracks,
+        clear_min_score=clear_min_score,
+    )
+    save_saved_playlist_definition(store_root, store)
+    latest = read_saved_playlist_latest_result(store_root, playlist_id)
+    console.print(_saved_playlist_detail_table(definition, latest))
+    console.print(_saved_playlist_diff_table(latest))
+
+
+@app.command("delete-playlist")
+def delete_playlist_cmd(
+    playlist_id: str = typer.Argument(..., help="Saved playlist id"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+    yes: bool = typer.Option(False, "--yes", help="Confirm deletion of the saved playlist definition and latest result"),
+) -> None:
+    if not yes:
+        raise typer.BadParameter("Deletion requires --yes")
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    deleted = delete_saved_playlist_definition(store_root, store, playlist_id)
+    if deleted is None:
+        raise typer.BadParameter(f"Saved playlist not found: {playlist_id}")
+    save_saved_playlist_definition(store_root, store)
+    console.print(f"[green]Deleted saved playlist:[/green] {playlist_id}")
+
+
+@app.command("refresh-playlist")
+def refresh_playlist_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    playlist_id: str = typer.Argument(..., help="Saved playlist id"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    analysis_cache: Path = typer.Option(Path("data/cache/analysis.sqlite"), "--analysis-cache", help="Optional analysis cache path"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Override the saved playlist profile for this refresh"),
+    max_tracks: int | None = typer.Option(None, "--max-tracks", help="Override max tracks for this refresh"),
+    min_score: float | None = typer.Option(None, "--min-score", help="Override minimum score for this refresh"),
+    export_m3u: bool = typer.Option(False, "--export-m3u", help="Export the refreshed saved playlist as M3U"),
+    export_json_tracks: bool = typer.Option(False, "--export-json-tracks", help="Export the refreshed saved playlist as JSON track list"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    definition = store.playlists.get(playlist_id)
+    if definition is None:
+        raise typer.BadParameter(f"Saved playlist not found: {playlist_id}")
+    app_config = _load_app_config(config, profile or definition.profile)
+    state_path = state or _default_state_path(out)
+    latest, _refresh_summary = _refresh_saved_playlist_definition(
+        music,
+        definition,
+        store_root=store_root,
+        app_config=app_config,
+        incremental=incremental,
+        state_path=state_path,
+        analysis_cache=analysis_cache,
+        profile_override=app_config.profile,
+        max_tracks_override=max_tracks,
+        min_score_override=min_score,
+    )
+    save_saved_playlist_definition(store_root, store)
+    if export_m3u:
+        export_saved_playlist_m3u(store_root, definition.playlist_id, latest)
+    if export_json_tracks:
+        export_saved_playlist_json(store_root, definition.playlist_id, latest)
+    console.print(_saved_playlist_detail_table(definition, latest))
+    console.print(_saved_playlist_diff_table(latest))
+
+
+@app.command("refresh-all-playlists")
+def refresh_all_playlists_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output root for saved playlists"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    analysis_cache: Path = typer.Option(Path("data/cache/analysis.sqlite"), "--analysis-cache", help="Optional analysis cache path"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    export_m3u: bool = typer.Option(False, "--export-m3u", help="Export refreshed playlists as M3U"),
+    export_json_tracks: bool = typer.Option(False, "--export-json-tracks", help="Export refreshed playlists as JSON track lists"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    store_root = _default_saved_playlists_root(out)
+    store = load_saved_playlist_store(store_root)
+    state_path = state or _default_state_path(out)
+    rows: list[tuple[SavedPlaylistDefinition, SavedPlaylistLatestResult]] = []
+    for definition in sorted(store.playlists.values(), key=lambda item: item.playlist_id):
+        app_config = _load_app_config(config, definition.profile)
+        latest, _refresh_summary = _refresh_saved_playlist_definition(
+            music,
+            definition,
+            store_root=store_root,
+            app_config=app_config,
+            incremental=incremental,
+            state_path=state_path,
+            analysis_cache=analysis_cache,
+            profile_override=definition.profile,
+        )
+        if export_m3u:
+            export_saved_playlist_m3u(store_root, definition.playlist_id, latest)
+        if export_json_tracks:
+            export_saved_playlist_json(store_root, definition.playlist_id, latest)
+        rows.append((definition, latest))
+    save_saved_playlist_definition(store_root, store)
+    console.print(_saved_playlist_table([definition for definition, _latest in rows]))
+
+
+@app.command("review")
+def review_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for review queue reports"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
+    max_items: int | None = typer.Option(None, "--max-items", help="Maximum review items to keep"),
+    min_priority: str | None = typer.Option(None, "--min-priority", help="Minimum priority band: low, medium, high"),
+    include_type: list[str] | None = typer.Option(None, "--include-type", help="Repeat to keep only specific item types"),
+    exclude_type: list[str] | None = typer.Option(None, "--exclude-type", help="Repeat to hide specific item types"),
+    include_ignored: bool = typer.Option(False, "--include-ignored", help="Include ignored items in the review output"),
+    include_snoozed: bool = typer.Option(False, "--include-snoozed", help="Include active snoozed items in the review output"),
+    include_resolved: bool = typer.Option(False, "--include-resolved", help="Include resolved items in the review output"),
+    only_unresolved: bool = typer.Option(False, "--only-unresolved", help="Show only new or seen items"),
+    mark_seen: list[str] | None = typer.Option(None, "--mark-seen", help="Repeat to mark one or more review items as seen"),
+    ignore_ids: list[str] | None = typer.Option(None, "--ignore", help="Repeat to ignore one or more review items"),
+    snooze_ids: list[str] | None = typer.Option(None, "--snooze", help="Repeat to snooze one or more review items"),
+    resolve_ids: list[str] | None = typer.Option(None, "--resolve", help="Repeat to mark one or more review items resolved"),
+    days: int | None = typer.Option(None, "--days", help="Snooze duration in days; used with --snooze"),
+    list_states: bool = typer.Option(False, "--list-states", help="Print the persisted review state store"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    if max_items is not None and max_items < 1:
+        raise typer.BadParameter("--max-items must be >= 1")
+    if min_priority is not None and min_priority not in {"low", "medium", "high"}:
+        raise typer.BadParameter("--min-priority must be one of: low, medium, high")
+    include_types = set(include_type or [])
+    exclude_types = set(exclude_type or [])
+    unknown_types = sorted((include_types | exclude_types) - REVIEW_ITEM_TYPES)
+    if unknown_types:
+        raise typer.BadParameter(f"Unknown review item type(s): {', '.join(unknown_types)}")
+    actions = {
+        "seen": list(mark_seen or []),
+        "ignored": list(ignore_ids or []),
+        "snoozed": list(snooze_ids or []),
+        "resolved": list(resolve_ids or []),
+    }
+    active_actions = [name for name, ids in actions.items() if ids]
+    if len(active_actions) > 1:
+        raise typer.BadParameter("Use only one review-state action at a time")
+    if snooze_ids and (days is None or days < 1):
+        raise typer.BadParameter("--snooze requires --days >= 1")
+    if days is not None and not snooze_ids:
+        raise typer.BadParameter("--days is only valid with --snooze")
+
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    state_path = state or _default_state_path(out)
+    review_state_path = review_state or _default_review_state_path(out)
+    review_state_store = load_review_state(review_state_path)
+    records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    full_report = _build_review_report(
+        music,
+        records,
+        refresh_summary=refresh_summary,
+        app_config=app_config,
+        review_state_store=review_state_store,
+        max_items=None,
+        min_priority=None,
+        include_types=None,
+        exclude_types=None,
+        include_ignored=True,
+        include_snoozed=True,
+        include_resolved=True,
+        only_unresolved=False,
+    )
+    if active_actions:
+        action_name = active_actions[0]
+        target_ids = actions[action_name]
+        known_ids = {item.item_id for item in full_report.items} | set(review_state_store.items)
+        missing_ids = sorted(item_id for item_id in target_ids if item_id not in known_ids)
+        if missing_ids:
+            raise typer.BadParameter(f"Unknown review item id(s): {', '.join(missing_ids)}")
+        item_type_by_id = {item.item_id: item.item_type for item in full_report.items}
+        summary_by_id = {item.item_id: item.summary for item in full_report.items}
+        apply_review_action(
+            review_state_store,
+            item_ids=target_ids,
+            status=action_name,
+            days=days,
+            item_type_by_id=item_type_by_id,
+            summary_by_id=summary_by_id,
+        )
+        save_review_state(review_state_path, review_state_store)
+        full_report = _build_review_report(
+            music,
+            records,
+            refresh_summary=refresh_summary,
+            app_config=app_config,
+            review_state_store=review_state_store,
+            max_items=None,
+            min_priority=None,
+            include_types=None,
+            exclude_types=None,
+            include_ignored=True,
+            include_snoozed=True,
+            include_resolved=True,
+            only_unresolved=False,
+        )
+    else:
+        save_review_state(review_state_path, review_state_store)
+
+    if list_states:
+        console.print(_review_states_table(review_state_store))
+
+    report = _build_review_report(
+        music,
+        records,
+        refresh_summary=refresh_summary,
+        app_config=app_config,
+        review_state_store=review_state_store,
+        max_items=max_items,
+        min_priority=min_priority,
+        include_types=include_types or None,
+        exclude_types=exclude_types or None,
+        include_ignored=include_ignored,
+        include_snoozed=include_snoozed,
+        include_resolved=include_resolved,
+        only_unresolved=only_unresolved,
+    )
+    meta = _config_meta(app_config, "review", "health", "duplicates")
+    json_path = _write_review_json(out, music, report, refresh_summary=refresh_summary, config_meta=meta)
+    md_path = _write_review_md(out, report, refresh_summary=refresh_summary, config_meta=meta)
+    console.print(_review_summary_table(report))
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("review-plan")
+def review_plan_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    item_id: list[str] | None = typer.Option(None, "--item-id", help="Repeat to select one or more review item ids"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for review plan reports"),
+    incremental: bool = typer.Option(False, "--incremental", help="Reuse cached scan records for unchanged files"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    selected_ids = list(item_id or [])
+    if not selected_ids:
+        raise typer.BadParameter("Provide at least one --item-id")
+
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    state_path = state or _default_state_path(out)
+    review_state_path = review_state or _default_review_state_path(out)
+    review_state_store = load_review_state(review_state_path)
+    records, refresh_summary = _load_library_records(music, incremental=incremental, state_path=state_path)
+    review_report = _build_review_report(
+        music,
+        records,
+        refresh_summary=refresh_summary,
+        app_config=app_config,
+        review_state_store=review_state_store,
+        max_items=None,
+        min_priority=None,
+        include_types=None,
+        exclude_types=None,
+        include_ignored=True,
+        include_snoozed=True,
+        include_resolved=True,
+        only_unresolved=False,
+    )
+    plan_report = build_action_plan_report(music, records, review_report, source_review_item_ids=selected_ids)
+    meta = _config_meta(app_config, "review", "health", "duplicates")
+    json_path = _write_action_plan_json(out, music, plan_report, config_meta=meta)
+    md_path = _write_action_plan_md(out, plan_report, config_meta=meta)
+    console.print(_action_plan_summary_table(plan_report))
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("apply-review-plan")
+def apply_review_plan_cmd(
+    plan: Path = typer.Argument(..., help="Path to review_plan.json"),
+    out: Path | None = typer.Option(None, "--out", help="Output folder for apply result reports"),
+    review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+    backup_dir: Path | None = typer.Option(None, "--backup-dir", help="Optional backup directory for low-risk file writes"),
+) -> None:
+    if not plan.exists():
+        raise typer.BadParameter(f"Plan file does not exist: {plan}")
+    plan_payload = json.loads(plan.read_text(encoding="utf-8"))
+    report = ActionPlanReport.from_dict(plan_payload)
+    output_dir = out or plan.parent
+    ensure_out_dir(output_dir)
+    review_state_path = review_state or _default_review_state_path(output_dir)
+    history_path = history or _default_history_path(output_dir)
+    review_state_store = load_review_state(review_state_path)
+    results = apply_action_plan_report(report, review_state=review_state_store, backup_dir=backup_dir)
+    save_review_state(review_state_path, review_state_store)
+    ledger = load_operation_ledger(history_path)
+    batch = append_operation_batch(ledger, plan_report=report, results=results)
+    save_operation_ledger(history_path, ledger)
+    json_path = _write_applied_plan_json(output_dir, results)
+    md_path = _write_applied_plan_md(output_dir, results)
+    table = Table(title="Applied Review Plan Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="magenta")
+    table.add_row("Plans", str(len(results)))
+    table.add_row("Successful", str(sum(1 for item in results if item.status == "ok")))
+    table.add_row("Partial failure", str(sum(1 for item in results if item.status == "partial_failure")))
+    table.add_row("Skipped", str(sum(1 for item in results if item.status == "skipped")))
+    table.add_row("History batch", batch.batch_id)
+    console.print(table)
+    console.print(f"[green]Wrote:[/green] {json_path}")
+    console.print(f"[green]Wrote:[/green] {md_path}")
+
+
+@app.command("history")
+def history_cmd(
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+) -> None:
+    history_path = history or _default_history_path(out)
+    ledger = load_operation_ledger(history_path)
+    console.print(_history_table(ledger))
+
+
+@app.command("show-history")
+def show_history_cmd(
+    batch_id: str = typer.Argument(..., help="History batch id"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+) -> None:
+    history_path = history or _default_history_path(out)
+    ledger = load_operation_ledger(history_path)
+    batch = find_batch(ledger, batch_id)
+    if batch is None:
+        raise typer.BadParameter(f"History batch not found: {batch_id}")
+    console.print(_history_detail_table(batch))
+
+
+def _restore_or_undo_history_batch(
+    *,
+    batch_id: str,
+    out: Path,
+    history: Path | None,
+    review_state: Path | None,
+    alternate_restore_dir: Path | None,
+    target_path: str | None,
+) -> None:
+    history_path = history or _default_history_path(out)
+    review_state_path = review_state or _default_review_state_path(out)
+    ledger = load_operation_ledger(history_path)
+    batch = find_batch(ledger, batch_id)
+    if batch is None:
+        raise typer.BadParameter(f"History batch not found: {batch_id}")
+    review_state_store = load_review_state(review_state_path)
+    undo_operation_batch(
+        batch,
+        review_state=review_state_store,
+        alternate_restore_dir=alternate_restore_dir,
+        target_path=target_path,
+    )
+    save_review_state(review_state_path, review_state_store)
+    save_operation_ledger(history_path, ledger)
+    console.print(_history_detail_table(batch))
+
+
+@app.command("restore-review-action")
+def restore_review_action_cmd(
+    batch_id: str = typer.Argument(..., help="History batch id to restore"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+    review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
+    alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
+    target_path: str | None = typer.Option(None, "--target-path", help="Restore only one recorded path from the batch"),
+) -> None:
+    """Restore a recorded history batch using the reversible operation ledger."""
+    _restore_or_undo_history_batch(
+        batch_id=batch_id,
+        out=out,
+        history=history,
+        review_state=review_state,
+        alternate_restore_dir=alternate_restore_dir,
+        target_path=target_path,
+    )
+
+
+@app.command("undo-review-action")
+def undo_review_action_cmd(
+    batch_id: str = typer.Argument(..., help="History batch id to undo"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+    review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
+    alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
+    target_path: str | None = typer.Option(None, "--target-path", help="Undo only one recorded path from the batch"),
+) -> None:
+    """Compatibility alias for the same history-batch reversal path."""
+    _restore_or_undo_history_batch(
+        batch_id=batch_id,
+        out=out,
+        history=history,
+        review_state=review_state,
+        alternate_restore_dir=alternate_restore_dir,
+        target_path=target_path,
+    )
+
+
+@app.command("watch")
+def watch_cmd(
+    music: Path = typer.Argument(Path("./music"), help="Music root folder"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for refreshed reports"),
+    state: Path | None = typer.Option(None, "--state", help="Path to incremental scan state file"),
+    interval: float | None = typer.Option(None, "--interval", help="Polling interval in seconds"),
+    once: bool = typer.Option(False, "--once", help="Run a single incremental refresh and exit"),
+    cycles: int | None = typer.Option(None, "--cycles", help="Optional number of poll cycles to run"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    if cycles is not None and cycles < 1:
+        raise typer.BadParameter("--cycles must be >= 1")
+
+    ensure_out_dir(out)
+    app_config = _load_app_config(config, profile)
+    interval = app_config.watch.default_interval_seconds if interval is None else interval
+    if interval < 0.2:
+        raise typer.BadParameter("--interval must be >= 0.2 seconds")
+    state_path = state or _default_state_path(out)
+    max_cycles = 1 if once else cycles
+
+    def _on_refresh(result: RefreshSummary, records: list[TrackRecord]) -> None:
+        review_state_path = _default_review_state_path(out)
+        review_state_store = load_review_state(review_state_path)
+        pipeline = build_review_pipeline(
+            music,
+            records,
+            app_config=app_config,
+            review_state=review_state_store,
+            generation_mode=result.mode,
+        )
+        scan_stats = compute_stats(records)
+        _write_scan_json(out, music, records, scan_stats, refresh_summary=result)
+        _write_scan_md(out, scan_stats, refresh_summary=result)
+        duplicate_meta = _config_meta(app_config, "duplicates")
+        health_meta = _config_meta(app_config, "health", "duplicates")
+        review_meta = _config_meta(app_config, "review", "health", "duplicates")
+        _write_duplicates_json(out, music, pipeline.duplicate_report, refresh_summary=result, config_meta=duplicate_meta)
+        _write_duplicates_md(out, pipeline.duplicate_report, refresh_summary=result, config_meta=duplicate_meta)
+        _write_health_json(out, music, pipeline.health_report, refresh_summary=result, config_meta=health_meta)
+        _write_health_md(out, pipeline.health_report, refresh_summary=result, config_meta=health_meta)
+        save_review_state(review_state_path, review_state_store)
+        _write_review_json(out, music, pipeline.review_report, refresh_summary=result, config_meta=review_meta)
+        _write_review_md(out, pipeline.review_report, refresh_summary=result, config_meta=review_meta)
+        console.print(
+            f"[cyan]refresh={result.mode}[/cyan] added={len(result.changes.added_files)} "
+            f"modified={len(result.changes.modified_files)} removed={len(result.changes.removed_files)} "
+            f"unchanged={len(result.changes.unchanged_files)} rescanned={result.rescanned_files}"
+        )
+
+    def _callback(result_obj) -> None:
+        _on_refresh(result_obj.summary, result_obj.records)
+
+    watch_incremental_state(
+        music,
+        state_path,
+        interval_seconds=interval,
+        max_cycles=max_cycles,
+        on_refresh=_callback,
+    )
 
 
 @app.command()
@@ -692,7 +2191,7 @@ def rename_cmd(
         raise typer.BadParameter("--concurrency must be between 1 and 20")
 
     ensure_out_dir(out)
-    files = sorted(iter_mp3_files(music))
+    files = iter_library_audio_files(music)
     if limit > 0:
         files = files[:limit]
 
@@ -1012,7 +2511,12 @@ def judge(
     music: Path = typer.Argument(Path("./music"), help="Music root folder"),
     analysis: Path = typer.Option(..., "--analysis", help="Path to analysis_preview.jsonl"),
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder for judge reports"),
-    config: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", help="Path to YAML config"),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        help="Path to YAML config (defaults to the packaged nyxcore config)",
+    ),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
     provider: str = typer.Option("deepseek", "--provider", help="LLM provider"),
     model: str = typer.Option(
         "deepseek-chat",
@@ -1033,13 +2537,8 @@ def judge(
         raise typer.BadParameter("Use model deepseek-chat or deepseek-reasoner for DeepSeek judge")
     if limit < 0:
         raise typer.BadParameter("--limit must be >= 0")
-    if not config.exists():
-        raise typer.BadParameter(f"Config file does not exist: {config}")
 
-    try:
-        app_config = load_config(config)
-    except Exception as exc:
-        raise typer.BadParameter(f"Failed to load config: {exc}") from exc
+    app_config = _load_app_config(config, profile)
 
     if concurrency is None:
         concurrency = app_config.judge.concurrency_default
@@ -1250,6 +2749,18 @@ def judge(
     console.print(f"[green]Wrote:[/green] {summary_path}")
 
 
+def _select_preview_rows_by_confidence(input_rows: list[dict], *, min_confidence: float | None) -> tuple[list[dict], int]:
+    selected: list[dict] = []
+    skipped_confidence = 0
+    for row in input_rows:
+        confidence = row.get("confidence")
+        if min_confidence is not None and confidence is not None and float(confidence) < min_confidence:
+            skipped_confidence += 1
+            continue
+        selected.append(row)
+    return selected, skipped_confidence
+
+
 @app.command("apply-ai")
 def apply_ai(
     music: Path = typer.Argument(Path("./music"), help="Music root folder"),
@@ -1277,15 +2788,7 @@ def apply_ai(
     reports_dir = in_.parent
     ensure_out_dir(reports_dir)
     log_path = reports_dir / "apply_ai_log.jsonl"
-
-    selected: list[dict] = []
-    skipped_confidence = 0
-    for row in input_rows:
-        conf = row.get("confidence")
-        if min_confidence is not None and conf is not None and float(conf) < min_confidence:
-            skipped_confidence += 1
-            continue
-        selected.append(row)
+    selected, skipped_confidence = _select_preview_rows_by_confidence(input_rows, min_confidence=min_confidence)
 
     succeeded = 0
     failed = 0
@@ -1410,15 +2913,7 @@ def apply_judge(
     reports_dir = in_.parent
     ensure_out_dir(reports_dir)
     log_path = reports_dir / "apply_judge_log.jsonl"
-
-    selected: list[dict] = []
-    skipped_confidence = 0
-    for row in input_rows:
-        conf = row.get("confidence")
-        if min_confidence is not None and conf is not None and float(conf) < min_confidence:
-            skipped_confidence += 1
-            continue
-        selected.append(row)
+    selected, skipped_confidence = _select_preview_rows_by_confidence(input_rows, min_confidence=min_confidence)
 
     succeeded = 0
     failed = 0
@@ -1525,6 +3020,7 @@ def playlists(
         help="Input analysis preview jsonl (used if --from-cache is not set)",
     ),
 ) -> None:
+    """Legacy bucketed M3U export. Prefer `playlist` and saved-playlist commands for current workflows."""
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     ensure_out_dir(out)
