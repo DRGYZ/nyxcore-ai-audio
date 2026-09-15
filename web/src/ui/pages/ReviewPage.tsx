@@ -171,11 +171,19 @@ export function ReviewPage() {
   const selectedOperations = selectedOperationIds.size;
   const busy = reviewMutation.isPending || planMutation.isPending || applyPlanMutation.isPending || checking;
 
+  const highCount = items.filter((item) => item.priority_band === "high").length;
+  const mediumCount = items.filter((item) => item.priority_band === "medium").length;
+  const lowCount = items.filter((item) => item.priority_band === "low").length;
+
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Review Findings"
-        title="Review Inbox"
+        eyebrow={`AUDIT STAGE 01 — ${report.items.length} FINDINGS RECORDED`}
+        title={
+          <span>
+            Review Inbox <span className="font-editorial text-xl font-normal italic text-primary-subtle">precision triage</span>
+          </span>
+        }
         description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
         actions={
           <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
@@ -203,23 +211,36 @@ export function ReviewPage() {
       <SplitScreen
         main={
           <div className="space-y-4">
-            <Panel className="flex flex-wrap items-center gap-4 px-5 py-3">
+            <Panel className="flex flex-wrap items-center gap-3.5 px-4 py-2.5">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Priority</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {["all", "high", "medium", "low"].map((value) => (
-                    <button key={value} type="button" onClick={() => setPriority(value)}>
-                      <Chip tone={value === "high" ? "danger" : value === "medium" ? "warning" : "neutral"} active={priority === value}>
-                        {value}
-                      </Chip>
-                    </button>
-                  ))}
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Priority</span>
+                <div className="flex flex-wrap gap-1">
+                  <button type="button" onClick={() => setPriority("all")}>
+                    <Chip tone="neutral" active={priority === "all"}>
+                      All
+                    </Chip>
+                  </button>
+                  <button type="button" onClick={() => setPriority("high")}>
+                    <Chip tone="danger" active={priority === "high"}>
+                      High ({highCount})
+                    </Chip>
+                  </button>
+                  <button type="button" onClick={() => setPriority("medium")}>
+                    <Chip tone="warning" active={priority === "medium"}>
+                      Med ({mediumCount})
+                    </Chip>
+                  </button>
+                  <button type="button" onClick={() => setPriority("low")}>
+                    <Chip tone="neutral" active={priority === "low"}>
+                      Low ({lowCount})
+                    </Chip>
+                  </button>
                 </div>
               </div>
-              <div className="hidden h-4 w-px bg-border lg:block" />
+              <div className="hidden h-3.5 w-px bg-white/[0.08] lg:block" />
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Status</span>
-                <div className="flex flex-wrap gap-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Status</span>
+                <div className="flex flex-wrap gap-1">
                   {REVIEW_STATUS_FILTERS.map(({ value, label }) => (
                     <button key={value} type="button" onClick={() => setStatus(value)}>
                       <Chip
@@ -232,15 +253,15 @@ export function ReviewPage() {
                   ))}
                 </div>
               </div>
-              <div className="hidden h-4 w-px bg-border lg:block" />
+              <div className="hidden h-3.5 w-px bg-white/[0.08] lg:block" />
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Type</span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Type</span>
                 <select
-                  className="border border-border bg-surface px-2.5 py-1 font-mono text-xs uppercase tracking-wider text-primary outline-none focus:border-accent"
+                  className="rounded-[3px] border border-white/[0.08] bg-surface px-2 py-1 font-sans text-xs text-primary outline-none focus:border-accent/50"
                   value={itemType}
                   onChange={(event) => setItemType(event.target.value)}
                 >
-                  <option value="all">All</option>
+                  <option value="all">All Types</option>
                   {[...new Set(report.items.map((item) => item.item_type))].map((value) => (
                     <option key={value} value={value}>
                       {value}
@@ -249,7 +270,7 @@ export function ReviewPage() {
                 </select>
               </div>
               <div className="ml-auto font-mono text-[10px] text-primary-subtle">
-                {filtered.length} visible / {report.items.length} total
+                {filtered.length} / {report.items.length} findings
               </div>
             </Panel>
 
@@ -273,18 +294,17 @@ export function ReviewPage() {
             ) : (
               <Panel className="overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left">
-                    <thead className="border-b border-border bg-surface-low">
-                      <tr className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
-                        <th className="px-4 py-3">Priority</th>
-                        <th className="px-4 py-3">Item Type</th>
-                        <th className="px-4 py-3">Score</th>
-                        <th className="px-4 py-3">Summary</th>
-                        <th className="px-4 py-3">State</th>
-                        <th className="px-4 py-3 text-right">Inspect</th>
+                  <table className="w-full min-w-[720px] text-left">
+                    <thead className="border-b border-white/[0.07] bg-surface-low/80">
+                      <tr className="font-sans text-[11px] font-medium text-primary-subtle">
+                        <th className="px-4 py-2.5 w-24">Priority</th>
+                        <th className="px-4 py-2.5">Finding Descriptor</th>
+                        <th className="px-4 py-2.5 w-24">Score</th>
+                        <th className="px-4 py-2.5 w-28">State</th>
+                        <th className="px-4 py-2.5 text-right w-12" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody className="divide-y divide-white/[0.04]">
                       {filtered.map((item) => {
                         const active = selected?.item_id === item.item_id;
                         return (
@@ -292,29 +312,44 @@ export function ReviewPage() {
                             key={item.item_id}
                             onClick={() => selectById(item.item_id)}
                             className={`cursor-pointer transition-colors ${
-                              active ? "border-l-2 border-l-accent bg-accent/5" : "hover:bg-surface-low"
+                              active
+                                ? "border-l-2 border-l-accent bg-surface-high"
+                                : "border-l-2 border-l-transparent hover:bg-white/[0.02]"
                             }`}
                           >
-                            <td className="px-4 py-3.5">
+                            <td className="px-4 py-3">
                               <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                             </td>
-                            <td className="px-4 py-3.5 font-mono text-xs text-primary-muted">{item.item_type}</td>
-                            <td className="px-4 py-3.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-16">
-                                  <ProgressBar value={item.priority_score} />
+                            <td className="px-4 py-3">
+                              <div className="min-w-0 max-w-xl">
+                                <div className="flex items-center gap-2">
+                                  <span className={`font-sans text-xs ${active ? "text-primary font-medium" : "text-primary/90"}`}>
+                                    {item.summary}
+                                  </span>
+                                  <span className="font-mono text-[9px] text-primary-subtle/80 rounded-[2px] bg-white/[0.03] px-1.5 py-0.5 border border-white/[0.05]">
+                                    {item.item_type}
+                                  </span>
                                 </div>
-                                <span className="font-mono text-xs font-bold text-primary">{item.priority_score}</span>
+                                {item.reason_summary ? (
+                                  <p className="mt-0.5 truncate font-editorial text-[11px] italic text-primary-subtle">
+                                    {item.reason_summary}
+                                  </p>
+                                ) : null}
                               </div>
                             </td>
-                            <td className="px-4 py-3.5">
-                              <span className={`block max-w-[28rem] truncate font-mono text-xs ${active ? "text-primary font-semibold" : "text-primary-muted"}`}>{item.summary}</span>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-semibold text-primary">{item.priority_score.toFixed(0)}</span>
+                                <div className="w-12 hidden sm:block">
+                                  <ProgressBar value={item.priority_score} />
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-4 py-3.5">
+                            <td className="px-4 py-3">
                               <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
                             </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span className={`inline-flex p-1 ${active ? "text-accent" : "text-primary-subtle"}`}>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`inline-flex p-0.5 ${active ? "text-accent" : "text-primary-subtle/60"}`}>
                                 <Icon name="chevron_right" className="text-base" />
                               </span>
                             </td>
@@ -323,6 +358,10 @@ export function ReviewPage() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex items-center justify-between border-t border-white/[0.05] bg-surface-low/40 px-4 py-2 font-mono text-[10px] text-primary-subtle">
+                  <span>{filtered.length} visible / {report.items.length} total findings</span>
+                  <span>Sorted by Priority Score (Descending)</span>
                 </div>
               </Panel>
             )}

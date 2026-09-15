@@ -12,6 +12,7 @@ import {
   ActionBanner,
   ApiUnavailableState,
   Button,
+  Chip,
   DataTable,
   EmptyState,
   Icon,
@@ -118,7 +119,7 @@ export function DashboardPage() {
         title="Overview"
         description="Local music library overview, review priorities, duplicate findings, and recent operations."
         actions={
-          <Button tone="primary" onClick={() => void handleRefresh()} disabled={refreshing}>
+          <Button tone="secondary" onClick={() => void handleRefresh()} disabled={refreshing}>
             <Icon name="refresh" className={`text-base ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Refreshing…" : "Refresh Overview"}
           </Button>
@@ -128,13 +129,13 @@ export function DashboardPage() {
       {refreshNotice ? <ActionBanner tone={refreshNotice.tone} message={refreshNotice.message} /> : null}
 
       {/* 4 Focused Metrics */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Library Files"
           value={formatNumber(health.overview.total_audio_files)}
           icon="audio_file"
           meta={
-            <p className="truncate font-mono text-xs text-primary-muted">
+            <p className="truncate font-mono text-[11px] text-primary-subtle">
               {status?.music_path ? status.music_path : `${formatNumber(health.overview.total_folders_touched)} folders scanned`}
             </p>
           }
@@ -145,49 +146,52 @@ export function DashboardPage() {
           icon="inbox"
           accent={
             actionableReviewItems.length > 0 ? (
-              <span className="border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-rose-400">
-                Actionable
-              </span>
+              <Chip tone="danger">Actionable</Chip>
             ) : undefined
           }
-          meta={<p className="font-mono text-xs text-primary-muted">{review.items.length} total findings recorded</p>}
+          meta={<p className="font-mono text-[11px] text-primary-subtle">{review.items.length} total findings recorded</p>}
         />
         <MetricCard
-          label="Duplicate Findings"
+          label="Duplicate Sets"
           value={formatNumber(duplicates.summary.exact_group_count)}
           icon="copy_all"
           meta={
-            <p className="font-mono text-xs text-primary-muted">
-              Exact: <span className="font-bold text-primary">{duplicates.summary.exact_group_count}</span> • Likely: <span className="font-bold text-amber-400">{duplicates.summary.likely_group_count}</span>
+            <p className="font-mono text-[11px] text-primary-subtle">
+              Exact: <span className="font-semibold text-primary">{duplicates.summary.exact_group_count}</span> • Likely: <span className="font-semibold text-amber-400">{duplicates.summary.likely_group_count}</span>
             </p>
           }
         />
         <MetricCard
-          label="Health Findings"
+          label="Health Issues"
           value={formatNumber(missingTagsCount + unreadableCount)}
           icon="health_and_safety"
           meta={
-            <p className="font-mono text-xs text-primary-muted">
+            <p className="font-mono text-[11px] text-primary-subtle">
               Artwork: {health.artwork.coverage_percent.toFixed(0)}% • Unreadable: {unreadableCount}
             </p>
           }
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         {/* Left 2 Cols: Priority Review + Recent History */}
-        <div className="space-y-8 xl:col-span-2">
-          <Panel className="p-6">
-            <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
-              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
-                <Icon name="inbox" className="text-base text-accent" />
-                Priority Review
-              </h2>
+        <div className="space-y-6 xl:col-span-2">
+          <Panel className="p-5">
+            <div className="mb-4 flex items-center justify-between border-b border-white/[0.07] pb-4">
+              <div>
+                <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
+                  <Icon name="inbox" className="text-base text-accent" />
+                  Priority Review Stream
+                </h2>
+                <p className="mt-0.5 font-editorial text-xs italic text-primary-subtle">
+                  High-leverage issues requiring operator decision
+                </p>
+              </div>
               <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/review")}>
-                Open Review Inbox
+                Open Inbox →
               </Button>
             </div>
-            <div className="space-y-2">
+            <div>
               {actionableReviewItems.length === 0 ? (
                 <EmptyState
                   title={review.items.length === 0 ? "No review findings" : "No active review findings"}
@@ -198,39 +202,53 @@ export function DashboardPage() {
                   }
                 />
               ) : (
-                actionableReviewItems.slice(0, 4).map((item) => (
-                  <div
-                    key={item.item_id}
-                    onClick={() => navigate(`/review?item=${encodeURIComponent(item.item_id)}`)}
-                    className="flex cursor-pointer items-center justify-between gap-4 border border-border bg-surface-low px-4 py-3 transition-colors hover:border-border-bright"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex size-8 shrink-0 items-center justify-center border border-border bg-surface text-accent">
-                        <Icon name="priority_high" className="text-sm" />
+                <div className="divide-y divide-white/[0.05]">
+                  {actionableReviewItems.slice(0, 4).map((item) => (
+                    <div
+                      key={item.item_id}
+                      onClick={() => navigate(`/review?item=${encodeURIComponent(item.item_id)}`)}
+                      className="group -mx-2 flex cursor-pointer items-center justify-between gap-4 rounded-[3px] px-3 py-3 transition-colors hover:bg-surface-raised/80"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Chip
+                          tone={item.priority_band === "high" ? "danger" : item.priority_band === "medium" ? "warning" : "default"}
+                          className="shrink-0"
+                        >
+                          {item.priority_band}
+                        </Chip>
+                        <div className="min-w-0">
+                          <p className="truncate font-sans text-xs font-medium text-primary transition-colors group-hover:text-accent">
+                            {item.summary}
+                          </p>
+                          <p className="truncate font-editorial text-xs italic text-primary-subtle">
+                            {item.reason_summary}
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-primary">{item.summary}</p>
-                        <p className="truncate font-mono text-[10px] text-primary-subtle">{item.reason_summary}</p>
+                      <div className="flex shrink-0 items-center gap-4">
+                        <span className="font-mono text-xs text-primary-subtle">Score {item.priority_score}</span>
+                        <span className="font-sans text-xs text-primary-subtle transition-colors group-hover:text-accent">
+                          Inspect →
+                        </span>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="font-mono text-xs text-primary-muted">Score: {item.priority_score}</span>
-                      <span className="border border-accent/40 bg-accent/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-accent">
-                        {item.priority_band}
-                      </span>
-                    </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           </Panel>
 
           <Panel className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
-                <Icon name="history" className="text-base text-accent" />
-                Recent Operations
-              </h2>
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
+                  <Icon name="history" className="text-base text-accent" />
+                  Recent Operations
+                </h2>
+                <p className="mt-0.5 font-editorial text-xs italic text-primary-subtle">
+                  Batches committed to the local ledger
+                </p>
+              </div>
               <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/history")}>
                 View History
               </Button>
@@ -249,14 +267,12 @@ export function DashboardPage() {
                     batch.action_types.join(", "),
                     formatDate(batch.applied_at),
                     formatNumber(batch.affected_count),
-                    <span
+                    <Chip
                       key={batch.batch_id}
-                      className={`border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
-                        batch.reversible ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" : "border-amber-500/40 bg-amber-500/10 text-amber-400"
-                      }`}
+                      tone={batch.reversible ? "success" : "warning"}
                     >
-                      {batch.reversible ? "reversible" : "mixed"}
-                    </span>,
+                      {batch.reversible ? "Reversible" : "Mixed"}
+                    </Chip>,
                   ])}
                 />
               )}
@@ -265,10 +281,10 @@ export function DashboardPage() {
         </div>
 
         {/* Right Col: Health Breakdown & Quick Inspection */}
-        <div className="space-y-8">
-          <Panel className="p-6">
-            <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
-              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
+        <div className="space-y-6">
+          <Panel className="p-5">
+            <div className="mb-4 flex items-center justify-between border-b border-white/[0.07] pb-3.5">
+              <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
                 <Icon name="health_and_safety" className="text-base text-accent" />
                 Library Health
               </h2>
@@ -278,35 +294,35 @@ export function DashboardPage() {
             </div>
             <div className="space-y-4">
               <div>
-                <div className="mb-2 flex items-center justify-between font-mono text-xs">
-                  <span className="text-primary-muted">Artwork Coverage</span>
-                  <span className="font-bold text-accent">{health.artwork.coverage_percent.toFixed(1)}%</span>
+                <div className="mb-2 flex items-center justify-between font-sans text-xs">
+                  <span className="text-primary-subtle">Artwork Coverage</span>
+                  <span className="font-semibold text-accent">{health.artwork.coverage_percent.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={health.artwork.coverage_percent} />
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between font-mono text-xs">
-                  <span className="text-primary-muted">Lossless Files Share</span>
-                  <span className="font-bold text-primary">{losslessRatio.toFixed(1)}%</span>
+                <div className="mb-2 flex items-center justify-between font-sans text-xs">
+                  <span className="text-primary-subtle">Lossless Files Share</span>
+                  <span className="font-semibold text-primary">{losslessRatio.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={losslessRatio} tone="violet" />
               </div>
 
-              <div className="mt-4 border-t border-border pt-4 space-y-2.5">
-                <div className="flex justify-between font-mono text-xs">
-                  <span className="text-primary-muted">Missing Artist / Title / Album</span>
-                  <span className="font-bold text-primary">{formatNumber(missingTagsCount)}</span>
+              <div className="mt-4 space-y-2 border-t border-white/[0.06] pt-3.5">
+                <div className="flex justify-between font-sans text-xs">
+                  <span className="text-primary-subtle">Missing Artist / Title / Album</span>
+                  <span className="font-mono text-primary">{formatNumber(missingTagsCount)}</span>
                 </div>
-                <div className="flex justify-between font-mono text-xs">
-                  <span className="text-primary-muted">Unreadable / Unparseable</span>
-                  <span className={`font-bold ${unreadableCount > 0 ? "text-rose-400" : "text-primary"}`}>
+                <div className="flex justify-between font-sans text-xs">
+                  <span className="text-primary-subtle">Unreadable / Unparseable</span>
+                  <span className={`font-mono ${unreadableCount > 0 ? "text-rose-400 font-semibold" : "text-primary"}`}>
                     {formatNumber(unreadableCount)}
                   </span>
                 </div>
-                <div className="flex justify-between font-mono text-xs">
-                  <span className="text-primary-muted">Placeholder Metadata</span>
-                  <span className="font-bold text-primary">
+                <div className="flex justify-between font-sans text-xs">
+                  <span className="text-primary-subtle">Placeholder Metadata</span>
+                  <span className="font-mono text-primary">
                     {formatNumber(health.metadata.placeholder_metadata.count)}
                   </span>
                 </div>
@@ -314,60 +330,60 @@ export function DashboardPage() {
             </div>
           </Panel>
 
-          <Panel className="p-6">
-            <h3 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
+          <Panel className="p-5">
+            <h3 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">
               Inspect Next
             </h3>
             <div className="space-y-1.5">
               <Link
                 to="/review"
-                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
+                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
               >
-                <div className="flex items-center gap-3">
-                  <Icon name="inbox" className="text-accent text-sm" />
+                <div className="flex items-center gap-2.5">
+                  <Icon name="inbox" className="text-sm text-accent" />
                   <span>Review Inbox</span>
                 </div>
-                <span className="font-bold text-accent">{actionableReviewItems.length}</span>
+                <span className="font-mono font-semibold text-accent">{actionableReviewItems.length}</span>
               </Link>
               <Link
                 to="/duplicates"
-                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
+                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
               >
-                <div className="flex items-center gap-3">
-                  <Icon name="copy_all" className="text-accent text-sm" />
+                <div className="flex items-center gap-2.5">
+                  <Icon name="copy_all" className="text-sm text-accent" />
                   <span>Duplicates</span>
                 </div>
-                <span className="text-primary-subtle">{duplicates.summary.exact_group_count} exact</span>
+                <span className="font-mono text-primary-subtle">{duplicates.summary.exact_group_count} exact</span>
               </Link>
               <Link
                 to="/health"
-                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
+                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
               >
-                <div className="flex items-center gap-3">
-                  <Icon name="health_and_safety" className="text-accent text-sm" />
+                <div className="flex items-center gap-2.5">
+                  <Icon name="health_and_safety" className="text-sm text-accent" />
                   <span>Library Health</span>
                 </div>
-                <span className="text-primary-subtle">{missingTagsCount} tags</span>
+                <span className="font-mono text-primary-subtle">{missingTagsCount} tags</span>
               </Link>
               <Link
                 to="/history"
-                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
+                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
               >
-                <div className="flex items-center gap-3">
-                  <Icon name="history" className="text-accent text-sm" />
+                <div className="flex items-center gap-2.5">
+                  <Icon name="history" className="text-sm text-accent" />
                   <span>Operation History</span>
                 </div>
-                <span className="text-primary-subtle">{history.items.length} batches</span>
+                <span className="font-mono text-primary-subtle">{history.items.length} batches</span>
               </Link>
               <Link
                 to="/search"
-                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
+                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
               >
-                <div className="flex items-center gap-3">
-                  <Icon name="manage_search" className="text-accent text-sm" />
+                <div className="flex items-center gap-2.5">
+                  <Icon name="manage_search" className="text-sm text-accent" />
                   <span>Archive Search</span>
                 </div>
-                <span className="text-primary-subtle">Lookup</span>
+                <span className="font-mono text-primary-subtle">Lookup</span>
               </Link>
             </div>
           </Panel>

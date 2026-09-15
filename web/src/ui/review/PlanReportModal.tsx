@@ -79,15 +79,15 @@ function PlanCard({
   const displayedFiles = plan.affected_files.slice(0, 8);
 
   return (
-    <Panel className="border border-border bg-surface-low p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+    <Panel className="border border-white/[0.07] bg-surface-low/60 rounded-[3px] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
         <div>
           <p className="font-display text-base font-bold uppercase tracking-wider text-primary">{plan.action_type}</p>
-          <p className="mt-1 font-mono text-xs text-primary-subtle">
+          <p className="mt-0.5 font-mono text-[11px] text-primary-subtle">
             Safety: {plan.safety_level} • Confidence: {(plan.confidence * 100).toFixed(0)}% • {plan.affected_files.length} files
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           <Chip tone={selectedInPlan > 0 ? "primary" : availableInPlan > 0 ? "warning" : "neutral"}>
             {selectedInPlan > 0 ? `${selectedInPlan} selected` : availableInPlan > 0 ? `${availableInPlan} available` : "review-only"}
           </Chip>
@@ -97,13 +97,13 @@ function PlanCard({
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div>
-          <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Affected Files</p>
+          <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-subtle">Affected Files</p>
           <div className="space-y-1.5">
             {displayedFiles.map((file) => (
               <PathBlock key={file} value={file} />
             ))}
             {plan.affected_files.length > displayedFiles.length ? (
-              <p className="font-mono text-[10px] text-primary-subtle">
+              <p className="font-sans text-[11px] text-primary-subtle">
                 {plan.affected_files.length - displayedFiles.length} more files are listed with the operations.
               </p>
             ) : null}
@@ -111,7 +111,7 @@ function PlanCard({
         </div>
         <div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Proposed Operations</p>
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-subtle">Proposed Operations</p>
             <span className="font-mono text-[10px] text-primary-subtle">
               {selectedTotal}/{maximum} selected overall
             </span>
@@ -125,7 +125,7 @@ function PlanCard({
                 setPage(0);
               }}
               placeholder="Filter by path, type, field, or value"
-              className="mb-3 w-full border border-border bg-surface px-3 py-1.5 font-mono text-xs text-primary outline-none focus:border-accent"
+              className="mb-3 w-full rounded-[3px] border border-white/[0.08] bg-surface px-3 py-1.5 font-sans text-xs text-primary outline-none focus:border-accent/50"
             />
           ) : null}
           <div className="space-y-1.5">
@@ -135,19 +135,19 @@ function PlanCard({
                 actionOperationSelectionKey(plan.plan_id, operation.operation_id),
               );
               return (
-                <label key={operation.operation_id} className="block border border-border bg-surface p-3">
+                <label key={operation.operation_id} className="block rounded-[3px] border border-white/[0.06] bg-surface p-3 transition-colors hover:border-white/[0.1]">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
                       {selectable ? (
                         <input
                           type="checkbox"
                           checked={checked}
                           disabled={disabled || (!checked && selectedTotal >= maximum)}
                           onChange={(event) => onToggleOperation(plan.plan_id, operation.operation_id, event.target.checked)}
-                          className="size-4 shrink-0 accent-accent"
+                          className="size-3.5 shrink-0 accent-accent rounded-[2px]"
                         />
                       ) : null}
-                      <p className="truncate font-mono text-xs font-semibold text-primary">{operation.operation_type}</p>
+                      <p className="truncate font-sans text-xs font-semibold text-primary">{operation.operation_type}</p>
                     </div>
                     <Chip tone={checked ? "success" : selectable ? "warning" : "neutral"}>
                       {checked ? "selected" : selectable ? "available" : "review-only"}
@@ -156,23 +156,23 @@ function PlanCard({
                   <div className="mt-2">
                     <PathBlock value={renderOperationPath(operation)} />
                   </div>
-                  {operation.notes.length > 0 ? <p className="mt-1.5 font-mono text-[10px] text-amber-400">{operation.notes.join(" ")}</p> : null}
+                  {operation.notes.length > 0 ? <p className="mt-1.5 font-sans text-[11px] text-amber-400">{operation.notes.join(" ")}</p> : null}
                 </label>
               );
             })}
             {visibleOperations.length === 0 ? (
-              <p className="border border-border bg-surface-low px-3 py-6 text-center font-mono text-xs text-primary-subtle">
+              <p className="rounded-[3px] border border-white/[0.06] bg-surface-low px-3 py-6 text-center font-sans text-xs text-primary-subtle">
                 No operations match this filter.
               </p>
             ) : null}
           </div>
           {pageCount > 1 ? (
             <div className="mt-3 flex items-center justify-between gap-3">
-              <Button tone="ghost" className="px-3 py-1 text-xs" disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>
+              <Button tone="ghost" className="px-2.5 py-0.5 text-xs" disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>
                 Previous
               </Button>
               <span className="font-mono text-xs text-primary-subtle">Page {safePage + 1} / {pageCount}</span>
-              <Button tone="ghost" className="px-3 py-1 text-xs" disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>
+              <Button tone="ghost" className="px-2.5 py-0.5 text-xs" disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>
                 Next
               </Button>
             </div>
@@ -180,8 +180,8 @@ function PlanCard({
         </div>
       </div>
 
-      {plan.reasons.length > 0 ? <p className="mt-4 font-mono text-xs text-primary-muted">Reasons: {plan.reasons.join(" • ")}</p> : null}
-      {plan.notes.length > 0 ? <p className="mt-1 font-mono text-xs text-primary-muted">Notes: {plan.notes.join(" ")}</p> : null}
+      {plan.reasons.length > 0 ? <p className="mt-3.5 font-sans text-xs text-primary-muted">Reasons: {plan.reasons.join(" • ")}</p> : null}
+      {plan.notes.length > 0 ? <p className="mt-1 font-sans text-xs text-primary-subtle">Notes: {plan.notes.join(" ")}</p> : null}
     </Panel>
   );
 }
@@ -266,14 +266,14 @@ export function ApplyResultPanel({
   const skippedCount = operationResults.filter((entry) => entry.status === "skipped").length;
 
   return (
-    <Panel className="border border-emerald-500/30 bg-surface-low p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-3">
+    <Panel className="rounded-[3px] border border-emerald-500/25 bg-surface-low/80 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.06] pb-3">
         <div>
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400">Apply Complete</p>
-          <h3 className="mt-1 font-display text-base font-bold uppercase tracking-wider text-primary">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-400">Apply Complete</p>
+          <h3 className="mt-0.5 font-display text-base font-bold text-primary">
             {result.result_count} plan result{result.result_count === 1 ? "" : "s"} processed
           </h3>
-          <p className="mt-1 font-mono text-xs text-primary-muted">
+          <p className="mt-1 font-sans text-xs text-primary-muted">
             {successCount} operations succeeded
             {failureCount > 0 ? `, ${failureCount} reported errors` : ""}
             {skippedCount > 0 ? `${failureCount > 0 ? "," : ""} ${skippedCount} skipped` : ""}
@@ -285,23 +285,23 @@ export function ApplyResultPanel({
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {result.results.map((entry) => (
-          <div key={entry.plan_id} className="border border-border bg-surface p-4">
+          <div key={entry.plan_id} className="rounded-[3px] border border-white/[0.06] bg-surface p-3.5">
             <div className="flex items-center justify-between gap-3">
-              <p className="font-mono text-xs font-semibold text-primary">{entry.action_type}</p>
+              <p className="font-sans text-xs font-semibold text-primary">{entry.action_type}</p>
               <Chip tone={planExecutionTone(entry.status)}>{formatPlanExecutionStatus(entry.status)}</Chip>
             </div>
             <p className="mt-1 font-mono text-[10px] text-primary-subtle">{entry.source_review_item_ids.join(", ")}</p>
             <div className="mt-3 space-y-1.5">
               {entry.operation_results.map((operation) => (
-                <div key={operation.operation_id} className="border border-border bg-surface-low p-2.5">
-                  <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-primary-subtle">{operation.operation_type}</p>
+                <div key={operation.operation_id} className="rounded-[2px] border border-white/[0.05] bg-surface-low p-2.5">
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-primary-subtle">{operation.operation_type}</p>
                   <div className="mt-1">
                     <PathBlock
                       value={[operation.path, operation.destination_path].filter(Boolean).join(" -> ") || operation.operation_id}
                       tone={operation.status === "ok" ? "success" : operation.status === "error" ? "danger" : "default"}
                     />
                   </div>
-                  <p className={`mt-1 font-mono text-[10px] ${operation.status === "ok" ? "text-emerald-400" : operation.status === "error" ? "text-rose-400" : "text-primary-muted"}`}>
+                  <p className={`mt-1 font-sans text-[11px] ${operation.status === "ok" ? "text-emerald-400" : operation.status === "error" ? "text-rose-400" : "text-primary-muted"}`}>
                     {formatOperationExecutionStatus(operation.status)}: {operation.message}
                   </p>
                 </div>
