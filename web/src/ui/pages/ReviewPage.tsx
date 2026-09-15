@@ -59,6 +59,28 @@ export function ReviewPage() {
     if (requestedItemType) setItemType(requestedItemType);
   }, [requestedItemType]);
 
+  const usingMock = false;
+  const report = reviewQuery.data?.data;
+  const items = useMemo(() => report?.items ?? [], [report?.items]);
+
+  const filtered = useMemo(
+    () =>
+      items.filter((item) => {
+        if (priority !== "all" && item.priority_band !== priority) return false;
+        if (status !== "all" && item.review_status !== status) return false;
+        if (itemType !== "all" && item.item_type !== itemType) return false;
+        return true;
+      }),
+    [itemType, priority, items, status],
+  );
+
+  const { selected, selectById } = useUrlBackedSelection({
+    items,
+    fallbackItems: filtered,
+    param: "item",
+    idKey: "item_id",
+  });
+
   if (reviewQuery.isError) {
     return (
       <div className="space-y-6">
@@ -72,7 +94,7 @@ export function ReviewPage() {
     );
   }
 
-  if (reviewQuery.isLoading || !reviewQuery.data) {
+  if (reviewQuery.isLoading || !report) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -86,27 +108,6 @@ export function ReviewPage() {
       </div>
     );
   }
-
-  const report = reviewQuery.data.data;
-  const usingMock = false;
-
-  const filtered = useMemo(
-    () =>
-      report.items.filter((item) => {
-        if (priority !== "all" && item.priority_band !== priority) return false;
-        if (status !== "all" && item.review_status !== status) return false;
-        if (itemType !== "all" && item.item_type !== itemType) return false;
-        return true;
-      }),
-    [itemType, priority, report.items, status],
-  );
-
-  const { selected, selectById } = useUrlBackedSelection({
-    items: report.items,
-    fallbackItems: filtered,
-    param: "item",
-    idKey: "item_id",
-  });
 
   async function handleReviewAction(action: "seen" | "ignored" | "snoozed" | "resolved") {
     if (!selected) return;
@@ -202,10 +203,10 @@ export function ReviewPage() {
       <SplitScreen
         main={
           <div className="space-y-4">
-            <Panel className="flex flex-wrap items-center gap-4 px-6 py-4">
+            <Panel className="flex flex-wrap items-center gap-4 px-5 py-3">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Priority</span>
-                <div className="flex flex-wrap gap-2">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Priority</span>
+                <div className="flex flex-wrap gap-1.5">
                   {["all", "high", "medium", "low"].map((value) => (
                     <button key={value} type="button" onClick={() => setPriority(value)}>
                       <Chip tone={value === "high" ? "danger" : value === "medium" ? "warning" : "neutral"} active={priority === value}>
@@ -215,10 +216,10 @@ export function ReviewPage() {
                   ))}
                 </div>
               </div>
-              <div className="hidden h-4 w-px bg-border-dark lg:block" />
+              <div className="hidden h-4 w-px bg-border lg:block" />
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Status</span>
-                <div className="flex flex-wrap gap-2">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Status</span>
+                <div className="flex flex-wrap gap-1.5">
                   {REVIEW_STATUS_FILTERS.map(({ value, label }) => (
                     <button key={value} type="button" onClick={() => setStatus(value)}>
                       <Chip
@@ -231,11 +232,11 @@ export function ReviewPage() {
                   ))}
                 </div>
               </div>
-              <div className="hidden h-4 w-px bg-border-dark lg:block" />
+              <div className="hidden h-4 w-px bg-border lg:block" />
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Type</span>
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Type</span>
                 <select
-                  className="rounded-full border border-border-dark bg-background-dark px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-slate-400 outline-none focus:border-primary"
+                  className="border border-border bg-surface px-2.5 py-1 font-mono text-xs uppercase tracking-wider text-primary outline-none focus:border-accent"
                   value={itemType}
                   onChange={(event) => setItemType(event.target.value)}
                 >
@@ -247,7 +248,7 @@ export function ReviewPage() {
                   ))}
                 </select>
               </div>
-              <div className="ml-auto text-xs font-mono text-slate-500">
+              <div className="ml-auto font-mono text-[10px] text-primary-subtle">
                 {filtered.length} visible / {report.items.length} total
               </div>
             </Panel>
@@ -270,50 +271,52 @@ export function ReviewPage() {
                 }
               />
             ) : (
-              <Panel className="overflow-hidden px-4 py-4">
+              <Panel className="overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left">
-                    <thead>
-                      <tr className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
-                        <th className="px-4 pb-3">Priority</th>
-                        <th className="px-4 pb-3">Item Type</th>
-                        <th className="px-4 pb-3">Score</th>
-                        <th className="px-4 pb-3">Summary</th>
-                        <th className="px-4 pb-3">State</th>
-                        <th className="px-4 pb-3 text-right">Inspect</th>
+                  <table className="w-full min-w-[760px] text-left">
+                    <thead className="border-b border-border bg-surface-low">
+                      <tr className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
+                        <th className="px-4 py-3">Priority</th>
+                        <th className="px-4 py-3">Item Type</th>
+                        <th className="px-4 py-3">Score</th>
+                        <th className="px-4 py-3">Summary</th>
+                        <th className="px-4 py-3">State</th>
+                        <th className="px-4 py-3 text-right">Inspect</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-border">
                       {filtered.map((item) => {
                         const active = selected?.item_id === item.item_id;
                         return (
                           <tr
                             key={item.item_id}
                             onClick={() => selectById(item.item_id)}
-                            className={`cursor-pointer transition-all ${active ? "bg-primary/5 ring-1 ring-primary/20" : "border border-border-dark bg-surface-dark hover:border-primary/30"}`}
+                            className={`cursor-pointer transition-colors ${
+                              active ? "border-l-2 border-l-accent bg-accent/5" : "hover:bg-surface-low"
+                            }`}
                           >
-                            <td className="rounded-l-2xl px-4 py-4">
+                            <td className="px-4 py-3.5">
                               <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                             </td>
-                            <td className="px-4 py-4 text-sm font-medium text-slate-300">{item.item_type}</td>
-                            <td className="px-4 py-4">
+                            <td className="px-4 py-3.5 font-mono text-xs text-primary-muted">{item.item_type}</td>
+                            <td className="px-4 py-3.5">
                               <div className="flex items-center gap-2">
                                 <div className="w-16">
                                   <ProgressBar value={item.priority_score} />
                                 </div>
-                                <span className="font-mono text-sm font-bold text-primary">{item.priority_score}</span>
+                                <span className="font-mono text-xs font-bold text-primary">{item.priority_score}</span>
                               </div>
                             </td>
-                            <td className="px-4 py-4">
-                              <span className={`block max-w-[28rem] truncate font-mono text-xs ${active ? "text-primary" : "text-slate-400"}`}>{item.summary}</span>
+                            <td className="px-4 py-3.5">
+                              <span className={`block max-w-[28rem] truncate font-mono text-xs ${active ? "text-primary font-semibold" : "text-primary-muted"}`}>{item.summary}</span>
                             </td>
-                            <td className="px-4 py-4">
+                            <td className="px-4 py-3.5">
                               <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
                             </td>
-                            <td className="rounded-r-2xl px-4 py-4 text-right">
-                              <button type="button" className={`rounded-lg p-1.5 ${active ? "bg-primary/20 text-primary" : "text-slate-500 hover:bg-primary/20 hover:text-primary"}`}>
-                                <span className="material-symbols-outlined text-lg">{active ? "chevron_right" : "open_in_new"}</span>
-                              </button>
+                            <td className="px-4 py-3.5 text-right">
+                              <span className={`inline-flex p-1 ${active ? "text-accent" : "text-primary-subtle"}`}>
+                                <Icon name="chevron_right" className="text-base" />
+                              </span>
                             </td>
                           </tr>
                         );

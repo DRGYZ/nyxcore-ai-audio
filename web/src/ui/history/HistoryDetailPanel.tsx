@@ -48,7 +48,7 @@ export function HistoryDetailPanel({
       }
     >
       {!batch ? (
-        <div className="rounded-xl border border-dashed border-border-dark bg-background-dark/50 px-4 py-8 text-sm text-slate-500">
+        <div className="border border-border bg-surface-low px-4 py-8 font-mono text-xs text-primary-subtle">
           Select a history batch to inspect operation steps, reversibility, and restore outcomes.
         </div>
       ) : (
@@ -56,30 +56,30 @@ export function HistoryDetailPanel({
           <Panel className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-display text-lg font-bold text-slate-100">{batch.action_types.join(", ")}</p>
-                <p className="mt-1 text-xs text-slate-500">{formatDate(batch.applied_at)}</p>
+                <p className="font-display text-base font-bold uppercase tracking-wider text-primary">{batch.action_types.join(", ")}</p>
+                <p className="mt-1 font-mono text-xs text-primary-subtle">{formatDate(batch.applied_at)}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Chip tone={batch.reversible ? "primary" : "warning"}>{batch.reversible ? "reversible" : "non-reversible"}</Chip>
-                <Chip tone="violet">{batch.affected_count} files</Chip>
+                <Chip tone="neutral">{batch.affected_count} files</Chip>
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <Panel className="p-3">
-                <p className="text-[10px] text-slate-500">Source Plans</p>
-                <p className="mt-1 text-lg font-bold text-slate-100">{batch.source_plan_ids.length}</p>
-              </Panel>
-              <Panel className="p-3">
-                <p className="text-[10px] text-slate-500">Review Items</p>
-                <p className="mt-1 text-lg font-bold text-primary">{batch.source_review_item_ids.length}</p>
-              </Panel>
+              <div className="border border-border bg-surface-low p-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">Source Plans</p>
+                <p className="mt-1 font-display text-xl font-bold tracking-tight text-primary">{batch.source_plan_ids.length}</p>
+              </div>
+              <div className="border border-border bg-surface-low p-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">Review Items</p>
+                <p className="mt-1 font-display text-xl font-bold tracking-tight text-accent">{batch.source_review_item_ids.length}</p>
+              </div>
             </div>
           </Panel>
 
           {mutationResult ? (
-            <Panel className="border-primary/20 bg-primary/5 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Latest Reversal Outcome</p>
-              <p className="mt-2 text-sm text-slate-300">
+            <Panel className="border border-accent/40 bg-accent/5 p-4">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Latest Reversal Outcome</p>
+              <p className="mt-2 font-mono text-xs text-primary-muted">
                 {mutationSummary?.successful ?? 0} successful,
                 {" "}
                 {mutationSummary?.unsupported ?? 0} not supported,
@@ -90,15 +90,15 @@ export function HistoryDetailPanel({
           ) : null}
 
           <div>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Operation Steps</p>
+            <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Operation Steps</p>
             <div className="space-y-2">
               {batch.operations.map((operation) => {
                 const changed = changedById.get(operation.operation_id);
                 return (
-                  <div key={operation.operation_id} className="rounded-xl border border-border-dark bg-background-dark/70 px-4 py-3">
+                  <div key={operation.operation_id} className="border border-border bg-surface-low px-4 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-slate-100">{operation.operation_type}</p>
+                        <p className="font-mono text-xs font-semibold text-primary">{operation.operation_type}</p>
                         <div className="mt-2">
                           <PathBlock value={operationPath(operation)} />
                         </div>
@@ -110,7 +110,7 @@ export function HistoryDetailPanel({
                         </Chip>
                       </div>
                     </div>
-                    {changed?.undo_message ? <p className={`mt-2 text-xs ${changed.undo_status === "error" ? "text-rose-400" : "text-slate-400"}`}>{changed.undo_message}</p> : null}
+                    {changed?.undo_message ? <p className={`mt-2 font-mono text-xs ${changed.undo_status === "error" ? "text-rose-400" : "text-primary-muted"}`}>{changed.undo_message}</p> : null}
                   </div>
                 );
               })}

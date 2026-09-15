@@ -134,7 +134,7 @@ export function DashboardPage() {
           value={formatNumber(health.overview.total_audio_files)}
           icon="audio_file"
           meta={
-            <p className="truncate text-xs text-slate-400">
+            <p className="truncate font-mono text-xs text-primary-muted">
               {status?.music_path ? status.music_path : `${formatNumber(health.overview.total_folders_touched)} folders scanned`}
             </p>
           }
@@ -145,20 +145,20 @@ export function DashboardPage() {
           icon="inbox"
           accent={
             actionableReviewItems.length > 0 ? (
-              <span className="rounded bg-rose-500/10 px-2 py-0.5 text-xs font-bold text-rose-400">
+              <span className="border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-rose-400">
                 Actionable
               </span>
             ) : undefined
           }
-          meta={<p className="text-xs text-slate-400">{review.items.length} total findings recorded</p>}
+          meta={<p className="font-mono text-xs text-primary-muted">{review.items.length} total findings recorded</p>}
         />
         <MetricCard
           label="Duplicate Findings"
           value={formatNumber(duplicates.summary.exact_group_count)}
           icon="copy_all"
           meta={
-            <p className="text-xs text-slate-400">
-              Exact: <span className="font-bold text-slate-200">{duplicates.summary.exact_group_count}</span> • Likely: <span className="font-bold text-amber-400">{duplicates.summary.likely_group_count}</span>
+            <p className="font-mono text-xs text-primary-muted">
+              Exact: <span className="font-bold text-primary">{duplicates.summary.exact_group_count}</span> • Likely: <span className="font-bold text-amber-400">{duplicates.summary.likely_group_count}</span>
             </p>
           }
         />
@@ -167,7 +167,7 @@ export function DashboardPage() {
           value={formatNumber(missingTagsCount + unreadableCount)}
           icon="health_and_safety"
           meta={
-            <p className="text-xs text-slate-400">
+            <p className="font-mono text-xs text-primary-muted">
               Artwork: {health.artwork.coverage_percent.toFixed(0)}% • Unreadable: {unreadableCount}
             </p>
           }
@@ -178,16 +178,16 @@ export function DashboardPage() {
         {/* Left 2 Cols: Priority Review + Recent History */}
         <div className="space-y-8 xl:col-span-2">
           <Panel className="p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="flex items-center gap-2 font-display text-xl font-bold text-slate-100">
-                <Icon name="inbox" className="text-primary" />
+            <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
+                <Icon name="inbox" className="text-base text-accent" />
                 Priority Review
               </h2>
-              <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => navigate("/review")}>
+              <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/review")}>
                 Open Review Inbox
               </Button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {actionableReviewItems.length === 0 ? (
                 <EmptyState
                   title={review.items.length === 0 ? "No review findings" : "No active review findings"}
@@ -202,20 +202,20 @@ export function DashboardPage() {
                   <div
                     key={item.item_id}
                     onClick={() => navigate(`/review?item=${encodeURIComponent(item.item_id)}`)}
-                    className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-primary/10 bg-primary/5 px-4 py-4 transition-colors hover:border-primary/30"
+                    className="flex cursor-pointer items-center justify-between gap-4 border border-border bg-surface-low px-4 py-3 transition-colors hover:border-border-bright"
                   >
-                    <div className="flex min-w-0 items-center gap-4">
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
-                        <Icon name="priority_high" />
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex size-8 shrink-0 items-center justify-center border border-border bg-surface text-accent">
+                        <Icon name="priority_high" className="text-sm" />
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-200">{item.summary}</p>
-                        <p className="truncate font-mono text-[11px] text-slate-500">{item.reason_summary}</p>
+                        <p className="truncate text-xs font-semibold text-primary">{item.summary}</p>
+                        <p className="truncate font-mono text-[10px] text-primary-subtle">{item.reason_summary}</p>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
-                      <span className="font-mono text-xs text-slate-400">Score: {item.priority_score}</span>
-                      <span className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                      <span className="font-mono text-xs text-primary-muted">Score: {item.priority_score}</span>
+                      <span className="border border-accent/40 bg-accent/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-accent">
                         {item.priority_band}
                       </span>
                     </div>
@@ -226,16 +226,16 @@ export function DashboardPage() {
           </Panel>
 
           <Panel className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-primary/10 px-6 py-5">
-              <h2 className="flex items-center gap-2 font-display text-xl font-bold text-slate-100">
-                <Icon name="history" className="text-primary" />
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
+                <Icon name="history" className="text-base text-accent" />
                 Recent Operations
               </h2>
-              <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => navigate("/history")}>
+              <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/history")}>
                 View History
               </Button>
             </div>
-            <div className="px-4 py-4">
+            <div className="p-4">
               {history.items.length === 0 ? (
                 <EmptyState
                   title="No operations recorded yet"
@@ -251,8 +251,8 @@ export function DashboardPage() {
                     formatNumber(batch.affected_count),
                     <span
                       key={batch.batch_id}
-                      className={`rounded px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
-                        batch.reversible ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
+                      className={`border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
+                        batch.reversible ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" : "border-amber-500/40 bg-amber-500/10 text-amber-400"
                       }`}
                     >
                       {batch.reversible ? "reversible" : "mixed"}
@@ -267,9 +267,9 @@ export function DashboardPage() {
         {/* Right Col: Health Breakdown & Quick Inspection */}
         <div className="space-y-8">
           <Panel className="p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="flex items-center gap-2 font-display text-lg font-bold text-slate-100">
-                <Icon name="health_and_safety" className="text-primary" />
+            <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+              <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-primary">
+                <Icon name="health_and_safety" className="text-base text-accent" />
                 Library Health
               </h2>
               <Button tone="ghost" className="px-2.5 py-1 text-xs" onClick={() => navigate("/health")}>
@@ -278,35 +278,35 @@ export function DashboardPage() {
             </div>
             <div className="space-y-4">
               <div>
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Artwork Coverage</span>
-                  <span className="font-bold text-primary">{health.artwork.coverage_percent.toFixed(1)}%</span>
+                <div className="mb-2 flex items-center justify-between font-mono text-xs">
+                  <span className="text-primary-muted">Artwork Coverage</span>
+                  <span className="font-bold text-accent">{health.artwork.coverage_percent.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={health.artwork.coverage_percent} />
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Lossless Files Share</span>
-                  <span className="font-bold text-slate-200">{losslessRatio.toFixed(1)}%</span>
+                <div className="mb-2 flex items-center justify-between font-mono text-xs">
+                  <span className="text-primary-muted">Lossless Files Share</span>
+                  <span className="font-bold text-primary">{losslessRatio.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={losslessRatio} tone="violet" />
               </div>
 
-              <div className="mt-4 border-t border-border-dark pt-4 space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">Missing Artist / Title / Album</span>
-                  <span className="font-mono font-bold text-slate-200">{formatNumber(missingTagsCount)}</span>
+              <div className="mt-4 border-t border-border pt-4 space-y-2.5">
+                <div className="flex justify-between font-mono text-xs">
+                  <span className="text-primary-muted">Missing Artist / Title / Album</span>
+                  <span className="font-bold text-primary">{formatNumber(missingTagsCount)}</span>
                 </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">Unreadable / Unparseable</span>
-                  <span className={`font-mono font-bold ${unreadableCount > 0 ? "text-rose-400" : "text-slate-200"}`}>
+                <div className="flex justify-between font-mono text-xs">
+                  <span className="text-primary-muted">Unreadable / Unparseable</span>
+                  <span className={`font-bold ${unreadableCount > 0 ? "text-rose-400" : "text-primary"}`}>
                     {formatNumber(unreadableCount)}
                   </span>
                 </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">Placeholder Metadata</span>
-                  <span className="font-mono font-bold text-slate-200">
+                <div className="flex justify-between font-mono text-xs">
+                  <span className="text-primary-muted">Placeholder Metadata</span>
+                  <span className="font-bold text-primary">
                     {formatNumber(health.metadata.placeholder_metadata.count)}
                   </span>
                 </div>
@@ -315,59 +315,59 @@ export function DashboardPage() {
           </Panel>
 
           <Panel className="p-6">
-            <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-[0.2em] text-slate-400">
+            <h3 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
               Inspect Next
             </h3>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Link
                 to="/review"
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3 text-sm text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="inbox" className="text-primary" />
+                  <Icon name="inbox" className="text-accent text-sm" />
                   <span>Review Inbox</span>
                 </div>
-                <span className="text-xs font-bold text-primary">{actionableReviewItems.length}</span>
+                <span className="font-bold text-accent">{actionableReviewItems.length}</span>
               </Link>
               <Link
                 to="/duplicates"
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3 text-sm text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="copy_all" className="text-primary" />
+                  <Icon name="copy_all" className="text-accent text-sm" />
                   <span>Duplicates</span>
                 </div>
-                <span className="text-xs text-slate-400">{duplicates.summary.exact_group_count} exact</span>
+                <span className="text-primary-subtle">{duplicates.summary.exact_group_count} exact</span>
               </Link>
               <Link
                 to="/health"
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3 text-sm text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="health_and_safety" className="text-primary" />
+                  <Icon name="health_and_safety" className="text-accent text-sm" />
                   <span>Library Health</span>
                 </div>
-                <span className="text-xs text-slate-400">{missingTagsCount} tags</span>
+                <span className="text-primary-subtle">{missingTagsCount} tags</span>
               </Link>
               <Link
                 to="/history"
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3 text-sm text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="history" className="text-primary" />
+                  <Icon name="history" className="text-accent text-sm" />
                   <span>Operation History</span>
                 </div>
-                <span className="text-xs text-slate-400">{history.items.length} batches</span>
+                <span className="text-primary-subtle">{history.items.length} batches</span>
               </Link>
               <Link
                 to="/search"
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3 text-sm text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex items-center justify-between border border-border bg-surface-low px-4 py-2.5 font-mono text-xs text-primary-muted transition-colors hover:border-accent hover:text-accent"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="manage_search" className="text-primary" />
+                  <Icon name="manage_search" className="text-accent text-sm" />
                   <span>Archive Search</span>
                 </div>
-                <span className="text-xs text-slate-500">Lookup</span>
+                <span className="text-primary-subtle">Lookup</span>
               </Link>
             </div>
           </Panel>

@@ -18,6 +18,22 @@ export function PlaylistsPage() {
   const [maxTracks, setMaxTracks] = useState("25");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
 
+  const response = playlistsQuery.data;
+  const usingMock = false;
+  const items = useMemo(() => response?.items ?? [], [response?.items]);
+  const filtered = useMemo(() => items.filter((item) => {
+    if (playlistFilter === "all") return true;
+    if (playlistFilter === "never") return !item.last_refreshed_at;
+    if (!item.last_refreshed_at) return false;
+    return Date.now() - Date.parse(item.last_refreshed_at) <= 7 * 24 * 60 * 60 * 1000;
+  }), [playlistFilter, items]);
+  const { selected, selectById } = useUrlBackedSelection({
+    items: filtered,
+    param: "playlist",
+    idKey: "playlist_id",
+  });
+  const busy = createMutation.isPending || refreshMutation.isPending;
+
   if (playlistsQuery.isError) {
     return (
       <div className="space-y-6">
@@ -31,7 +47,7 @@ export function PlaylistsPage() {
     );
   }
 
-  if (playlistsQuery.isLoading || !playlistsQuery.data) {
+  if (playlistsQuery.isLoading || !response) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -45,21 +61,6 @@ export function PlaylistsPage() {
       </div>
     );
   }
-
-  const response = playlistsQuery.data;
-  const usingMock = false;
-  const filtered = useMemo(() => response.items.filter((item) => {
-    if (playlistFilter === "all") return true;
-    if (playlistFilter === "never") return !item.last_refreshed_at;
-    if (!item.last_refreshed_at) return false;
-    return Date.now() - Date.parse(item.last_refreshed_at) <= 7 * 24 * 60 * 60 * 1000;
-  }), [playlistFilter, response.items]);
-  const { selected, selectById } = useUrlBackedSelection({
-    items: filtered,
-    param: "playlist",
-    idKey: "playlist_id",
-  });
-  const busy = createMutation.isPending || refreshMutation.isPending;
 
   async function handleCreate() {
     const parsedMaxTracks = Number.parseInt(maxTracks, 10);

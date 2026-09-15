@@ -19,16 +19,20 @@ function SidebarLink({ to, label, icon, badge }: { to: string; label: string; ic
       to={to}
       end={to === "/"}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+        `group relative flex items-center gap-3 px-3 py-2 text-xs font-mono tracking-wider uppercase transition-colors ${
           isActive
-            ? "border border-primary/20 bg-primary/10 text-primary"
-            : "text-slate-400 hover:bg-primary/5 hover:text-primary"
+            ? "border-l-2 border-accent bg-accent/5 text-accent font-medium pl-[10px]"
+            : "border-l-2 border-transparent text-primary-muted hover:bg-surface-low hover:text-primary pl-[10px]"
         }`
       }
     >
-      <Icon name={icon} className="text-xl" />
+      <Icon name={icon} className="text-base" />
       <span>{label}</span>
-      {badge ? <span className="ml-auto rounded bg-primary px-1.5 py-0.5 text-[10px] font-bold text-background-dark">{badge}</span> : null}
+      {badge ? (
+        <span className="ml-auto bg-accent text-background px-1.5 py-0.5 font-mono text-[10px] font-bold">
+          {badge}
+        </span>
+      ) : null}
     </NavLink>
   );
 }
@@ -87,50 +91,50 @@ export function AppShell({ children }: PropsWithChildren) {
   }
 
   return (
-    <div className="min-h-screen bg-background-dark text-slate-100">
+    <div className="min-h-screen bg-background text-primary">
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-r border-primary/10 bg-background-dark lg:w-72 lg:shrink-0">
-          <div className="flex items-center gap-3 px-6 py-6">
-            <div className="flex size-10 items-center justify-center rounded-lg border border-primary/30 bg-primary/20 text-primary">
-              <Icon name="waves" className="text-xl" />
+        <aside className="border-r border-border bg-surface lg:w-72 lg:shrink-0">
+          <div className="flex items-center gap-3 border-b border-border px-6 py-5">
+            <div className="flex size-8 items-center justify-center border border-border-bright bg-surface-low text-accent">
+              <span className="size-2 bg-accent" />
             </div>
             <div>
-              <h1 className="font-display text-lg font-bold">NyxCore</h1>
-              <p className="text-xs font-medium text-primary/60">Local music-library review toolkit</p>
+              <h1 className="font-display text-sm font-bold uppercase tracking-wider text-primary">NyxCore</h1>
+              <p className="font-mono text-[10px] tracking-wider text-primary-muted uppercase">Audio Library Toolkit</p>
             </div>
           </div>
-          <nav className="space-y-6 px-4 pb-6">
+          <nav className="space-y-6 p-4">
             <div>
-              <p className="px-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Navigation</p>
-              <div className="mt-3 space-y-1">
+              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">Navigation</p>
+              <div className="mt-2 space-y-0.5">
                 {navItems.map((item) => (
                   <SidebarLink key={item.to} {...item} badge={item.to === "/review" ? (reviewCount || undefined) : undefined} />
                 ))}
               </div>
             </div>
-            <div className="rounded-xl border border-primary/10 bg-gradient-to-br from-primary/10 to-transparent p-4">
+            <div className="border border-border bg-surface-low p-4">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Workspace Status</p>
-                <Chip tone={isConnected ? "primary" : "warning"}>{isConnected ? "connected" : "offline"}</Chip>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Workspace Status</p>
+                <Chip tone={isConnected ? "accent" : "neutral"}>{isConnected ? "connected" : "offline"}</Chip>
               </div>
               {isConnected ? (
                 <>
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Open Review</p>
-                      <p className="mt-1 text-lg font-bold text-slate-100">{unresolvedReviewCount}</p>
+                      <p className="font-mono text-[10px] uppercase tracking-wider text-primary-subtle">Open Review</p>
+                      <p className="mt-1 font-mono text-lg font-bold text-primary">{unresolvedReviewCount}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Ledger</p>
-                      <p className="mt-1 text-lg font-bold text-primary">{status?.history_exists ? "Active" : "Empty"}</p>
+                      <p className="font-mono text-[10px] uppercase tracking-wider text-primary-subtle">Ledger</p>
+                      <p className="mt-1 font-mono text-lg font-bold text-accent">{status?.history_exists ? "Active" : "Empty"}</p>
                     </div>
                   </div>
-                  <p className="mt-3 text-[10px] text-slate-400">
+                  <p className="mt-3 font-mono text-[10px] text-primary-subtle">
                     Live status is sourced from the local API session.
                   </p>
                 </>
               ) : (
-                <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+                <p className="mt-3 text-xs leading-relaxed text-primary-muted">
                   Local API is not connected. Start the local backend to inspect and review your library.
                 </p>
               )}
@@ -138,28 +142,28 @@ export function AppShell({ children }: PropsWithChildren) {
           </nav>
         </aside>
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-primary/10 bg-background-dark/70 px-6 py-4 backdrop-blur-md">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-background/95 px-6 py-3.5 backdrop-blur-md">
             <div className="flex min-w-0 items-center gap-6">
-              <div className="hidden items-center gap-2 text-primary sm:flex">
-                <Icon name={isConnected ? "folder_open" : "cloud_off"} className="text-lg" />
-                <span className="truncate font-mono text-xs text-slate-300">
+              <div className="hidden items-center gap-2 text-primary-muted sm:flex">
+                <Icon name={isConnected ? "folder_open" : "cloud_off"} className="text-base text-accent" />
+                <span className="truncate font-mono text-xs text-primary-muted">
                   {isConnected ? status?.music_path : "Local API Disconnected"}
                 </span>
               </div>
-              <div className="hidden h-4 w-px bg-primary/20 md:block" />
+              <div className="hidden h-4 w-px bg-border md:block" />
               <div className="hidden items-center gap-2 md:flex">
-                <span className={`size-2 rounded-full ${isConnected ? "bg-primary shadow-[0_0_8px_#25e2f4]" : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.55)]"}`} />
-                <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
-                  {isConnected ? "Local API" : "Disconnected"}
+                <span className={`size-1.5 ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
+                  {isConnected ? "Local API Active" : "Disconnected"}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <form className="relative hidden md:block" role="search" onSubmit={handleSearchSubmit}>
-                <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500" />
+                <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-primary-subtle" />
                 <input
                   aria-label="Search archive"
-                  className="w-64 rounded-full border border-primary/10 bg-primary/5 py-1.5 pl-10 pr-10 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-primary focus:ring-1 focus:ring-primary"
+                  className="w-64 border border-border bg-surface-low py-1.5 pl-9 pr-9 font-mono text-xs text-primary placeholder:text-primary-subtle focus:border-accent focus:outline-none"
                   placeholder="Search archive..."
                   type="search"
                   value={searchValue}
@@ -171,9 +175,9 @@ export function AppShell({ children }: PropsWithChildren) {
                 <button
                   type="submit"
                   aria-label="Submit archive search"
-                  className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center text-primary-subtle transition-colors hover:bg-surface-mid hover:text-accent focus-visible:outline-none"
                 >
-                  <Icon name="arrow_forward" className="text-base" />
+                  <Icon name="arrow_forward" className="text-sm" />
                 </button>
               </form>
               <div ref={notificationRef} className="relative">
@@ -183,11 +187,11 @@ export function AppShell({ children }: PropsWithChildren) {
                   aria-expanded={notificationsOpen}
                   aria-haspopup="menu"
                   onClick={() => setNotificationsOpen((open) => !open)}
-                  className="relative rounded-lg bg-primary/10 p-2 text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="relative border border-border bg-surface-low p-2 text-primary-muted transition-colors hover:border-border-bright hover:text-primary focus-visible:outline-none"
                 >
-                  <Icon name="notifications" className="text-xl" />
+                  <Icon name="notifications" className="text-lg" />
                   {notificationItems.length > 0 ? (
-                    <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full border-2 border-background-dark bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white">
+                    <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center bg-rose-500 px-1 font-mono text-[9px] font-bold leading-4 text-white">
                       {notificationItems.length}
                     </span>
                   ) : null}
@@ -196,57 +200,59 @@ export function AppShell({ children }: PropsWithChildren) {
                   <div
                     role="menu"
                     aria-label="High-priority review notifications"
-                    className="absolute right-0 top-full z-50 mt-3 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-primary/20 bg-surface-dark shadow-2xl"
+                    className="absolute right-0 top-full z-50 mt-2 w-[min(24rem,calc(100vw-2rem))] border border-border bg-surface shadow-2xl"
                   >
-                    <div className="border-b border-border-dark px-4 py-3">
-                      <p className="text-xs font-bold uppercase tracking-[0.22em] text-primary">Priority Review</p>
-                      <p className="mt-1 text-xs text-slate-500">High-priority items that still need attention.</p>
+                    <div className="border-b border-border bg-surface-low px-4 py-3">
+                      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Priority Review</p>
+                      <p className="mt-1 text-xs text-primary-subtle">High-priority items that still need attention.</p>
                     </div>
                     {notificationItems.length > 0 ? (
-                      <div className="max-h-80 overflow-y-auto p-2">
+                      <div className="max-h-80 overflow-y-auto divide-y divide-border">
                         {notificationItems.map((item) => (
                           <Link
                             key={item.item_id}
                             role="menuitem"
                             to={`/review?item=${encodeURIComponent(item.item_id)}`}
-                            className="block rounded-lg px-3 py-3 transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none"
+                            className="block px-4 py-3 transition-colors hover:bg-surface-low focus-visible:bg-surface-low focus-visible:outline-none"
                           >
                             <div className="flex items-center justify-between gap-3">
-                              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-400">High priority</span>
-                              <span className="font-mono text-[10px] text-slate-500">{item.priority_score.toFixed(1)}</span>
+                              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-rose-400">High priority</span>
+                              <span className="font-mono text-[10px] text-primary-subtle">{item.priority_score.toFixed(1)}</span>
                             </div>
-                            <p className="mt-1 line-clamp-2 text-sm font-medium text-slate-200">{item.summary}</p>
+                            <p className="mt-1 line-clamp-2 text-xs font-medium text-primary">{item.summary}</p>
                           </Link>
                         ))}
                       </div>
                     ) : (
-                      <p className="px-4 py-6 text-center text-sm text-slate-500">No high-priority review items right now.</p>
+                      <p className="px-4 py-6 text-center text-xs font-mono text-primary-subtle">No high-priority review items right now.</p>
                     )}
                     <Link
                       role="menuitem"
                       to="/review"
-                      className="flex items-center justify-between border-t border-border-dark px-4 py-3 text-xs font-bold text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                      className="flex items-center justify-between border-t border-border bg-surface-low px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-accent hover:bg-surface-mid focus-visible:outline-none"
                     >
-                      Open Review Inbox
-                      <Icon name="arrow_forward" className="text-base" />
+                      <span>Open Review Inbox</span>
+                      <Icon name="arrow_forward" className="text-sm" />
                     </Link>
                   </div>
                 ) : null}
               </div>
-              <div className="size-10 rounded-full border border-primary/30 bg-gradient-to-br from-primary/40 to-secondary/40" />
+              <div className="flex h-8 items-center border border-border bg-surface-low px-2.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-subtle">
+                LOCAL
+              </div>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top_right,_rgba(37,226,244,0.08),transparent_28%),linear-gradient(180deg,#102122_0%,#0a0f0f_100%)] px-6 py-6 lg:px-8">
+          <main className="flex-1 overflow-y-auto bg-background px-6 py-6 lg:px-8">
             <div className="mx-auto max-w-[1400px]">{children}</div>
           </main>
-          <footer className="border-t border-primary/5 bg-background-dark/80 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">
+          <footer className="border-t border-border bg-surface-low px-6 py-3 font-mono text-[10px] uppercase tracking-[0.18em] text-primary-subtle">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap items-center gap-6">
                 <span className="flex items-center gap-2">
-                  <span className={`size-1.5 rounded-full ${isConnected ? "animate-pulse bg-primary" : "bg-amber-400"}`} />
+                  <span className={`size-1.5 ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
                   {isConnected ? "Local API Connected (127.0.0.1:8000)" : "Local API Unavailable"}
                 </span>
-                {isConnected && status?.music_path ? <span>Library: {status.music_path}</span> : null}
+                {isConnected && status?.music_path ? <span className="text-primary-muted">Library: {status.music_path}</span> : null}
               </div>
               {isConnected ? (
                 <div className="flex flex-wrap gap-6">

@@ -46,11 +46,11 @@ export function SearchPage() {
         <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleSubmit} role="search">
           <label className="relative min-w-0 flex-1">
             <span className="sr-only">Search the music archive</span>
-            <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-primary-subtle" />
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              className="w-full rounded-lg border border-border-dark bg-background-dark py-2.5 pl-10 pr-4 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-primary focus:ring-1 focus:ring-primary"
+              className="w-full border border-border bg-surface-low py-2.5 pl-10 pr-4 font-mono text-xs text-primary placeholder:text-primary-subtle focus:border-accent focus:outline-none"
               placeholder="Try a title, artist, album, genre, or filename"
               type="search"
               minLength={2}
@@ -59,7 +59,7 @@ export function SearchPage() {
             />
           </label>
           <Button type="submit" tone="primary" disabled={draft.trim().length < 2 || searchQuery.isFetching}>
-            <Icon name="manage_search" className="text-lg" />
+            <Icon name="manage_search" className="text-base" />
             {searchQuery.isFetching ? "Scanning…" : "Search Library"}
           </Button>
         </form>
@@ -82,8 +82,8 @@ export function SearchPage() {
       ) : response ? (
         <div className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-400">
-              Found <span className="font-bold text-primary">{formatNumber(response.total_matches)}</span> matches for “{response.query}”
+            <p className="font-mono text-xs text-primary-muted">
+              Found <span className="font-bold text-accent">{formatNumber(response.total_matches)}</span> matches for “{response.query}”
             </p>
             <Chip tone="primary">{response.returned_count} shown</Chip>
           </div>
@@ -92,24 +92,24 @@ export function SearchPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-                      <Icon name="audio_file" />
-                    </span>
+                    <div className="flex size-8 shrink-0 items-center justify-center border border-border bg-surface text-accent">
+                      <Icon name="audio_file" className="text-sm" />
+                    </div>
                     <div className="min-w-0">
-                      <h2 className="break-words font-display text-lg font-bold text-slate-100">{track.title || track.filename}</h2>
-                      <p className="mt-1 text-sm text-slate-400">
+                      <h2 className="break-words font-mono text-xs font-bold text-primary">{track.title || track.filename}</h2>
+                      <p className="mt-1 font-mono text-[11px] text-primary-muted">
                         {track.artist || "Unknown artist"}{track.album ? ` · ${track.album}` : ""}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-4"><PathBlock value={track.path} /></div>
+                  <div className="mt-3"><PathBlock value={track.path} /></div>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-xs lg:justify-end">
                   {track.match_fields.map((field) => <Chip key={field} tone="primary">{field.replace("albumartist", "album artist")}</Chip>)}
                   {track.warnings.length > 0 ? <Chip tone="warning">{track.warnings.length} warnings</Chip> : null}
                 </div>
               </div>
-              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-primary/5 pt-4 text-xs text-slate-500">
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-3 font-mono text-[10px] text-primary-subtle">
                 <span>{formatDuration(track.duration_seconds)}</span>
                 <span>{formatBytes(track.file_size_bytes)}</span>
                 <span>{track.has_cover_art ? "Artwork embedded" : "No embedded artwork"}</span>
@@ -117,7 +117,7 @@ export function SearchPage() {
             </Panel>
           ))}
           {response.total_matches > response.returned_count ? (
-            <p className="text-center text-xs text-slate-500">Showing the first {response.returned_count} of {response.total_matches} ranked matches.</p>
+            <p className="text-center font-mono text-xs text-primary-subtle">Showing the first {response.returned_count} of {response.total_matches} ranked matches.</p>
           ) : null}
         </div>
       ) : null}

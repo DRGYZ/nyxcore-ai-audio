@@ -14,6 +14,7 @@ tests/tmp*/
 
 stitch_neurodesk_focus_workspace/
 demo/generated/
+demo/demo-library/
 
 music/
 Music/

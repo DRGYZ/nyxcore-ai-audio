@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, PropsWithChildren, ReactNode } from "react";
 
 export function Icon({ name, className = "" }: { name: string; className?: string }) {
-  return <span className={`material-symbols-outlined ${className}`}>{name}</span>;
+  return <span className={`material-symbols-outlined select-none text-[20px] ${className}`}>{name}</span>;
 }
 
 export function PageHeader({
@@ -16,13 +16,15 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="flex flex-col gap-4 border-b border-border pb-6 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
-        {eyebrow ? <p className="mb-1 text-xs font-bold uppercase tracking-[0.28em] text-primary">{eyebrow}</p> : null}
-        <h1 className="font-display text-3xl font-bold tracking-tight text-slate-100 md:text-4xl">{title}</h1>
-        {description ? <p className="mt-2 max-w-3xl text-sm text-slate-400">{description}</p> : null}
+        {eyebrow ? (
+          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-accent">{eyebrow}</p>
+        ) : null}
+        <h1 className="font-display text-3xl font-bold tracking-tight text-primary md:text-4xl">{title}</h1>
+        {description ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-primary-muted">{description}</p> : null}
       </div>
-      {actions ? <div className="flex flex-wrap gap-3">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
     </div>
   );
 }
@@ -32,9 +34,7 @@ export function Panel({
   className = "",
 }: PropsWithChildren<{ className?: string }>) {
   return (
-    <section
-      className={`min-w-0 rounded-xl border border-primary/10 bg-surface-dark/80 shadow-[0_0_30px_-18px_rgba(37,226,244,0.25)] backdrop-blur-xl ${className}`}
-    >
+    <section className={`min-w-0 border border-border bg-surface ${className}`}>
       {children}
     </section>
   );
@@ -45,16 +45,17 @@ export function Button({
   tone = "ghost",
   className = "",
   ...props
-}: PropsWithChildren<{ tone?: "ghost" | "primary" | "secondary"; className?: string } & ButtonHTMLAttributes<HTMLButtonElement>>) {
+}: PropsWithChildren<{ tone?: "ghost" | "primary" | "secondary" | "danger"; className?: string } & ButtonHTMLAttributes<HTMLButtonElement>>) {
   const tones = {
-    ghost: "border border-border-dark bg-surface-dark text-slate-200 hover:bg-border-dark focus-visible:border-primary/40",
-    primary: "bg-primary text-background-dark hover:brightness-110 focus-visible:ring-primary/60",
-    secondary: "border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 focus-visible:border-primary/40",
+    ghost: "border border-border bg-surface-low text-primary-muted hover:border-border-bright hover:text-primary hover:bg-surface-mid",
+    primary: "border border-accent bg-accent text-background font-bold hover:bg-accent/90",
+    secondary: "border border-border bg-surface-mid text-primary hover:border-accent/40 hover:text-accent",
+    danger: "border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50",
   };
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-all focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 ${tones[tone]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-[0.14em] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40 ${tones[tone]} ${className}`}
     >
       {children}
     </button>
@@ -65,16 +66,21 @@ export function Chip({
   children,
   tone = "neutral",
   active = false,
-}: PropsWithChildren<{ tone?: "neutral" | "primary" | "success" | "warning" | "danger" | "violet"; active?: boolean }>) {
+}: PropsWithChildren<{ tone?: "neutral" | "primary" | "accent" | "success" | "warning" | "danger" | "violet"; active?: boolean }>) {
   const tones = {
-    neutral: active ? "border-slate-700 bg-slate-800 text-slate-200" : "border-border-dark bg-background-dark text-slate-400",
-    primary: "border-primary/30 bg-primary/10 text-primary",
-    success: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
-    warning: "border-amber-500/20 bg-amber-500/10 text-amber-400",
-    danger: "border-rose-500/20 bg-rose-500/10 text-rose-400",
-    violet: "border-secondary/20 bg-secondary/10 text-secondary",
+    neutral: active ? "border-accent text-accent bg-accent/10" : "border-border bg-surface-low text-primary-muted",
+    primary: "border-accent/50 bg-accent/10 text-accent",
+    accent: "border-accent/50 bg-accent/10 text-accent",
+    success: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+    warning: "border-amber-500/40 bg-amber-500/10 text-amber-400",
+    danger: "border-rose-500/40 bg-rose-500/10 text-rose-400",
+    violet: "border-accent/30 bg-surface-mid text-accent",
   };
-  return <span className={`inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] ${tones[tone]}`}>{children}</span>;
+  return (
+    <span className={`inline-flex max-w-full items-center border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${tones[tone]}`}>
+      {children}
+    </span>
+  );
 }
 
 export function MetricCard({
@@ -91,18 +97,16 @@ export function MetricCard({
   meta?: ReactNode;
 }) {
   return (
-    <Panel className="relative overflow-hidden p-6">
-      {icon ? (
-        <div className="absolute right-4 top-2 text-primary/10">
-          <Icon name={icon} className="text-6xl" />
-        </div>
-      ) : null}
-      <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">{label}</p>
-      <div className="mt-3 flex items-end gap-3">
-        <p className="font-display text-4xl font-bold tracking-tight text-slate-100">{value}</p>
+    <Panel className="relative p-6">
+      <div className="flex items-center justify-between">
+        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-primary-muted">{label}</p>
+        {icon ? <Icon name={icon} className="text-primary-subtle" /> : null}
+      </div>
+      <div className="mt-3 flex items-baseline gap-3">
+        <p className="font-display text-3xl font-bold tracking-tight text-primary md:text-4xl">{value}</p>
         {accent}
       </div>
-      {meta ? <div className="mt-4">{meta}</div> : null}
+      {meta ? <div className="mt-4 border-t border-border-muted pt-3">{meta}</div> : null}
     </Panel>
   );
 }
@@ -115,14 +119,14 @@ export function ProgressBar({
   tone?: "primary" | "warning" | "danger" | "violet";
 }) {
   const toneClass = {
-    primary: "bg-primary",
-    warning: "bg-amber-500",
-    danger: "bg-rose-500",
-    violet: "bg-secondary",
+    primary: "bg-accent",
+    warning: "bg-amber-400",
+    danger: "bg-rose-400",
+    violet: "bg-accent",
   }[tone];
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-border-dark">
-      <div className={`h-full rounded-full ${toneClass}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    <div className="h-1 w-full bg-surface-high">
+      <div className={`h-full ${toneClass}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
     </div>
   );
 }
@@ -138,21 +142,21 @@ export function DataTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] border-separate border-spacing-y-2 text-left">
+      <table className="w-full min-w-[640px] border-collapse text-left">
         <thead>
-          <tr className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+          <tr className="border-b border-border bg-surface-low font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-muted">
             {headers.map((header) => (
-              <th key={header} className="px-4 pb-2">
+              <th key={header} className="px-4 py-3">
                 {header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border-muted">
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="rounded-2xl border border-border-dark bg-background-dark/70 transition-colors hover:border-primary/30">
+            <tr key={rowIndex} className="transition-colors hover:bg-surface-low">
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className={`max-w-0 truncate px-4 ${dense ? "py-3" : "py-4"} text-sm text-slate-200 first:rounded-l-2xl last:rounded-r-2xl`}>
+                <td key={cellIndex} className={`max-w-0 truncate px-4 ${dense ? "py-2.5" : "py-3.5"} text-sm text-primary`}>
                   {cell}
                 </td>
               ))}
@@ -171,22 +175,22 @@ export function Drawer({
   footer,
 }: PropsWithChildren<{ title: string; subtitle?: string; footer?: ReactNode }>) {
   return (
-    <Panel className="flex h-full min-h-[520px] flex-col overflow-hidden xl:max-h-[calc(100vh-10rem)]">
-      <div className="border-b border-border-dark bg-background-dark/40 px-6 py-5">
-        <h3 className="font-display text-lg font-bold text-slate-100">{title}</h3>
-        {subtitle ? <p className="mt-1 truncate font-mono text-[11px] text-primary/70">{subtitle}</p> : null}
+    <Panel className="flex h-full min-h-[520px] flex-col xl:max-h-[calc(100vh-10rem)]">
+      <div className="border-b border-border bg-surface-low px-6 py-4">
+        <h3 className="font-display text-lg font-bold text-primary">{title}</h3>
+        {subtitle ? <p className="mt-1 truncate font-mono text-[11px] text-primary-muted">{subtitle}</p> : null}
       </div>
       <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">{children}</div>
-      {footer ? <div className="grid grid-cols-1 gap-4 border-t border-border-dark bg-background-dark/30 p-6 sm:grid-cols-2">{footer}</div> : null}
+      {footer ? <div className="grid grid-cols-1 gap-3 border-t border-border bg-surface-low p-4 sm:grid-cols-2">{footer}</div> : null}
     </Panel>
   );
 }
 
 export function LabeledValue({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="space-y-1.5 min-w-0">
-      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">{label}</p>
-      <div className="min-w-0">{value}</div>
+    <div className="min-w-0 space-y-1">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary-muted">{label}</p>
+      <div className="min-w-0 text-primary">{value}</div>
     </div>
   );
 }
@@ -201,13 +205,13 @@ export function PathBlock({
   strike?: boolean;
 }) {
   const tones = {
-    default: "bg-background-dark text-slate-400",
-    primary: "bg-background-dark text-primary",
-    success: "bg-emerald-500/5 text-slate-300",
-    danger: "bg-rose-500/5 text-slate-300",
+    default: "bg-surface-low border-border-muted text-primary-muted",
+    primary: "bg-surface-low border-accent/30 text-accent",
+    success: "bg-emerald-500/5 border-emerald-500/20 text-emerald-300",
+    danger: "bg-rose-500/5 border-rose-500/20 text-rose-300",
   };
   return (
-    <div className={`break-all rounded-xl px-4 py-3 font-mono text-xs ${tones[tone]} ${strike ? "line-through opacity-70" : ""}`}>
+    <div className={`break-all border px-3 py-2 font-mono text-xs ${tones[tone]} ${strike ? "line-through opacity-70" : ""}`}>
       {value}
     </div>
   );

@@ -48,20 +48,20 @@ export function ReviewDetailPanel({
       }
     >
       {!item ? (
-        <div className="rounded-xl border border-dashed border-border-dark bg-background-dark/50 px-4 py-8 text-sm text-slate-500">
+        <div className="border border-border bg-surface-low px-4 py-8 font-mono text-xs text-primary-subtle">
           Select a review item to inspect its affected files, triage state, and plan options.
         </div>
       ) : (
         <>
-          <Panel className="border-primary/20 bg-background-dark/50 p-4">
+          <Panel className="border border-border bg-surface-low p-4">
             <div className="mb-4 flex items-start justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex size-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-                  <span className="material-symbols-outlined">audio_file</span>
+              <div className="flex items-center gap-3">
+                <div className="flex size-8 items-center justify-center border border-border bg-surface text-accent">
+                  <span className="material-symbols-outlined text-base">audio_file</span>
                 </div>
                 <div>
-                  <h3 className="font-display text-base font-bold text-slate-200">{item.summary}</h3>
-                  <p className="mt-1 text-[10px] font-mono uppercase tracking-[0.18em] text-slate-500">{item.item_type}</p>
+                  <h3 className="font-display text-sm font-bold uppercase tracking-wider text-primary">{item.summary}</h3>
+                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-primary-subtle">{item.item_type}</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -70,9 +70,9 @@ export function ReviewDetailPanel({
               </div>
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">
+              <div className="flex justify-between font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-subtle">
                 <span>Priority Score</span>
-                <span className="font-mono text-primary">{item.priority_score}</span>
+                <span className="text-primary font-bold">{item.priority_score}</span>
               </div>
               <ProgressBar value={item.priority_score} />
             </div>
@@ -93,25 +93,25 @@ export function ReviewDetailPanel({
             </Button>
           </div>
 
-          <div className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-5 text-slate-400" role="note">
-            <span className="font-bold text-primary">Resolve Until Refresh</span> hides this finding without editing audio.
-            If the next library refresh still detects it, NyxCore returns it as <span className="font-bold text-slate-300">Seen</span>.
+          <div className="border border-border bg-surface-low px-4 py-3 font-mono text-xs text-primary-muted leading-relaxed" role="note">
+            <span className="font-bold text-accent">Resolve Until Refresh</span> hides this finding without editing audio.
+            If the next library refresh still detects it, NyxCore returns it as <span className="font-bold text-primary">Seen</span>.
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Panel className="p-3">
-              <p className="text-[10px] text-slate-500">Reclaimable</p>
-              <p className="mt-1 text-lg font-bold text-amber-400">{formatBytes(item.reclaimable_bytes ?? 0)}</p>
-            </Panel>
-            <Panel className="p-3">
-              <p className="text-[10px] text-slate-500">Confidence</p>
-              <p className="mt-1 text-lg font-bold text-primary">{item.confidence ? `${Math.round(item.confidence * 100)}%` : "n/a"}</p>
-            </Panel>
+            <div className="border border-border bg-surface-low p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">Reclaimable</p>
+              <p className="mt-1 font-display text-xl font-bold tracking-tight text-emerald-400">{formatBytes(item.reclaimable_bytes ?? 0)}</p>
+            </div>
+            <div className="border border-border bg-surface-low p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">Confidence</p>
+              <p className="mt-1 font-display text-xl font-bold tracking-tight text-accent">{item.confidence ? `${Math.round(item.confidence * 100)}%` : "n/a"}</p>
+            </div>
           </div>
 
           <LabeledValue
             label="Reason Summary"
-            value={<div className="break-words rounded-xl bg-background-dark px-4 py-3 text-sm text-slate-300">{item.reason_summary}</div>}
+            value={<div className="break-words border border-border bg-surface-low px-4 py-3 font-mono text-xs text-primary-muted">{item.reason_summary}</div>}
           />
 
           {item.preferred_path ? (
@@ -125,18 +125,18 @@ export function ReviewDetailPanel({
             label="Affected Paths"
             value={
               affectedPaths.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {displayedAffectedPaths.map((path) => (
                     <PathBlock key={path} value={path} />
                   ))}
                   {remainingAffectedPathCount > 0 ? (
-                    <p className="px-1 text-xs text-slate-500">
+                    <p className="px-1 font-mono text-[10px] text-primary-subtle">
                       {remainingAffectedPathCount} more paths. Generate a plan to inspect the paginated operations.
                     </p>
                   ) : null}
                 </div>
               ) : (
-                <div className="rounded-xl bg-background-dark px-4 py-3 text-sm text-slate-500">No affected paths were attached to this finding.</div>
+                <div className="border border-border bg-surface-low px-4 py-3 font-mono text-xs text-primary-subtle">No affected paths were attached to this finding.</div>
               )
             }
           />
