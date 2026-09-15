@@ -8,17 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nyxcore import __version__
 from nyxcore.action_plan.ledger import (
-    append_operation_batch,
     find_batch,
     load_operation_ledger,
-    save_operation_ledger,
-    undo_operation_batch,
 )
 from nyxcore.action_plan.service import (
     ActionPlanReport,
     build_action_plan_report,
     execute_reviewed_action_plan,
 )
+from nyxcore.action_plan.lifecycle import reverse_recorded_batch
+from nyxcore.action_plan.lock import MutationLockError
 from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
 from nyxcore.incremental.service import ChangeSet, RefreshSummary
@@ -396,22 +395,19 @@ def create_app() -> FastAPI:
             )
         )
         try:
-            plan_report, results = execute_reviewed_action_plan(
+            plan_report, results, batch = execute_reviewed_action_plan(
                 resolved_music,
                 records,
                 review_report,
                 requested_plan_report,
                 review_state=review_state,
+                review_state_path=review_state_path,
+                ledger_path=resolved_out / "review_history.json",
                 backup_dir=backup_dir,
                 workspace_root=resolved_out,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        save_review_state(review_state_path, review_state)
-        ledger_path = resolved_out / "review_history.json"
-        ledger = load_operation_ledger(ledger_path)
-        batch = append_operation_batch(ledger, plan_report=plan_report, results=results)
-        save_operation_ledger(ledger_path, ledger)
         resolved_review_item_ids = sorted({item_id for result in results for item_id in result.resolved_review_item_ids})
         return ReviewPlanApplyResponse(
             result_count=len(results),
@@ -587,19 +583,22 @@ def create_app() -> FastAPI:
                 )
             )
         )
-        review_state = load_review_state(review_state_path)
         try:
-            changed = undo_operation_batch(
-                batch,
-                review_state=review_state,
-                allowed_roots=(resolved_music, resolved_out),
+            batch, changed = reverse_recorded_batch(
+                ledger_path=ledger_path,
+                review_state_path=review_state_path,
+                batch_id=batch_id,
+                library_root=resolved_music,
+                workspace_root=resolved_out,
                 alternate_restore_dir=alternate_restore_dir,
                 target_path=target_path,
+                stale_lock_token=request.stale_lock_token,
             )
+        except MutationLockError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-        save_operation_ledger(ledger_path, ledger)
-        save_review_state(review_state_path, review_state)
+        review_state = load_review_state(review_state_path)
         reactivated_review_item_ids = sorted(
             item_id for item_id, entry in review_state.items.items() if entry.status == "seen" and item_id in batch.source_review_item_ids
         )

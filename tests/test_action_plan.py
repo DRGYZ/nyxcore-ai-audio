@@ -142,6 +142,8 @@ class ActionPlanTests(unittest.TestCase):
                 review_report,
                 requested,
                 review_state=ReviewStateStore(),
+                review_state_path=self.out / "review_state.json",
+                ledger_path=self.out / "history.json",
             )
 
         self.assertTrue(left.exists())
@@ -150,12 +152,14 @@ class ActionPlanTests(unittest.TestCase):
         left, _right, records, review_report, requested = self._reviewed_duplicate_plan()
         left.write_bytes(b"changed-after-review")
 
-        _authorized, results = execute_reviewed_action_plan(
+        _authorized, results, _batch = execute_reviewed_action_plan(
             self.music,
             records,
             review_report,
             requested,
             review_state=ReviewStateStore(),
+            review_state_path=self.out / "review_state.json",
+            ledger_path=self.out / "history.json",
         )
 
         self.assertEqual(results[0].status, "partial_failure")
@@ -199,6 +203,8 @@ class ActionPlanTests(unittest.TestCase):
                 review_report,
                 requested,
                 review_state=ReviewStateStore(),
+                review_state_path=self.out / "review_state.json",
+                ledger_path=self.out / "history.json",
             )
 
         self.assertTrue(preferred.exists())
@@ -213,12 +219,14 @@ class ActionPlanTests(unittest.TestCase):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"existing-user-file")
 
-        _authorized, results = execute_reviewed_action_plan(
+        _authorized, results, _batch = execute_reviewed_action_plan(
             self.music,
             records,
             review_report,
             requested,
             review_state=ReviewStateStore(),
+            review_state_path=self.out / "review_state.json",
+            ledger_path=self.out / "history.json",
         )
 
         self.assertEqual(results[0].status, "partial_failure")

@@ -24,12 +24,10 @@ from nyxcore.action_plan.service import (
 from nyxcore.action_plan.ledger import (
     OperationBatch,
     OperationLedger,
-    append_operation_batch,
     find_batch,
     load_operation_ledger,
-    save_operation_ledger,
-    undo_operation_batch,
 )
+from nyxcore.action_plan.lifecycle import inspect_recorded_batch, recover_recorded_batch, reverse_recorded_batch
 from nyxcore.audio.backends.base import AudioBackend
 from nyxcore.audio.backends.dummy_backend import DummyBackend
 from nyxcore.audio.cache import AnalysisCache
@@ -1891,21 +1889,19 @@ def apply_review_plan_cmd(
         only_unresolved=False,
     )
     try:
-        report, results = execute_reviewed_action_plan(
+        report, results, batch = execute_reviewed_action_plan(
             music,
             records,
             review_report,
             requested_report,
             review_state=review_state_store,
+            review_state_path=review_state_path,
+            ledger_path=history_path,
             backup_dir=backup_dir,
             workspace_root=output_dir,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    save_review_state(review_state_path, review_state_store)
-    ledger = load_operation_ledger(history_path)
-    batch = append_operation_batch(ledger, plan_report=report, results=results)
-    save_operation_ledger(history_path, ledger)
     json_path = _write_applied_plan_json(output_dir, results)
     md_path = _write_applied_plan_md(output_dir, results)
     table = Table(title="Applied Review Plan Summary")
@@ -1954,6 +1950,7 @@ def _restore_or_undo_history_batch(
     review_state: Path | None,
     alternate_restore_dir: Path | None,
     target_path: str | None,
+    stale_lock_token: str | None,
 ) -> None:
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
@@ -1965,20 +1962,19 @@ def _restore_or_undo_history_batch(
             path.relative_to(out)
         except ValueError as exc:
             raise typer.BadParameter(f"{label} path must stay inside --out") from exc
-    ledger = load_operation_ledger(history_path)
-    batch = find_batch(ledger, batch_id)
-    if batch is None:
-        raise typer.BadParameter(f"History batch not found: {batch_id}")
-    review_state_store = load_review_state(review_state_path)
-    undo_operation_batch(
-        batch,
-        review_state=review_state_store,
-        allowed_roots=(music.resolve(), out.resolve()),
-        alternate_restore_dir=alternate_restore_dir,
-        target_path=target_path,
-    )
-    save_review_state(review_state_path, review_state_store)
-    save_operation_ledger(history_path, ledger)
+    try:
+        batch, _changed = reverse_recorded_batch(
+            ledger_path=history_path,
+            review_state_path=review_state_path,
+            batch_id=batch_id,
+            library_root=music.resolve(),
+            workspace_root=out,
+            alternate_restore_dir=alternate_restore_dir,
+            target_path=target_path,
+            stale_lock_token=stale_lock_token,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     console.print(_history_detail_table(batch))
 
 
@@ -1991,6 +1987,7 @@ def restore_review_action_cmd(
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Restore only one recorded path from the batch"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
 ) -> None:
     """Restore a recorded history batch using the reversible operation ledger."""
     _restore_or_undo_history_batch(
@@ -2001,6 +1998,7 @@ def restore_review_action_cmd(
         review_state=review_state,
         alternate_restore_dir=alternate_restore_dir,
         target_path=target_path,
+        stale_lock_token=stale_lock_token,
     )
 
 
@@ -2013,6 +2011,7 @@ def undo_review_action_cmd(
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Undo only one recorded path from the batch"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
 ) -> None:
     """Compatibility alias for the same history-batch reversal path."""
     _restore_or_undo_history_batch(
@@ -2023,7 +2022,53 @@ def undo_review_action_cmd(
         review_state=review_state,
         alternate_restore_dir=alternate_restore_dir,
         target_path=target_path,
+        stale_lock_token=stale_lock_token,
     )
+
+
+@app.command("recover-review-action")
+def recover_review_action_cmd(
+    batch_id: str = typer.Argument(..., help="History batch id to inspect or recover"),
+    music: Path = typer.Option(..., "--music", help="Configured music-library root"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+    action: str = typer.Option("inspect", "--action", help="inspect, finalize, or abort"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    out = out.resolve()
+    history_path = (history or _default_history_path(out)).resolve()
+    try:
+        history_path.relative_to(out)
+    except ValueError as exc:
+        raise typer.BadParameter("history path must stay inside --out") from exc
+    try:
+        if action == "inspect":
+            batch, assessments = inspect_recorded_batch(
+                history_path,
+                batch_id,
+                library_root=music.resolve(),
+                workspace_root=out,
+            )
+        elif action in {"finalize", "abort"}:
+            batch, assessments = recover_recorded_batch(
+                ledger_path=history_path,
+                batch_id=batch_id,
+                library_root=music.resolve(),
+                workspace_root=out,
+                action=action,
+                stale_lock_token=stale_lock_token,
+            )
+        else:
+            raise ValueError("--action must be one of: inspect, finalize, abort")
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print_json(data={
+        "batch_id": batch.batch_id,
+        "lifecycle_state": batch.lifecycle_state,
+        "assessments": [assessment.to_dict() for assessment in assessments],
+    })
 
 
 @app.command("watch")

@@ -331,6 +331,7 @@ Current command families include:
 - `show-history`
 - `restore-review-action`
 - `undo-review-action`
+- `recover-review-action`
 - `playlist`
 - `save-playlist`
 - `list-playlists`
@@ -354,6 +355,8 @@ Safety note:
 - mutating use of `apply`, `rename --apply`, `rename-undo`, `apply-ai`, and `apply-judge` is unavailable in this experimental release
 - their preview/report modes remain available where applicable
 - supported mutations must use `review` -> `review-plan` -> `apply-review-plan`, which rebuilds and validates the plan against the current library
+- reviewed mutations journal durable intent before touching audio files and use a library-scoped single-writer lock
+- `recover-review-action --action inspect` classifies incomplete operations; only explicitly safe states offer `finalize` or `abort`
 
 Legacy note:
 
