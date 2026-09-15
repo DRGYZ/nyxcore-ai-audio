@@ -20,31 +20,31 @@ export function ApiUnavailableState({
     <Panel className="p-8">
       <div className="flex max-w-3xl flex-col gap-6">
         <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center border border-amber-500/30 bg-amber-500/10 text-amber-400">
+          <div className="flex size-9 items-center justify-center rounded-[3px] border border-amber-500/30 bg-amber-500/10 text-amber-400">
             <Icon name="cloud_off" className="text-xl" />
           </div>
           <div>
-            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-amber-400">Local Connection</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-400">Local Connection</p>
             <h2 className="font-display text-xl font-bold text-primary">
               Local API is not connected {contextLabel ? `• ${contextLabel}` : ""}
             </h2>
           </div>
         </div>
 
-        <p className="text-sm leading-relaxed text-primary-muted">
+        <p className="font-sans text-sm leading-relaxed text-primary-muted">
           NyxCore is an experimental local-first toolkit. It connects to a local FastAPI backend running on your machine
-          at <code className="border border-border bg-surface-low px-1.5 py-0.5 font-mono text-xs text-accent">http://127.0.0.1:8000</code>.
+          at <code className="rounded-[2px] border border-white/[0.08] bg-surface-low px-1.5 py-0.5 font-mono text-xs text-accent">http://127.0.0.1:8000</code>.
           The local server is not currently reachable.
         </p>
 
-        <div className="space-y-4 border border-border bg-surface-low/70 p-5">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-primary-muted">Setup Instructions</p>
+        <div className="space-y-4 rounded-[3px] border border-white/[0.07] bg-surface-low/60 p-5">
+          <p className="font-sans text-xs font-semibold text-primary">Setup Instructions</p>
 
           <div className="space-y-2">
-            <p className="font-mono text-xs font-semibold text-primary">
+            <p className="font-sans text-xs text-primary-muted">
               1. Start the local API pointed at your music library & reports directory:
             </p>
-            <pre className="overflow-x-auto border border-border-muted bg-surface p-3 font-mono text-xs text-primary-muted select-all">
+            <pre className="overflow-x-auto rounded-[3px] border border-white/[0.06] bg-surface p-3 font-mono text-xs text-primary/90 select-all">
 {`export NYXCORE_WEB_MUSIC_DIR="/path/to/your/music"
 export NYXCORE_WEB_OUT_DIR="data/reports"
 uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
@@ -52,10 +52,10 @@ uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
           </div>
 
           <div className="space-y-2">
-            <p className="font-mono text-xs font-semibold text-primary">
+            <p className="font-sans text-xs text-primary-muted">
               2. Or generate and inspect the built-in demo library:
             </p>
-            <pre className="overflow-x-auto border border-border-muted bg-surface p-3 font-mono text-xs text-primary-muted select-all">
+            <pre className="overflow-x-auto rounded-[3px] border border-white/[0.06] bg-surface p-3 font-mono text-xs text-primary/90 select-all">
 {`python demo/create_demo_library.py demo/demo-library
 export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/demo-library"
 export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
@@ -63,7 +63,7 @@ uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
             </pre>
           </div>
 
-          <p className="font-mono text-[11px] text-primary-subtle">
+          <p className="font-sans text-xs text-primary-subtle">
             For step-by-step setup guides (including Windows WSL2 setup and dependencies), refer to <span className="text-accent">INSTALL_WSL.md</span> in the project root.
           </p>
         </div>
@@ -73,7 +73,7 @@ uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
             <Icon name="refresh" className={`text-base ${isChecking ? "animate-spin" : ""}`} />
             {isChecking ? "Checking Connection…" : "Check Connection"}
           </Button>
-          <span className="font-mono text-xs text-primary-subtle">
+          <span className="font-sans text-xs text-primary-subtle">
             NyxCore operates locally. No cloud services or external network requests are made.
           </span>
         </div>
@@ -93,20 +93,20 @@ export function QueryNotice({
 }) {
   if (loading) {
     return (
-      <div className="border border-border bg-surface-low px-4 py-3 font-mono text-xs text-primary-muted">
+      <div className="rounded-[3px] border border-white/[0.07] bg-surface-low px-4 py-2.5 font-sans text-xs text-primary-muted">
         Loading library data from local API…
       </div>
     );
   }
   if (error || usingMock) {
     return (
-      <div className="border border-amber-500/20 bg-amber-500/10 px-4 py-3 font-mono text-xs text-amber-300">
+      <div className="rounded-[3px] border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 font-sans text-xs text-amber-300">
         Local API unavailable. Connect the backend to inspect live library data.
       </div>
     );
   }
   return (
-    <div className="border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
+    <div className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-2.5 font-sans text-xs text-emerald-300">
       Live API connected. Data and review state are current.
     </div>
   );
@@ -141,12 +141,12 @@ export function ActionBanner({
   action?: ReactNode;
 }) {
   const styles = {
-    info: "border-l-2 border-l-accent border-border bg-surface-low text-primary",
-    success: "border-l-2 border-l-emerald-400 border-border bg-surface-low text-primary",
-    error: "border-l-2 border-l-rose-400 border-border bg-surface-low text-primary",
+    info: "border-l-2 border-l-accent border-white/[0.07] bg-surface-low text-primary",
+    success: "border-l-2 border-l-emerald-400 border-white/[0.07] bg-surface-low text-primary",
+    error: "border-l-2 border-l-rose-400 border-white/[0.07] bg-surface-low text-primary",
   };
   return (
-    <div className={`flex flex-col gap-3 border px-4 py-3 text-sm md:flex-row md:items-center md:justify-between ${styles[tone]}`}>
+    <div className={`flex flex-col gap-3 rounded-[3px] border px-4 py-3 text-xs md:text-sm md:flex-row md:items-center md:justify-between ${styles[tone]}`}>
       <span>{message}</span>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
@@ -163,10 +163,10 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <Panel className="border-dashed border-border bg-surface-low/40 px-6 py-12 text-center">
-      <p className="font-display text-lg font-bold text-primary">{title}</p>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-primary-muted">{description}</p>
-      {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
+    <Panel className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-6 py-12 text-center">
+      <p className="font-display text-base font-bold text-primary">{title}</p>
+      <p className="mx-auto mt-1.5 max-w-xl font-sans text-xs leading-relaxed text-primary-muted">{description}</p>
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
     </Panel>
   );
 }
@@ -206,23 +206,23 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 py-8 backdrop-blur-sm" role="presentation" onMouseDown={onClose}>
       <div
-        className="w-full max-w-4xl border border-border bg-surface shadow-2xl"
+        className="w-full max-w-4xl rounded-[4px] border border-white/[0.1] bg-surface shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-border bg-surface-low px-6 py-4">
+        <div className="flex items-start justify-between border-b border-white/[0.07] bg-surface-low/80 px-6 py-4">
           <div className="min-w-0">
-            <h3 id={titleId} className="font-display text-xl font-bold text-primary">{title}</h3>
-            {subtitle ? <p className="mt-1 break-all font-mono text-xs text-primary-muted">{subtitle}</p> : null}
+            <h3 id={titleId} className="font-display text-lg font-bold text-primary">{title}</h3>
+            {subtitle ? <p className="mt-1 break-all font-mono text-xs text-primary-subtle">{subtitle}</p> : null}
           </div>
-          <button ref={closeRef} onClick={onClose} className="p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <button ref={closeRef} onClick={onClose} className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent">
             <Icon name="close" />
           </button>
         </div>
         <div className="max-h-[70vh] overflow-y-auto px-6 py-6">{children}</div>
-        {footer ? <div className="flex flex-wrap justify-end gap-3 border-t border-border bg-surface-low px-6 py-4">{footer}</div> : null}
+        {footer ? <div className="flex flex-wrap justify-end gap-2.5 border-t border-white/[0.07] bg-surface-low/80 px-6 py-3.5">{footer}</div> : null}
       </div>
     </div>
   );

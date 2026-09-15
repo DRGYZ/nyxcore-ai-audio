@@ -13,6 +13,7 @@ tests/_runtime_*/
 tests/tmp*/
 
 stitch_neurodesk_focus_workspace/
+stitch_nyxcore_visual_redesign_directions/
 demo/generated/
 demo/demo-library/
 
