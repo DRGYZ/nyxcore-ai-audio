@@ -8,17 +8,11 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 
 from nyxcore.config import HealthConfig
+from nyxcore.core.text import normalize_match_text as _normalize_text
 from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.duplicates.service import DuplicateAnalysisReport, LOSSLESS_EXTENSIONS, analyze_duplicates
 
 FILENAME_SPLIT_RE = re.compile(r"\s+-\s+")
-
-
-def _normalize_text(value: str | None) -> str:
-    if value is None:
-        return ""
-    cleaned = re.sub(r"[^a-z0-9]+", " ", value.lower())
-    return " ".join(cleaned.split())
 
 
 def _sample_paths(paths: list[str], limit: int) -> list[str]:

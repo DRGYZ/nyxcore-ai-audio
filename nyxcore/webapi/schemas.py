@@ -35,6 +35,27 @@ class ApiReportEnvelope(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class SearchTrackResponse(BaseModel):
+    path: str
+    filename: str
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    duration_seconds: float | None = None
+    file_size_bytes: int
+    has_cover_art: bool
+    warnings: list[str] = Field(default_factory=list)
+    match_fields: list[str] = Field(default_factory=list)
+
+
+class SearchResponse(BaseModel):
+    meta: ApiMetaResponse
+    query: str
+    total_matches: int
+    returned_count: int
+    items: list[SearchTrackResponse] = Field(default_factory=list)
+
+
 class PlaylistSummaryResponse(BaseModel):
     playlist_id: str
     name: str
@@ -44,11 +65,37 @@ class PlaylistSummaryResponse(BaseModel):
     track_count: int = 0
     latest_summary: dict[str, Any] = Field(default_factory=dict)
     latest_refresh_diff: dict[str, Any] = Field(default_factory=dict)
+    latest_tracks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PlaylistsResponse(BaseModel):
     meta: ApiMetaResponse
     items: list[PlaylistSummaryResponse] = Field(default_factory=list)
+
+
+class PlaylistCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    query: str = Field(min_length=1, max_length=500)
+    max_tracks: int | None = Field(default=None, ge=1, le=500)
+    min_score: float | None = None
+    export_m3u: bool = True
+    music_path: str | None = None
+    out_path: str | None = None
+    profile: str | None = None
+    config_path: str | None = None
+
+
+class PlaylistRefreshRequest(BaseModel):
+    export_m3u: bool = True
+    music_path: str | None = None
+    out_path: str | None = None
+    profile: str | None = None
+    config_path: str | None = None
+
+
+class PlaylistMutationResponse(BaseModel):
+    item: PlaylistSummaryResponse
+    m3u_path: str | None = None
 
 
 class HistoryOperationResponse(BaseModel):
@@ -58,6 +105,9 @@ class HistoryOperationResponse(BaseModel):
     reversible: bool
     original_path: str | None = None
     current_path: str | None = None
+    undo_status: UndoExecutionStatus = "pending"
+    undone_at: str | None = None
+    undo_message: str | None = None
 
 
 class HistoryBatchSummaryResponse(BaseModel):
@@ -102,7 +152,10 @@ class ReviewPlanGenerateRequest(BaseModel):
 
 class ReviewPlanApplyRequest(BaseModel):
     plan_report: dict[str, Any]
+    music_path: str | None = None
     out_path: str | None = None
+    profile: str | None = None
+    config_path: str | None = None
     backup_dir: str | None = None
 
 

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from nyxcore.action_plan.service import ActionPlanReport, AppliedPlanResult
+from nyxcore.core.atomic import atomic_write_text
 from nyxcore.review_queue.state import ReviewStateStore, apply_review_action
 
 
@@ -28,6 +29,7 @@ class LedgerOperation:
     undo_status: str = "pending"
     undone_at: str | None = None
     undo_message: str | None = None
+    applied_hash: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -49,6 +51,7 @@ class LedgerOperation:
             undo_status=str(data.get("undo_status", "pending")),
             undone_at=None if data.get("undone_at") is None else str(data.get("undone_at")),
             undo_message=None if data.get("undo_message") is None else str(data.get("undo_message")),
+            applied_hash=data.get("applied_hash"),
         )
 
 
@@ -112,8 +115,7 @@ def load_operation_ledger(path: Path) -> OperationLedger:
 
 
 def save_operation_ledger(path: Path, ledger: OperationLedger) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(ledger.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(ledger.to_dict(), indent=2, ensure_ascii=False))
 
 
 def _batch_id(plan_ids: list[str], applied_at: str) -> str:
@@ -165,6 +167,7 @@ def append_operation_batch(
                     original_path=operation.path,
                     current_path=operation.destination_path if operation.status == "ok" and operation.destination_path else operation.path,
                     backup_path=operation.backup_path,
+                    applied_hash=operation.applied_hash,
                     status=operation.status,
                     message=operation.message,
                     reversible=_operation_reversible(operation.operation_type, operation.backup_path),
@@ -205,7 +208,9 @@ def undo_operation_batch(
     changed_operations: list[LedgerOperation] = []
     touched_review_item_ids: set[str] = set()
 
-    for operation in batch.operations:
+    for operation in reversed(batch.operations):
+        if operation.status != "ok":
+            continue
         if target_path is not None and target_path not in {operation.original_path, operation.current_path}:
             continue
         if not operation.reversible:
@@ -236,6 +241,13 @@ def undo_operation_batch(
                 destination = Path(operation.original_path or "")
                 if not backup.exists():
                     raise RuntimeError(f"backup path does not exist: {backup}")
+                if destination.exists():
+                    if not operation.applied_hash:
+                        raise RuntimeError("Cannot verify legacy metadata restore; original file left untouched")
+                    with destination.open("rb") as stream:
+                        current_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+                    if current_hash != operation.applied_hash:
+                        raise RuntimeError("File changed after metadata edit; restore would overwrite newer content")
                 shutil.copy2(backup, destination)
                 operation.current_path = str(destination)
             else:

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDuplicatesQuery, useHealthQuery, useHistoryQuery, useReviewQuery } from "../../lib/hooks";
 import { mockDuplicateReport, mockHealthReport, mockHistoryResponse, mockReviewReport } from "../../lib/mock-data";
 import {
@@ -20,10 +22,12 @@ import {
 } from "../components";
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const healthQuery = useHealthQuery();
   const reviewQuery = useReviewQuery();
   const duplicatesQuery = useDuplicatesQuery();
   const historyQuery = useHistoryQuery();
+  const [refreshNotice, setRefreshNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   const healthState = resolveReportQueryData(healthQuery, mockHealthReport);
   const reviewState = resolveReportQueryData(reviewQuery, mockReviewReport);
@@ -31,6 +35,9 @@ export function DashboardPage() {
   const historyState = resolveQueryData(historyQuery, mockHistoryResponse);
   const health = healthState.data;
   const review = reviewState.data;
+  const actionableReviewItems = review.items.filter(
+    (item) => item.review_status === "new" || item.review_status === "seen",
+  );
   const duplicates = duplicatesState.data;
   const history = historyState.data;
   const queryNoticeState = mergeQueryNoticeStates(
@@ -42,21 +49,41 @@ export function DashboardPage() {
   const showStartHere = queryNoticeState.usingMock || (review.items.length === 0 && history.items.length === 0);
   const losslessRatio = health.overview.total_audio_files === 0 ? 0 : (health.quality.lossless_files / health.overview.total_audio_files) * 100;
   const highBitrateRatio = health.overview.total_audio_files === 0 ? 0 : (health.quality.bitrate_buckets[">=256k"] / health.overview.total_audio_files) * 100;
+  const refreshing = healthQuery.isFetching || reviewQuery.isFetching || duplicatesQuery.isFetching || historyQuery.isFetching;
+
+  async function handleRefresh() {
+    setRefreshNotice(null);
+    const results = await Promise.all([
+      healthQuery.refetch(),
+      reviewQuery.refetch(),
+      duplicatesQuery.refetch(),
+      historyQuery.refetch(),
+    ]);
+    const failed = results.find((result) => result.error);
+    setRefreshNotice(
+      failed
+        ? { tone: "error", message: "Snapshot refresh failed. The last available data remains visible." }
+        : { tone: "success", message: "Mission Control refreshed from the current library." },
+    );
+  }
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="System Diagnostics"
         title="Mission Control"
-        description="Read-only operational view over NyxCore health, review priorities, duplicate pressure, and recent action history."
+        description="Live operational view over NyxCore health, review priorities, duplicate pressure, and recent action history."
         actions={
           <>
-            <Button tone="ghost" disabled>UI Is Read-Only</Button>
-            <Button tone="primary" disabled>Start with CLI Scan</Button>
+            <Button tone="ghost" onClick={() => navigate("/health")}>Open Health Audit</Button>
+            <Button tone="primary" onClick={() => void handleRefresh()} disabled={refreshing}>
+              {refreshing ? "Refreshing…" : "Refresh Snapshot"}
+            </Button>
           </>
         }
       />
       <PageQueryStateNotice {...queryNoticeState} />
+      {refreshNotice ? <ActionBanner tone={refreshNotice.tone} message={refreshNotice.message} /> : null}
       {showStartHere ? (
         <ActionBanner
           tone="info"
@@ -97,16 +124,18 @@ export function DashboardPage() {
                 <span className="material-symbols-outlined text-primary">priority_high</span>
                 Priority Review
               </h2>
-              <Button tone="secondary" className="px-3 py-2 text-xs">View All Issues</Button>
+              <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => navigate("/review")}>View All Issues</Button>
             </div>
             <div className="space-y-3">
-              {review.items.length === 0 ? (
+              {actionableReviewItems.length === 0 ? (
                 <EmptyState
-                  title="No review findings"
-                  description="Run `python -m nyxcore.cli review <music-dir> --out data/reports` first. For a safe local demo, generate `demo/generated/sample-library` with `python demo/create_demo_library.py --force` and point the API at that folder."
+                  title={review.items.length === 0 ? "No review findings" : "No active review findings"}
+                  description={review.items.length === 0
+                    ? "Run `python -m nyxcore.cli review <music-dir> --out data/reports` first. For a safe local demo, generate `demo/generated/sample-library` with `python demo/create_demo_library.py --force` and point the API at that folder."
+                    : "The remaining findings are snoozed or resolved until refresh. Open the Review Inbox to inspect their current state."}
                 />
               ) : (
-                review.items.slice(0, 4).map((item) => (
+                actionableReviewItems.slice(0, 4).map((item) => (
                   <div key={item.item_id} className="flex items-center justify-between gap-4 rounded-xl border border-primary/10 bg-primary/5 px-4 py-4 transition-colors hover:border-primary/30">
                     <div className="flex min-w-0 items-center gap-4">
                       <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
@@ -129,6 +158,7 @@ export function DashboardPage() {
                 <span className="material-symbols-outlined text-primary">history</span>
                 Recent History
               </h2>
+              <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => navigate("/history")}>View History</Button>
             </div>
             <div className="px-4 py-4">
               <DataTable

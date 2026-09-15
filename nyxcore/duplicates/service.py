@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
@@ -10,17 +9,11 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 
 from nyxcore.config import DuplicateConfig
+from nyxcore.core.text import normalize_match_text as _normalize_text
 from nyxcore.core.track import TrackRecord
 
 LOSSLESS_EXTENSIONS = {".flac", ".wav", ".aiff", ".aif"}
 PARTIAL_HASH_BYTES = 65_536
-
-
-def _normalize_text(value: str | None) -> str:
-    if value is None:
-        return ""
-    text = re.sub(r"[^a-z0-9]+", " ", value.lower())
-    return " ".join(text.split())
 
 
 def _similarity(a: str, b: str) -> float:

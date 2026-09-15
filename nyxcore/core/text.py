@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 REASON_CONNECTOR_TAILS = {"but", "and", "or", "with", "because", "so", "which"}
 DANGLING_REASON_FRAGMENTS = {"clap tags", "clap_tags", "genre evidence", "evidence inconsistent"}
@@ -14,6 +15,30 @@ REASON_BAD_END_PATTERNS = (
     r"(?i)^conflict(\s*\(|\b)",
     r"(?i)\bcontradictory$",
 )
+
+
+def normalize_match_text(value: str | None) -> str:
+    """Normalize human text without discarding non-ASCII scripts."""
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFC", value.casefold())
+    cleaned = "".join(
+        char if char.isalnum() or unicodedata.category(char).startswith("M") else " "
+        for char in normalized
+    )
+    return " ".join(cleaned.split())
+
+
+def tokenize_match_text(value: str | None) -> list[str]:
+    return normalize_match_text(value).split()
+
+
+def contains_match_term(value: str | None, term: str | None) -> bool:
+    normalized_value = normalize_match_text(value)
+    normalized_term = normalize_match_text(term)
+    if not normalized_value or not normalized_term:
+        return False
+    return f" {normalized_term} " in f" {normalized_value} "
 
 
 def _remove_conflict_segments(text: str) -> str:

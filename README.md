@@ -30,7 +30,7 @@ NyxCore exists to turn that mess into a review-first workflow instead of a pile 
 
 - CLI: scan, duplicates, health, review, plans, history, rename, analysis, tagging, and playlists
 - API: FastAPI layer in `nyxcore.webapi` that exposes the same service modules to the frontend
-- Web UI: React + Vite app in `web/` for Mission Control, Review Inbox, Saved Playlists, History, Duplicates, and Health
+- Web UI: React + Vite app in `web/` for Mission Control, Archive Search, Review Inbox, Saved Playlists, History, Duplicates, and Health
 
 ## Start Here
 
@@ -154,6 +154,12 @@ For the demo library or any non-default folder, set:
 
 - `NYXCORE_WEB_MUSIC_DIR`
 - `NYXCORE_WEB_OUT_DIR`
+- `NYXCORE_WEB_CONFIG_PATH` when the API should use a custom YAML config
+
+These environment variables are the web server's filesystem boundary. Request
+parameters cannot switch to another music, output, or config root. Custom backup
+and alternate-restore destinations must remain inside the configured music or
+output roots. Use the CLI when you intentionally need one-off paths.
 
 Example:
 
@@ -304,6 +310,7 @@ Core runtime:
 - `nyxcore/action_plan`: plan generation, apply, quarantine, and ledger/history handling
 - `nyxcore/saved_playlists`: saved-playlist definitions and refresh tracking
 - `nyxcore/playlist_query`: natural-language playlist ranking
+- `nyxcore/search`: ranked, Unicode-aware, read-only library search
 - `nyxcore/webapi`: FastAPI layer
 - `web/src`: React frontend
 - `tests`: unit and smoke coverage for backend workflows
@@ -353,6 +360,7 @@ Legacy note:
 Primary routes:
 
 - `/` Mission Control
+- `/search` Archive Search
 - `/review` Review Inbox
 - `/playlists` Saved Playlists
 - `/history` Operation History
@@ -361,14 +369,30 @@ Primary routes:
 
 The UI uses live FastAPI responses when available and falls back to local mock data for development. Mutation actions remain disabled in fallback mode.
 
+In live mode, the Review Inbox supports per-operation approval with paginated
+plan previews, History can filter by operation category, and Saved Playlists can
+be created, refreshed, inspected, and exported to M3U without leaving the UI.
+Mission Control can refresh its complete snapshot, Health can refresh and export
+its current report as JSON, and Duplicate Analysis has working Exact/Likely tabs
+with direct links to the matching filtered Review item. The global header search
+submits to a shareable Archive Search page and matches filenames, tags, genres,
+and folders without modifying the library. The notification control lists current
+high-priority Review items and links directly to their detail view.
+
+Review triage uses scan-aware language: **Resolve Until Refresh** hides a finding
+without editing audio files. On the next Inbox or Mission Control refresh, a
+finding that still exists returns as **Seen**. Snoozed findings remain available
+through the Review status filter.
+
 ## API Surface
 
 Route groups:
 
 - status: `GET /api/status`
+- archive search: `GET /api/search?q=<query>&limit=<1-50>`
 - reports: `GET /api/duplicates`, `GET /api/health`, `GET /api/review`
 - review mutations: `POST /api/review/state`, `POST /api/review/plan`, `POST /api/review/plan/apply`
-- saved playlists: `GET /api/playlists`
+- saved playlists: `GET /api/playlists`, `POST /api/playlists`, `POST /api/playlists/{playlist_id}/refresh`
 - history: `GET /api/history`, `POST /api/history/{batch_id}/restore`, `POST /api/history/{batch_id}/undo`
 
 The API is intentionally thin. It uses the same service modules as the CLI.
@@ -403,6 +427,44 @@ Preferred captures:
 If screenshots are not in the repo yet, use the checklist in that folder before publishing the README or portfolio page.
 
 ## Safety Model
+
+Duplicate cleanup moves extra copies into `.nyxcore_quarantine`, which ordinary
+library scans exclude. New duplicate plans record a content fingerprint and
+check all copies before applying: missing preferred copies or changed contents
+require a fresh plan. Older plans without fingerprints still require matching
+copies at apply time. History enables Undo for successful reversible operations
+and disables it once the batch has been restored.
+
+Review plans keep inferred `Singles` and `Remixes` album values as preview hints;
+they are never included in automatic metadata writes. Any generated plan with
+more than 50 executable operations is marked manual-review, and the same limit
+is enforced again when a plan is applied. Metadata writes are also limited to
+the exact fields that caused the review finding, so a missing album cannot grant
+permission to rewrite an existing title or artist.
+
+The API rebuilds every submitted review plan against the current scan before it
+can run. Client-selected operations must still exist in the server plan and must
+match its operation type, source path, destination path, fields, values, and
+content fingerprint. Review-only operations cannot be enabled by changing the
+browser request, and stale duplicate previews are rejected before any move.
+
+Review state, operation history, incremental scan state, saved-playlist results,
+and M3U exports use same-directory temporary files followed by an atomic replace.
+If writing or replacing the new version fails, the previous complete file stays
+in place and the temporary file is cleaned up.
+
+Text matching uses Unicode-aware normalization across duplicate, health, review,
+and playlist logic. Playlist negative terms are exclusions, and default queries
+only return tracks with matching text evidence instead of filling the result with
+unrelated zero-score tracks.
+
+These checks are preflight checks, not filesystem locks: avoid editing the same
+files concurrently while applying a plan. Review-plan metadata writes automatically
+back up the original in a sibling `.nyxcore_backups` folder unless a backup
+directory is supplied. Normal scans exclude this folder. Metadata Undo checks
+the post-edit fingerprint before replacing an existing file, so later user edits
+are preserved. Legacy CLI commands outside review plans still require an explicit
+`--backup-dir` for backups.
 
 - review-first reporting by default
 - explicit apply step for action plans

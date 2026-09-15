@@ -223,7 +223,7 @@ class ActionHistoryTests(unittest.TestCase):
         self.assertTrue(target.exists())
 
     @patch("nyxcore.action_plan.service.write_tags")
-    def test_non_undoable_metadata_without_backup_is_honest(self, write_tags_mock) -> None:
+    def test_metadata_without_explicit_backup_is_automatically_reversible(self, write_tags_mock) -> None:
         target = self.music / "Artist - Song.mp3"
         target.write_bytes(b"x" * 100)
         records = [
@@ -257,7 +257,8 @@ class ActionHistoryTests(unittest.TestCase):
         undo_operation_batch(batch, review_state=review_state)
 
         operation = next(item for item in batch.operations if item.operation_type == "write_metadata")
-        self.assertEqual(operation.undo_status, "not_supported")
+        self.assertEqual(operation.undo_status, "ok")
+        self.assertTrue(Path(operation.backup_path).is_file())
 
     def test_history_listing_and_detail_cli(self) -> None:
         records, duplicate_report, exact_item = self._duplicate_fixture()

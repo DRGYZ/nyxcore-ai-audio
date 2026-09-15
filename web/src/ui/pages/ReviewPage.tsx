@@ -1,5 +1,9 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  buildSelectedActionPlanReport,
+  setActionOperationSelected,
+} from "../../lib/action-plan";
 import {
   useApplyReviewPlanMutation,
   useGenerateReviewPlanMutation,
@@ -8,7 +12,7 @@ import {
 } from "../../lib/hooks";
 import { mockReviewReport } from "../../lib/mock-data";
 import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
-import { reviewPriorityTone, reviewStatusTone } from "../../lib/review-presenter";
+import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
 import { useUrlBackedSelection } from "../../lib/url-selection";
 import {
@@ -26,7 +30,17 @@ import { ReviewDetailPanel } from "../review/ReviewDetailPanel";
 import { ApplyResultPanel, PlanReportModal } from "../review/PlanReportModal";
 import { SplitScreen } from "../shell";
 
+const REVIEW_STATUS_FILTERS = [
+  { value: "all", label: "all" },
+  { value: "new", label: "new" },
+  { value: "seen", label: "seen" },
+  { value: "snoozed", label: "snoozed" },
+  { value: "resolved", label: "resolved until refresh" },
+];
+
 export function ReviewPage() {
+  const [searchParams] = useSearchParams();
+  const requestedItemType = searchParams.get("type");
   const reviewQuery = useReviewQuery();
   const reviewMutation = useReviewStateMutation();
   const planMutation = useGenerateReviewPlanMutation();
@@ -36,11 +50,16 @@ export function ReviewPage() {
   const usingMock = reviewState.usingMock;
   const [priority, setPriority] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
-  const [itemType, setItemType] = useState<string>("all");
+  const [itemType, setItemType] = useState<string>(() => requestedItemType ?? "all");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [planReport, setPlanReport] = useState<ActionPlanReport | null>(null);
+  const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
   const [confirmApply, setConfirmApply] = useState(false);
   const [applyResult, setApplyResult] = useState<ReviewPlanApplyResponse | null>(null);
+
+  useEffect(() => {
+    if (requestedItemType) setItemType(requestedItemType);
+  }, [requestedItemType]);
 
   const filtered = useMemo(
     () =>
@@ -65,10 +84,23 @@ export function ReviewPage() {
     try {
       setApplyResult(null);
       await reviewMutation.mutateAsync({ item_ids: [selected.item_id], action, days: action === "snoozed" ? 7 : undefined });
-      setBanner({ tone: "success", message: `Updated ${selected.item_id} to ${action}.` });
+      setBanner({
+        tone: "success",
+        message: action === "resolved"
+          ? `Resolved ${selected.item_id} until the next library refresh. If the finding remains, it will return as Seen; no audio file was changed.`
+          : `Updated ${selected.item_id} to ${action}.`,
+      });
     } catch (error) {
       setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to update review state." });
     }
+  }
+
+  async function handleRefreshInbox() {
+    setBanner(null);
+    const result = await reviewQuery.refetch();
+    setBanner(result.error
+      ? { tone: "error", message: "Inbox refresh failed. The last available review data remains visible." }
+      : { tone: "success", message: "Inbox refreshed. Findings that still exist are active again as Seen." });
   }
 
   async function handleGeneratePlan() {
@@ -77,6 +109,7 @@ export function ReviewPage() {
       const response = await planMutation.mutateAsync({ item_ids: [selected.item_id] });
       setApplyResult(null);
       setPlanReport(response.data);
+      setSelectedOperationIds(new Set());
       setBanner({ tone: "success", message: `Generated ${response.data.summary.generated_plan_count} plan(s) for ${selected.item_id}.` });
     } catch (error) {
       setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to generate review plan." });
@@ -86,9 +119,12 @@ export function ReviewPage() {
   async function handleApplyPlan() {
     if (!planReport || usingMock) return;
     try {
-      const response = await applyPlanMutation.mutateAsync({ plan_report: planReport });
+      const response = await applyPlanMutation.mutateAsync({
+        plan_report: buildSelectedActionPlanReport(planReport, selectedOperationIds),
+      });
       setConfirmApply(false);
       setPlanReport(null);
+      setSelectedOperationIds(new Set());
       setApplyResult(response);
       setBanner({
         tone: "success",
@@ -99,14 +135,20 @@ export function ReviewPage() {
     }
   }
 
-  const applyCapable = (planReport?.plans ?? []).some((plan) => plan.apply_supported);
+  const applyCapable = selectedOperationIds.size > 0;
+  const selectedOperations = selectedOperationIds.size;
   const busy = reviewMutation.isPending || planMutation.isPending || applyPlanMutation.isPending;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Review Inbox"
-        description="Review findings, move them through triage state, inspect explicit plans, and hand off applied changes into operation history without leaving the command-center workflow."
+        description="Review findings, use scan-aware triage states, inspect explicit plans, and hand off applied changes into operation history without leaving the command-center workflow."
+        actions={
+          <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
+            {reviewQuery.isFetching ? "Refreshing…" : "Refresh Inbox"}
+          </Button>
+        }
       />
       <PageQueryStateNotice
         {...toQueryNoticeState(reviewState)}
@@ -148,13 +190,13 @@ export function ReviewPage() {
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Status</span>
                 <div className="flex flex-wrap gap-2">
-                  {["all", "new", "seen", "snoozed", "resolved"].map((value) => (
+                  {REVIEW_STATUS_FILTERS.map(({ value, label }) => (
                     <button key={value} type="button" onClick={() => setStatus(value)}>
                       <Chip
                         tone={value === "new" ? "primary" : value === "snoozed" ? "warning" : value === "resolved" ? "success" : "neutral"}
                         active={status === value}
                       >
-                        {value}
+                        {label}
                       </Chip>
                     </button>
                   ))}
@@ -237,7 +279,7 @@ export function ReviewPage() {
                               <span className={`block max-w-[28rem] truncate font-mono text-xs ${active ? "text-primary" : "text-slate-400"}`}>{item.summary}</span>
                             </td>
                             <td className="px-4 py-4">
-                              <Chip tone={reviewStatusTone(item.review_status)}>{item.review_status}</Chip>
+                              <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
                             </td>
                             <td className="rounded-r-2xl px-4 py-4 text-right">
                               <button type="button" className={`rounded-lg p-1.5 ${active ? "bg-primary/20 text-primary" : "text-slate-500 hover:bg-primary/20 hover:text-primary"}`}>
@@ -273,8 +315,16 @@ export function ReviewPage() {
         sourceItemId={selected?.item_id}
         applyPending={applyPlanMutation.isPending}
         usingMock={usingMock}
+        selectedOperationIds={selectedOperationIds}
+        onToggleOperation={(planId, operationId, checked) => {
+          if (!planReport) return;
+          setSelectedOperationIds((current) =>
+            setActionOperationSelected(current, planReport, planId, operationId, checked),
+          );
+        }}
         onClose={() => {
           setPlanReport(null);
+          setSelectedOperationIds(new Set());
           setConfirmApply(false);
         }}
         onApply={() => setConfirmApply(true)}
@@ -283,7 +333,7 @@ export function ReviewPage() {
       <Modal
         open={confirmApply}
         title="Confirm Plan Apply"
-        subtitle="Only low-risk, apply-capable operations will run."
+        subtitle={`${selectedOperations} selected operation${selectedOperations === 1 ? "" : "s"}`}
         onClose={() => setConfirmApply(false)}
         footer={
           <>
@@ -297,8 +347,8 @@ export function ReviewPage() {
         }
       >
         <div className="space-y-4 text-sm text-slate-300">
-          <p>Applying this plan may rename files, update deterministic metadata, or move duplicate candidates into quarantine based on the selected operations.</p>
-          <p>No plan is auto-applied from generation alone, and review-only operations will be skipped.</p>
+          <p>The checked operations may rename files, update deterministic metadata, or move duplicate candidates into quarantine.</p>
+          <p>Partial selections remain in the Review Inbox until every proposed mutation has been completed.</p>
         </div>
       </Modal>
     </div>

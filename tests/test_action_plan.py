@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from nyxcore.action_plan.service import apply_action_plan_report, build_action_plan_report
+from nyxcore.action_plan.service import MAX_AUTOMATIC_PLAN_OPERATIONS, apply_action_plan_report, build_action_plan_report
 from nyxcore.cli import app
 from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.duplicates.service import (
@@ -151,6 +151,172 @@ class ActionPlanTests(unittest.TestCase):
 
         self.assertIn("metadata_fix_plan", action_types)
         self.assertIn("rename_normalize_plan", action_types)
+
+    @patch("nyxcore.normalize.parser.MutagenFile")
+    def test_inferred_album_is_review_only(self, mutagen_file_mock) -> None:
+        target = self.music / "Artist - Song.mp3"
+        target.write_bytes(b"x" * 100)
+        mutagen_file_mock.return_value.tags = {
+            "title": ["Song"],
+            "artist": ["Artist"],
+        }
+        records = [
+            _track(
+                target,
+                title="Song",
+                artist="Artist",
+                album=None,
+                duration=180.0,
+                cover=False,
+                warnings=[WarningCode.missing_album],
+            )
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(1, 0, 0, 0, 0),
+            exact_duplicates=[],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        review_report = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        metadata_item = next(item for item in review_report.items if item.item_type == "missing_metadata")
+
+        report = build_action_plan_report(self.music, records, review_report, source_review_item_ids=[metadata_item.item_id])
+
+        metadata_plan = next(plan for plan in report.plans if plan.action_type == "metadata_fix_plan")
+        self.assertFalse(metadata_plan.apply_supported)
+        self.assertEqual(metadata_plan.proposed_operations, [])
+        self.assertTrue(any("inferred album" in note for note in metadata_plan.notes))
+
+    @patch("nyxcore.normalize.parser.MutagenFile")
+    def test_missing_metadata_plan_does_not_rewrite_present_tags(self, mutagen_file_mock) -> None:
+        album_only = self.music / "Camila Cabello - Shameless.mp3"
+        missing_artist = self.music / "Singer - Song.mp3"
+        album_only.write_bytes(b"a" * 100)
+        missing_artist.write_bytes(b"b" * 100)
+
+        album_audio = type("Audio", (), {
+            "tags": {"title": ["Shameless"], "artist": ["Dan Music"]}
+        })()
+        artist_audio = type("Audio", (), {
+            "tags": {"title": ["Song"], "artist": None, "album": ["Album"]}
+        })()
+        mutagen_file_mock.side_effect = [album_audio, artist_audio]
+        records = [
+            _track(
+                album_only,
+                title="Shameless",
+                artist="Dan Music",
+                album=None,
+                duration=180.0,
+                cover=False,
+                warnings=[WarningCode.missing_album],
+            ),
+            _track(
+                missing_artist,
+                title="Song",
+                artist=None,
+                album="Album",
+                duration=180.0,
+                cover=False,
+                warnings=[WarningCode.missing_artist],
+            ),
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(2, 0, 0, 0, 0),
+            exact_duplicates=[],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        review_report = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        metadata_item = next(item for item in review_report.items if item.item_type == "missing_metadata")
+
+        report = build_action_plan_report(
+            self.music,
+            records,
+            review_report,
+            source_review_item_ids=[metadata_item.item_id],
+        )
+
+        metadata_plan = next(plan for plan in report.plans if plan.action_type == "metadata_fix_plan")
+        self.assertEqual(len(metadata_plan.proposed_operations), 1)
+        operation = metadata_plan.proposed_operations[0]
+        self.assertEqual(operation.path, str(missing_artist))
+        self.assertEqual(operation.fields, ["artist"])
+        self.assertEqual(operation.values, {"artist": "Singer"})
+
+    def test_large_aggregated_plans_are_review_only(self) -> None:
+        paths = []
+        for index in range(MAX_AUTOMATIC_PLAN_OPERATIONS + 1):
+            target = self.music / f"Artist - Song {index:03d} [Official Video].mp3"
+            target.write_bytes(b"x" * 100)
+            paths.append(target)
+        records = [
+            _track(
+                target,
+                title=None,
+                artist=None,
+                album=None,
+                duration=180.0,
+                cover=False,
+                warnings=[WarningCode.missing_title, WarningCode.missing_artist, WarningCode.missing_album],
+            )
+            for target in paths
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(len(records), 0, 0, 0, 0),
+            exact_duplicates=[],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        review_report = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        metadata_item = next(item for item in review_report.items if item.item_type == "missing_metadata")
+
+        report = build_action_plan_report(self.music, records, review_report, source_review_item_ids=[metadata_item.item_id])
+
+        self.assertTrue(report.plans)
+        self.assertTrue(all(not plan.apply_supported for plan in report.plans))
+        self.assertTrue(all(plan.safety_level == "manual-review" for plan in report.plans))
+
+        for plan in report.plans:
+            plan.apply_supported = True
+            for operation in plan.proposed_operations:
+                operation.apply_supported = True
+        review_state = ReviewStateStore()
+        results = apply_action_plan_report(report, review_state=review_state)
+
+        self.assertTrue(all(result.status == "skipped" for result in results))
+        self.assertTrue(all("automatic limit" in result.operation_results[0].message for result in results))
+        self.assertEqual(review_state.items, {})
+        self.assertTrue(all(path.exists() for path in paths))
+
+    @patch("nyxcore.action_plan.service.write_tags")
+    def test_partial_operation_selection_does_not_resolve_aggregate(self, write_tags_mock) -> None:
+        first = self.music / "Artist - One.mp3"
+        second = self.music / "Artist - Two.mp3"
+        first.write_bytes(b"a" * 100)
+        second.write_bytes(b"b" * 100)
+        records = [
+            _track(first, title=None, artist=None, album=None, duration=180.0, cover=False, warnings=[WarningCode.missing_title, WarningCode.missing_artist, WarningCode.missing_album]),
+            _track(second, title=None, artist=None, album=None, duration=180.0, cover=False, warnings=[WarningCode.missing_title, WarningCode.missing_artist, WarningCode.missing_album]),
+        ]
+        duplicate_report = DuplicateAnalysisReport(
+            summary=DuplicateSummary(2, 0, 0, 0, 0),
+            exact_duplicates=[],
+            likely_duplicates=[],
+        )
+        health_report = build_health_report(self.music, records, duplicate_report=duplicate_report)
+        review_report = build_review_queue(records, health_report=health_report, duplicate_report=duplicate_report)
+        metadata_item = next(item for item in review_report.items if item.item_type == "missing_metadata")
+        report = build_action_plan_report(self.music, records, review_report, source_review_item_ids=[metadata_item.item_id])
+        report.plans = [plan for plan in report.plans if plan.action_type == "metadata_fix_plan"]
+        report.plans[0].proposed_operations[1].apply_supported = False
+        review_state = ReviewStateStore()
+
+        results = apply_action_plan_report(report, review_state=review_state, backup_dir=self.out / "backups")
+
+        self.assertEqual(results[0].status, "ok")
+        self.assertTrue(write_tags_mock.called)
+        self.assertNotIn(metadata_item.item_id, review_state.items)
 
     def test_unsupported_plan_generation_returns_clear_reason(self) -> None:
         first = self.music / "Artist - Song.mp3"

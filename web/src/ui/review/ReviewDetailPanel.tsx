@@ -1,6 +1,8 @@
-import { reviewPriorityTone, reviewStatusTone } from "../../lib/review-presenter";
+import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ReviewItem } from "../../lib/types";
 import { Button, Chip, Drawer, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
+
+const AFFECTED_PATH_PREVIEW_LIMIT = 20;
 
 export function ReviewDetailPanel({
   item,
@@ -21,6 +23,10 @@ export function ReviewDetailPanel({
   onSnooze: () => void;
   onResolve: () => void;
 }) {
+  const affectedPaths = item?.affected_paths ?? item?.sample_paths ?? [];
+  const displayedAffectedPaths = affectedPaths.slice(0, AFFECTED_PATH_PREVIEW_LIMIT);
+  const remainingAffectedPathCount = affectedPaths.length - displayedAffectedPaths.length;
+
   return (
     <Drawer
       title="Review Details"
@@ -30,8 +36,13 @@ export function ReviewDetailPanel({
           <Button tone="ghost" className="w-full" onClick={onGeneratePlan} disabled={usingMock || busy || !item}>
             Generate Plan
           </Button>
-          <Button tone="primary" className="w-full" onClick={onResolve} disabled={usingMock || busy || !item}>
-            Resolve
+          <Button
+            tone="primary"
+            className="w-full"
+            onClick={onResolve}
+            disabled={usingMock || busy || !item || item.review_status === "resolved"}
+          >
+            {item?.review_status === "resolved" ? "Resolved Until Refresh" : "Resolve Until Refresh"}
           </Button>
         </>
       }
@@ -55,7 +66,7 @@ export function ReviewDetailPanel({
               </div>
               <div className="flex flex-wrap gap-2">
                 <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
-                <Chip tone={reviewStatusTone(item.review_status)}>{item.review_status}</Chip>
+                <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
               </div>
             </div>
             <div className="space-y-2">
@@ -80,6 +91,11 @@ export function ReviewDetailPanel({
             <Button tone="secondary" disabled={usingMock || busy} onClick={onGeneratePlan}>
               Plan
             </Button>
+          </div>
+
+          <div className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-5 text-slate-400" role="note">
+            <span className="font-bold text-primary">Resolve Until Refresh</span> hides this finding without editing audio.
+            If the next library refresh still detects it, NyxCore returns it as <span className="font-bold text-slate-300">Seen</span>.
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -108,11 +124,16 @@ export function ReviewDetailPanel({
           <LabeledValue
             label="Affected Paths"
             value={
-              (item.affected_paths ?? item.sample_paths ?? []).length > 0 ? (
+              affectedPaths.length > 0 ? (
                 <div className="space-y-2">
-                  {(item.affected_paths ?? item.sample_paths ?? []).map((path) => (
+                  {displayedAffectedPaths.map((path) => (
                     <PathBlock key={path} value={path} />
                   ))}
+                  {remainingAffectedPathCount > 0 ? (
+                    <p className="px-1 text-xs text-slate-500">
+                      {remainingAffectedPathCount} more paths. Generate a plan to inspect the paginated operations.
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <div className="rounded-xl bg-background-dark px-4 py-3 text-sm text-slate-500">No affected paths were attached to this finding.</div>

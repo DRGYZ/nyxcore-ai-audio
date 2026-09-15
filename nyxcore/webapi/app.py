@@ -14,12 +14,28 @@ from nyxcore.action_plan.ledger import (
     save_operation_ledger,
     undo_operation_batch,
 )
-from nyxcore.action_plan.service import ActionPlanReport, apply_action_plan_report, build_action_plan_report
+from nyxcore.action_plan.service import (
+    ActionPlanReport,
+    apply_action_plan_report,
+    authorize_action_plan_selection,
+    build_action_plan_report,
+)
 from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
+from nyxcore.incremental.service import ChangeSet, RefreshSummary
 from nyxcore.report_pipeline import build_duplicate_health_reports, build_duplicate_report, build_review_pipeline
 from nyxcore.review_queue.state import apply_review_action, load_review_state, save_review_state
-from nyxcore.saved_playlists.service import load_saved_playlist_store, read_saved_playlist_latest_result
+from nyxcore.search.service import search_tracks
+from nyxcore.saved_playlists.service import (
+    SavedPlaylistDefinition,
+    SavedPlaylistLatestResult,
+    create_saved_playlist_definition,
+    export_saved_playlist_m3u,
+    load_saved_playlist_store,
+    read_saved_playlist_latest_result,
+    refresh_saved_playlist,
+    save_saved_playlist_definition,
+)
 from nyxcore.webapi.schemas import (
     ApiMetaResponse,
     ApiReportEnvelope,
@@ -30,12 +46,17 @@ from nyxcore.webapi.schemas import (
     HistoryOperationResponse,
     HistoryResponse,
     PlaylistsResponse,
+    PlaylistCreateRequest,
+    PlaylistMutationResponse,
+    PlaylistRefreshRequest,
     PlaylistSummaryResponse,
     ReviewPlanApplyRequest,
     ReviewPlanApplyResponse,
     ReviewPlanGenerateRequest,
     ReviewStateMutationRequest,
     ReviewStateMutationResponse,
+    SearchResponse,
+    SearchTrackResponse,
 )
 
 
@@ -47,16 +68,73 @@ def _default_out_path() -> Path:
     return Path(os.environ.get("NYXCORE_WEB_OUT_DIR", "data/reports")).resolve()
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _resolve_configured_root(value: str | None, *, configured_root: Path, label: str) -> Path:
+    if value is None:
+        return configured_root
+    candidate = Path(value).resolve()
+    if candidate != configured_root:
+        raise HTTPException(
+            status_code=403,
+            detail=f"{label} must match the server-configured root: {configured_root}",
+        )
+    return candidate
+
+
+def _resolve_bounded_path(value: str, *, roots: tuple[Path, ...], label: str) -> Path:
+    candidate = Path(value).resolve()
+    if not any(_is_within(candidate, root) for root in roots):
+        allowed = ", ".join(str(root) for root in roots)
+        raise HTTPException(status_code=403, detail=f"{label} is outside the configured roots: {allowed}")
+    return candidate
+
+
 def _resolve_music_path(music_path: str | None) -> Path:
-    return Path(music_path).resolve() if music_path else _default_music_path()
+    return _resolve_configured_root(
+        music_path,
+        configured_root=_default_music_path(),
+        label="music_path",
+    )
 
 
 def _resolve_out_path(out_path: str | None) -> Path:
-    return Path(out_path).resolve() if out_path else _default_out_path()
+    return _resolve_configured_root(
+        out_path,
+        configured_root=_default_out_path(),
+        label="out_path",
+    )
 
 
 def _resolve_config(config_path: str | None, profile: str | None) -> NyxConfig:
-    return load_config(None if config_path is None else Path(config_path), profile=profile)
+    configured_value = os.environ.get("NYXCORE_WEB_CONFIG_PATH")
+    if config_path is not None:
+        if configured_value is None:
+            raise HTTPException(status_code=403, detail="config_path overrides are disabled for this server")
+        configured_path = Path(configured_value).resolve()
+        candidate = Path(config_path).resolve()
+        if candidate != configured_path:
+            raise HTTPException(
+                status_code=403,
+                detail=f"config_path must match the server-configured file: {configured_path}",
+            )
+    else:
+        candidate = None if configured_value is None else Path(configured_value).resolve()
+    return load_config(candidate, profile=profile)
+
+
+def _validate_history_batch_paths(batch, *, music_root: Path, out_root: Path) -> None:
+    allowed_roots = (music_root, out_root)
+    for operation in batch.operations:
+        for label, value in (
+            ("history original path", operation.original_path),
+            ("history current path", operation.current_path),
+            ("history backup path", operation.backup_path),
+        ):
+            if value is not None:
+                _resolve_bounded_path(value, roots=allowed_roots, label=label)
 
 
 def _meta(music_path: Path, out_path: Path, app_config: NyxConfig) -> ApiMetaResponse:
@@ -66,6 +144,36 @@ def _meta(music_path: Path, out_path: Path, app_config: NyxConfig) -> ApiMetaRes
 def _load_records(music_path: Path):
     records, _stats = scan_music_folder(music_path)
     return records
+
+
+def _full_refresh_summary(records) -> RefreshSummary:
+    return RefreshSummary(
+        mode="full",
+        changes=ChangeSet(
+            added_files=sorted(record.path for record in records),
+            modified_files=[],
+            removed_files=[],
+            unchanged_files=[],
+        ),
+        rescanned_files=len(records),
+    )
+
+
+def _playlist_summary_response(
+    definition: SavedPlaylistDefinition,
+    latest: SavedPlaylistLatestResult | None,
+) -> PlaylistSummaryResponse:
+    return PlaylistSummaryResponse(
+        playlist_id=definition.playlist_id,
+        name=definition.name,
+        profile=definition.profile,
+        query=definition.query,
+        last_refreshed_at=definition.last_refreshed_at,
+        track_count=0 if latest is None else int(latest.summary.get("track_count", 0)),
+        latest_summary={} if latest is None else dict(latest.summary),
+        latest_refresh_diff={} if latest is None else dict(latest.refresh_diff),
+        latest_tracks=[] if latest is None else list(latest.report.get("ranked_tracks", [])),
+    )
 
 
 def _build_review_dependencies(
@@ -146,6 +254,43 @@ def create_app() -> FastAPI:
         return ApiReportEnvelope(
             meta=_meta(resolved_music, resolved_out, app_config),
             data=report.to_dict(),
+        )
+
+    @app.get("/api/search", response_model=SearchResponse)
+    def search(
+        q: str = Query(min_length=2, max_length=200),
+        limit: int = Query(default=20, ge=1, le=50),
+        music_path: str | None = Query(default=None),
+        out_path: str | None = Query(default=None),
+        profile: str | None = Query(default=None),
+        config_path: str | None = Query(default=None),
+    ) -> SearchResponse:
+        resolved_music = _resolve_music_path(music_path)
+        resolved_out = _resolve_out_path(out_path)
+        app_config = _resolve_config(config_path, profile)
+        records = _load_records(resolved_music)
+        total_matches, results = search_tracks(records, q, limit=limit)
+        items = [
+            SearchTrackResponse(
+                path=result.record.path,
+                filename=result.filename,
+                title=result.record.tags.get("title"),
+                artist=result.record.tags.get("artist"),
+                album=result.record.tags.get("album"),
+                duration_seconds=result.record.duration_seconds,
+                file_size_bytes=result.record.file_size_bytes,
+                has_cover_art=result.record.has_cover_art,
+                warnings=[warning.value for warning in result.record.warnings],
+                match_fields=list(result.match_fields),
+            )
+            for result in results
+        ]
+        return SearchResponse(
+            meta=_meta(resolved_music, resolved_out, app_config),
+            query=q,
+            total_matches=total_matches,
+            returned_count=len(items),
+            items=items,
         )
 
     @app.get("/api/health", response_model=ApiReportEnvelope)
@@ -245,11 +390,34 @@ def create_app() -> FastAPI:
 
     @app.post("/api/review/plan/apply", response_model=ReviewPlanApplyResponse)
     def apply_review_plan(request: ReviewPlanApplyRequest) -> ReviewPlanApplyResponse:
+        resolved_music = _resolve_music_path(request.music_path)
         resolved_out = _resolve_out_path(request.out_path)
+        app_config = _resolve_config(request.config_path, request.profile)
         review_state_path = resolved_out / "review_state.json"
-        review_state = load_review_state(review_state_path)
-        plan_report = ActionPlanReport.from_dict(request.plan_report)
-        backup_dir = None if request.backup_dir is None else Path(request.backup_dir)
+        records, duplicates_report, health_report, review_state, review_report = _build_review_dependencies(
+            resolved_music, resolved_out, app_config
+        )
+        del duplicates_report, health_report
+        requested_plan_report = ActionPlanReport.from_dict(request.plan_report)
+        generated_plan_report = build_action_plan_report(
+            resolved_music,
+            records,
+            review_report,
+            source_review_item_ids=list(requested_plan_report.source_review_item_ids),
+        )
+        try:
+            plan_report = authorize_action_plan_selection(generated_plan_report, requested_plan_report)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        backup_dir = (
+            None
+            if request.backup_dir is None
+            else _resolve_bounded_path(
+                request.backup_dir,
+                roots=(resolved_out,),
+                label="backup_dir",
+            )
+        )
         results = apply_action_plan_report(plan_report, review_state=review_state, backup_dir=backup_dir)
         save_review_state(review_state_path, review_state)
         ledger_path = resolved_out / "review_history.json"
@@ -278,19 +446,86 @@ def create_app() -> FastAPI:
         items: list[PlaylistSummaryResponse] = []
         for definition in sorted(store.playlists.values(), key=lambda item: item.playlist_id):
             latest = read_saved_playlist_latest_result(resolved_out / "saved_playlists", definition.playlist_id)
-            items.append(
-                PlaylistSummaryResponse(
-                    playlist_id=definition.playlist_id,
-                    name=definition.name,
-                    profile=definition.profile,
-                    query=definition.query,
-                    last_refreshed_at=definition.last_refreshed_at,
-                    track_count=0 if latest is None else int(latest.summary.get("track_count", 0)),
-                    latest_summary={} if latest is None else dict(latest.summary),
-                    latest_refresh_diff={} if latest is None else dict(latest.refresh_diff),
-                )
-            )
+            items.append(_playlist_summary_response(definition, latest))
         return PlaylistsResponse(meta=_meta(resolved_music, resolved_out, app_config), items=items)
+
+    @app.post("/api/playlists", response_model=PlaylistMutationResponse)
+    def create_playlist(request: PlaylistCreateRequest) -> PlaylistMutationResponse:
+        resolved_music = _resolve_music_path(request.music_path)
+        resolved_out = _resolve_out_path(request.out_path)
+        if not resolved_music.is_dir():
+            raise HTTPException(status_code=400, detail=f"Music directory does not exist: {resolved_music}")
+        app_config = _resolve_config(request.config_path, request.profile)
+        name = request.name.strip()
+        query = request.query.strip()
+        if not name or not query:
+            raise HTTPException(status_code=422, detail="Playlist name and query cannot be blank")
+        store_root = resolved_out / "saved_playlists"
+        store = load_saved_playlist_store(store_root)
+        definition = create_saved_playlist_definition(
+            name=name,
+            query=query,
+            profile=app_config.profile,
+            max_tracks=request.max_tracks,
+            min_score=request.min_score,
+        )
+        if definition.playlist_id in store.playlists:
+            raise HTTPException(status_code=409, detail="An identical saved playlist already exists")
+        records = _load_records(resolved_music)
+        latest = refresh_saved_playlist(
+            store_root,
+            definition,
+            records=records,
+            refresh_summary=_full_refresh_summary(records),
+            app_config=app_config,
+            analysis_cache_path=None,
+            library_root=resolved_music,
+        )
+        store.playlists[definition.playlist_id] = definition
+        save_saved_playlist_definition(store_root, store)
+        m3u_path = (
+            export_saved_playlist_m3u(store_root, definition.playlist_id, latest)
+            if request.export_m3u
+            else None
+        )
+        return PlaylistMutationResponse(
+            item=_playlist_summary_response(definition, latest),
+            m3u_path=None if m3u_path is None else str(m3u_path),
+        )
+
+    @app.post("/api/playlists/{playlist_id}/refresh", response_model=PlaylistMutationResponse)
+    def refresh_playlist(playlist_id: str, request: PlaylistRefreshRequest) -> PlaylistMutationResponse:
+        resolved_music = _resolve_music_path(request.music_path)
+        resolved_out = _resolve_out_path(request.out_path)
+        if not resolved_music.is_dir():
+            raise HTTPException(status_code=400, detail=f"Music directory does not exist: {resolved_music}")
+        store_root = resolved_out / "saved_playlists"
+        store = load_saved_playlist_store(store_root)
+        definition = store.playlists.get(playlist_id)
+        if definition is None:
+            raise HTTPException(status_code=404, detail=f"Saved playlist not found: {playlist_id}")
+        app_config = _resolve_config(request.config_path, request.profile or definition.profile)
+        records = _load_records(resolved_music)
+        latest = refresh_saved_playlist(
+            store_root,
+            definition,
+            records=records,
+            refresh_summary=_full_refresh_summary(records),
+            app_config=app_config,
+            analysis_cache_path=None,
+            profile_override=app_config.profile,
+            library_root=resolved_music,
+        )
+        save_saved_playlist_definition(store_root, store)
+        m3u_path = (
+            export_saved_playlist_m3u(store_root, definition.playlist_id, latest)
+            if request.export_m3u
+            else None
+        )
+        return PlaylistMutationResponse(
+            item=_playlist_summary_response(definition, latest),
+            m3u_path=None if m3u_path is None else str(m3u_path),
+        )
 
     @app.get("/api/history", response_model=HistoryResponse)
     def history(
@@ -308,7 +543,10 @@ def create_app() -> FastAPI:
                 batch_id=batch.batch_id,
                 applied_at=batch.applied_at,
                 action_types=list(batch.action_types),
-                reversible=all(operation.reversible for operation in batch.operations) if batch.operations else False,
+                reversible=any(
+                    operation.status == "ok" and operation.reversible and operation.undo_status != "ok"
+                    for operation in batch.operations
+                ),
                 affected_count=len(batch.operations),
                 source_plan_ids=list(batch.source_plan_ids),
                 source_review_item_ids=list(batch.source_review_item_ids),
@@ -320,6 +558,9 @@ def create_app() -> FastAPI:
                         reversible=operation.reversible,
                         original_path=operation.original_path,
                         current_path=operation.current_path,
+                        undo_status=operation.undo_status,
+                        undone_at=operation.undone_at,
+                        undo_message=operation.undo_message,
                     )
                     for operation in batch.operations
                 ],
@@ -330,6 +571,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/history/{batch_id}/restore", response_model=HistoryMutationResponse)
     def restore_history_batch(batch_id: str, request: HistoryMutationRequest) -> HistoryMutationResponse:
+        resolved_music = _default_music_path()
         resolved_out = _resolve_out_path(request.out_path)
         ledger_path = resolved_out / "review_history.json"
         review_state_path = resolved_out / "review_state.json"
@@ -337,12 +579,33 @@ def create_app() -> FastAPI:
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise HTTPException(status_code=404, detail=f"History batch not found: {batch_id}")
+        _validate_history_batch_paths(batch, music_root=resolved_music, out_root=resolved_out)
+        alternate_restore_dir = (
+            None
+            if request.alternate_restore_dir is None
+            else _resolve_bounded_path(
+                request.alternate_restore_dir,
+                roots=(resolved_music, resolved_out),
+                label="alternate_restore_dir",
+            )
+        )
+        target_path = (
+            None
+            if request.target_path is None
+            else str(
+                _resolve_bounded_path(
+                    request.target_path,
+                    roots=(resolved_music, resolved_out),
+                    label="target_path",
+                )
+            )
+        )
         review_state = load_review_state(review_state_path)
         changed = undo_operation_batch(
             batch,
             review_state=review_state,
-            alternate_restore_dir=None if request.alternate_restore_dir is None else Path(request.alternate_restore_dir),
-            target_path=request.target_path,
+            alternate_restore_dir=alternate_restore_dir,
+            target_path=target_path,
         )
         save_operation_ledger(ledger_path, ledger)
         save_review_state(review_state_path, review_state)

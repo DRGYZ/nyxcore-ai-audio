@@ -4,12 +4,14 @@ import type {
   HealthReport,
   HistoryMutationResponse,
   HistoryResponse,
+  PlaylistMutationResponse,
   PlaylistsResponse,
   ReportEnvelope,
   ReviewStateAction,
   ReviewPlanApplyResponse,
   ReviewReport,
   ReviewStateMutationResponse,
+  SearchResponse,
   StatusResponse,
 } from "./types";
 
@@ -55,15 +57,34 @@ export function fetchHealth() {
 }
 
 export function fetchReview() {
-  return getJson<ReportEnvelope<ReviewReport>>("/review");
+  return getJson<ReportEnvelope<ReviewReport>>("/review?include_snoozed=true");
 }
 
 export function fetchDuplicates() {
   return getJson<ReportEnvelope<DuplicateReport>>("/duplicates");
 }
 
+export function fetchArchiveSearch(query: string, limit = 50) {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return getJson<SearchResponse>(`/search?${params.toString()}`);
+}
+
 export function fetchPlaylists() {
   return getJson<PlaylistsResponse>("/playlists");
+}
+
+export function createPlaylist(payload: {
+  name: string;
+  query: string;
+  max_tracks?: number;
+  min_score?: number;
+  export_m3u?: boolean;
+}) {
+  return postJson<PlaylistMutationResponse>("/playlists", payload);
+}
+
+export function refreshPlaylist(playlistId: string, payload: { export_m3u?: boolean } = {}) {
+  return postJson<PlaylistMutationResponse>(`/playlists/${playlistId}/refresh`, payload);
 }
 
 export function fetchHistory() {

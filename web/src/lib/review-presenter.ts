@@ -14,3 +14,8 @@ export function reviewStatusTone(status: ReviewStatus): ReviewTone {
   if (status === "snoozed") return "warning";
   return "neutral";
 }
+
+export function reviewStatusLabel(status: ReviewStatus): string {
+  if (status === "resolved") return "resolved until refresh";
+  return status;
+}

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from nyxcore.core.track import TrackRecord
+from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview_for_paths
 from nyxcore.rename.rules import deterministic_cleanup
 from nyxcore.rename.service import apply_rename, build_rename_result
@@ -22,6 +22,17 @@ SUPPORTED_ACTION_TYPES = {
     "rename_normalize_plan",
     "artwork_gap_plan",
 }
+
+MUTATING_OPERATION_TYPES = {"write_metadata", "rename_file", "quarantine_move"}
+
+# Review items are intentionally aggregated. Keep large plans inspectable, but
+# require per-file approval before they can be applied as one batch.
+MAX_AUTOMATIC_PLAN_OPERATIONS = 50
+
+
+def _content_hash(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _plan_id(action_type: str, source_review_item_ids: list[str]) -> str:
@@ -53,6 +64,7 @@ class ActionPlanOperation:
     values: dict[str, str | None] = field(default_factory=dict)
     apply_supported: bool = False
     notes: list[str] = field(default_factory=list)
+    expected_hash: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,6 +80,7 @@ class ActionPlanOperation:
             values={str(key): (None if value is None else str(value)) for key, value in data.get("values", {}).items()},
             apply_supported=bool(data.get("apply_supported", False)),
             notes=[str(item) for item in data.get("notes", [])],
+            expected_hash=data.get("expected_hash"),
         )
 
 
@@ -141,6 +154,7 @@ class ActionPlanSummary:
     generated_plan_count: int
     unsupported_item_count: int
     apply_supported_plan_count: int
+    max_automatic_operations: int = MAX_AUTOMATIC_PLAN_OPERATIONS
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -152,6 +166,9 @@ class ActionPlanSummary:
             generated_plan_count=int(data.get("generated_plan_count", 0)),
             unsupported_item_count=int(data.get("unsupported_item_count", 0)),
             apply_supported_plan_count=int(data.get("apply_supported_plan_count", 0)),
+            max_automatic_operations=int(
+                data.get("max_automatic_operations", MAX_AUTOMATIC_PLAN_OPERATIONS)
+            ),
         )
 
 
@@ -192,6 +209,7 @@ class AppliedOperationResult:
     status: str
     message: str
     backup_path: str | None = None
+    applied_hash: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -250,6 +268,7 @@ class ActionPlanBuilder:
                 generated_plan_count=len(plans),
                 unsupported_item_count=len(unsupported),
                 apply_supported_plan_count=sum(1 for plan in plans if plan.apply_supported),
+                max_automatic_operations=MAX_AUTOMATIC_PLAN_OPERATIONS,
             ),
         )
 
@@ -270,6 +289,7 @@ class ActionPlanBuilder:
 
     def _build_exact_duplicate_plan(self, item: ReviewQueueItem) -> ActionPlan:
         keep_path = item.preferred_path
+        expected_hash = _content_hash(Path(keep_path)) if keep_path else None
         candidate_paths = [path for path in item.affected_paths if path != keep_path]
         operations = [
             ActionPlanOperation(
@@ -278,6 +298,7 @@ class ActionPlanBuilder:
                 path=keep_path,
                 apply_supported=False,
                 notes=["preferred copy selected by duplicate analysis"],
+                expected_hash=expected_hash,
             )
         ]
         for index, path in enumerate(candidate_paths, start=1):
@@ -291,8 +312,16 @@ class ActionPlanBuilder:
                     destination_path=str(destination),
                     apply_supported=True,
                     notes=["non-preferred duplicate is moved to quarantine instead of deleted"],
+                    expected_hash=expected_hash,
                 )
             )
+        automatic_apply = len(operations) <= MAX_AUTOMATIC_PLAN_OPERATIONS
+        if not automatic_apply:
+            for operation in operations:
+                operation.apply_supported = False
+                operation.notes.append(
+                    f"automatic apply disabled for plans over {MAX_AUTOMATIC_PLAN_OPERATIONS} operations"
+                )
         return ActionPlan(
             plan_id=_plan_id("exact_duplicate_keep_plan", [item.item_id]),
             source_review_item_ids=[item.item_id],
@@ -300,10 +329,15 @@ class ActionPlanBuilder:
             affected_files=list(item.affected_paths),
             proposed_operations=operations,
             confidence=1.0,
-            safety_level="low-risk",
+            safety_level="low-risk" if automatic_apply else "manual-review",
             reasons=["exact duplicates are confirmed by full-content hashing"],
-            notes=["apply moves non-preferred files into a quarantine folder; no hard delete occurs"],
-            apply_supported=True,
+            notes=[
+                "apply moves non-preferred files into a quarantine folder; no hard delete occurs",
+                *([] if automatic_apply else [
+                    f"automatic apply is disabled above {MAX_AUTOMATIC_PLAN_OPERATIONS} operations; review individual files first"
+                ]),
+            ],
+            apply_supported=automatic_apply,
             resolves_review_items=True,
         )
 
@@ -313,17 +347,29 @@ class ActionPlanBuilder:
         metadata_operations: list[ActionPlanOperation] = []
         metadata_notes: list[str] = []
         rename_operations: list[ActionPlanOperation] = []
+        inferred_album_suggestion_count = 0
+        insufficient_metadata_confidence_count = 0
 
         for preview in previews:
             metadata_fields: list[str] = []
+            target_fields = self._metadata_target_fields(item, preview.path)
             values = {
                 "title": preview.proposed_title,
                 "artist": preview.proposed_artist,
                 "album": preview.proposed_album,
             }
             for field in ("title", "artist", "album"):
+                if field not in target_fields:
+                    continue
                 current_value = getattr(preview, f"current_{field}")
                 proposed_value = values[field]
+                # Smart album classification is a useful hint, not an album
+                # identity lookup. Never turn Singles / Remixes inference into
+                # an automatic tag mutation.
+                if field == "album" and any(reason.startswith("album_strategy_") for reason in preview.reasons):
+                    if proposed_value and proposed_value != current_value:
+                        inferred_album_suggestion_count += 1
+                    continue
                 if proposed_value and proposed_value != "UNKNOWN" and proposed_value != current_value:
                     metadata_fields.append(field)
             if metadata_fields and preview.confidence >= 0.7:
@@ -339,7 +385,7 @@ class ActionPlanBuilder:
                     )
                 )
             elif preview.would_change:
-                metadata_notes.append(f"{preview.path}: insufficient deterministic metadata confidence")
+                insufficient_metadata_confidence_count += 1
 
             rename_proposal = deterministic_cleanup(Path(preview.path).stem)
             rename_result = build_rename_result(Path(preview.path), rename_proposal.new_base, list(rename_proposal.rule_notes), False)
@@ -355,8 +401,24 @@ class ActionPlanBuilder:
                     )
                 )
 
+        if inferred_album_suggestion_count:
+            metadata_notes.append(
+                f"{inferred_album_suggestion_count} inferred album suggestions kept review-only"
+            )
+        if insufficient_metadata_confidence_count:
+            metadata_notes.append(
+                f"{insufficient_metadata_confidence_count} files need manual metadata identification"
+            )
+
         plans: list[ActionPlan] = []
         if metadata_operations:
+            automatic_apply = len(metadata_operations) <= MAX_AUTOMATIC_PLAN_OPERATIONS
+            if not automatic_apply:
+                for operation in metadata_operations:
+                    operation.apply_supported = False
+                    operation.notes.append(
+                        f"automatic apply disabled for plans over {MAX_AUTOMATIC_PLAN_OPERATIONS} operations"
+                    )
             plans.append(
                 ActionPlan(
                     plan_id=_plan_id("metadata_fix_plan", [item.item_id]),
@@ -365,10 +427,13 @@ class ActionPlanBuilder:
                     affected_files=sorted({operation.path for operation in metadata_operations if operation.path}),
                     proposed_operations=metadata_operations,
                     confidence=round(min(operation_count_conf(metadata_operations), 0.95), 3),
-                    safety_level="low-risk",
+                    safety_level="low-risk" if automatic_apply else "manual-review",
                     reasons=["deterministic normalize preview produced non-placeholder metadata values"],
-                    notes=metadata_notes or ["only confident deterministic metadata writes are included"],
-                    apply_supported=True,
+                    notes=(metadata_notes or ["only confident deterministic metadata writes are included"])
+                    + ([] if automatic_apply else [
+                        f"automatic apply is disabled above {MAX_AUTOMATIC_PLAN_OPERATIONS} operations; review individual files first"
+                    ]),
+                    apply_supported=automatic_apply,
                     resolves_review_items=True,
                 )
             )
@@ -390,6 +455,13 @@ class ActionPlanBuilder:
             )
 
         if rename_operations:
+            automatic_apply = len(rename_operations) <= MAX_AUTOMATIC_PLAN_OPERATIONS
+            if not automatic_apply:
+                for operation in rename_operations:
+                    operation.apply_supported = False
+                    operation.notes.append(
+                        f"automatic apply disabled for plans over {MAX_AUTOMATIC_PLAN_OPERATIONS} operations"
+                    )
             plans.append(
                 ActionPlan(
                     plan_id=_plan_id("rename_normalize_plan", [item.item_id]),
@@ -398,14 +470,54 @@ class ActionPlanBuilder:
                     affected_files=sorted({operation.path for operation in rename_operations if operation.path}),
                     proposed_operations=rename_operations,
                     confidence=0.9,
-                    safety_level="low-risk",
+                    safety_level="low-risk" if automatic_apply else "manual-review",
                     reasons=["deterministic filename cleanup produced concrete rename targets"],
-                    notes=["rename apply uses the existing deterministic rename path"],
-                    apply_supported=True,
+                    notes=[
+                        "rename apply uses the existing deterministic rename path",
+                        *([] if automatic_apply else [
+                            f"automatic apply is disabled above {MAX_AUTOMATIC_PLAN_OPERATIONS} operations; review individual files first"
+                        ]),
+                    ],
+                    apply_supported=automatic_apply,
                     resolves_review_items=False,
                 )
             )
         return plans
+
+    def _metadata_target_fields(self, item: ReviewQueueItem, path: str) -> set[str]:
+        """Return only fields that caused this review item to exist.
+
+        A missing-album finding must never become permission to rewrite an
+        already-present title or artist merely because normalization would
+        change it. Placeholder items carry their exact triggering fields in
+        the review report for the same reason.
+        """
+        if item.item_type == "missing_metadata":
+            record = self.records_by_path.get(path)
+            if record is None:
+                return set()
+            warnings_by_field = {
+                "title": WarningCode.missing_title,
+                "artist": WarningCode.missing_artist,
+                "album": WarningCode.missing_album,
+            }
+            return {
+                field
+                for field, warning in warnings_by_field.items()
+                if warning in record.warnings
+            }
+
+        raw_mapping = item.details.get("placeholder_fields_by_path", {})
+        if not isinstance(raw_mapping, dict):
+            return set()
+        raw_fields = raw_mapping.get(path, [])
+        if not isinstance(raw_fields, list):
+            return set()
+        return {
+            str(field)
+            for field in raw_fields
+            if str(field) in {"title", "artist", "album"}
+        }
 
     def _build_artwork_gap_plan(self, item: ReviewQueueItem) -> ActionPlan:
         return ActionPlan(
@@ -437,6 +549,109 @@ def build_action_plan_report(
     return ActionPlanBuilder(root, records, review_report).build(source_review_item_ids)
 
 
+def authorize_action_plan_selection(
+    generated_report: ActionPlanReport,
+    requested_report: ActionPlanReport,
+) -> ActionPlanReport:
+    """Rebuild a client selection exclusively from server-generated operations."""
+    generated_by_id = {plan.plan_id: plan for plan in generated_report.plans}
+    authorized_plans: list[ActionPlan] = []
+    seen_plan_ids: set[str] = set()
+
+    for requested_plan in requested_report.plans:
+        if requested_plan.plan_id in seen_plan_ids:
+            raise ValueError(f"duplicate plan selection: {requested_plan.plan_id}")
+        seen_plan_ids.add(requested_plan.plan_id)
+
+        generated_plan = generated_by_id.get(requested_plan.plan_id)
+        if generated_plan is None:
+            raise ValueError(f"plan is not present in the current review output: {requested_plan.plan_id}")
+        if not generated_plan.apply_supported:
+            raise ValueError(f"plan is review-only and cannot be applied: {requested_plan.plan_id}")
+        if requested_plan.action_type != generated_plan.action_type:
+            raise ValueError(f"plan action type changed: {requested_plan.plan_id}")
+        if sorted(requested_plan.source_review_item_ids) != sorted(generated_plan.source_review_item_ids):
+            raise ValueError(f"plan review-item scope changed: {requested_plan.plan_id}")
+
+        generated_operations = {
+            operation.operation_id: operation
+            for operation in generated_plan.proposed_operations
+        }
+        requested_operation_ids = [
+            operation.operation_id
+            for operation in requested_plan.proposed_operations
+        ]
+        if len(requested_operation_ids) != len(set(requested_operation_ids)):
+            raise ValueError(f"duplicate operation selection in plan: {requested_plan.plan_id}")
+
+        selected_mutation_ids: set[str] = set()
+        for requested_operation in requested_plan.proposed_operations:
+            generated_operation = generated_operations.get(requested_operation.operation_id)
+            if generated_operation is None:
+                raise ValueError(f"operation is not present in the current plan: {requested_operation.operation_id}")
+            if requested_operation.operation_type != generated_operation.operation_type:
+                raise ValueError(f"operation type changed: {requested_operation.operation_id}")
+            if (
+                requested_operation.path != generated_operation.path
+                or requested_operation.destination_path != generated_operation.destination_path
+                or requested_operation.fields != generated_operation.fields
+                or requested_operation.values != generated_operation.values
+            ):
+                raise ValueError(f"operation details changed: {requested_operation.operation_id}")
+            if requested_operation.expected_hash != generated_operation.expected_hash:
+                raise ValueError(f"operation source changed since preview: {requested_operation.operation_id}")
+            if generated_operation.operation_type in MUTATING_OPERATION_TYPES:
+                if not generated_operation.apply_supported:
+                    raise ValueError(f"operation is review-only: {requested_operation.operation_id}")
+                selected_mutation_ids.add(generated_operation.operation_id)
+            elif generated_operation.operation_type != "keep_preferred":
+                raise ValueError(f"unsupported reference operation: {requested_operation.operation_id}")
+
+        if not selected_mutation_ids:
+            raise ValueError(f"plan has no selected operations: {requested_plan.plan_id}")
+
+        all_mutation_ids = {
+            operation.operation_id
+            for operation in generated_plan.proposed_operations
+            if operation.operation_type in MUTATING_OPERATION_TYPES
+        }
+        authorized_plan = ActionPlan.from_dict(generated_plan.to_dict())
+        authorized_plan.proposed_operations = [
+            ActionPlanOperation.from_dict(operation.to_dict())
+            for operation in generated_plan.proposed_operations
+            if operation.operation_type == "keep_preferred"
+            or operation.operation_id in selected_mutation_ids
+        ]
+        authorized_plan.affected_files = sorted({
+            operation.path
+            for operation in authorized_plan.proposed_operations
+            if operation.path
+        })
+        authorized_plan.apply_supported = True
+        authorized_plan.resolves_review_items = (
+            generated_plan.resolves_review_items
+            and selected_mutation_ids == all_mutation_ids
+        )
+        authorized_plans.append(authorized_plan)
+
+    if not authorized_plans:
+        raise ValueError("action plan selection is empty")
+
+    return ActionPlanReport(
+        created_at=generated_report.created_at,
+        source_review_item_ids=list(generated_report.source_review_item_ids),
+        plans=authorized_plans,
+        unsupported_items=[],
+        summary=ActionPlanSummary(
+            requested_item_count=generated_report.summary.requested_item_count,
+            generated_plan_count=len(authorized_plans),
+            unsupported_item_count=0,
+            apply_supported_plan_count=len(authorized_plans),
+            max_automatic_operations=generated_report.summary.max_automatic_operations,
+        ),
+    )
+
+
 def apply_action_plan_report(
     report: ActionPlanReport,
     *,
@@ -445,6 +660,42 @@ def apply_action_plan_report(
 ) -> list[AppliedPlanResult]:
     results: list[AppliedPlanResult] = []
     now = datetime.now(tz=UTC)
+    report_executable_count = sum(
+        operation.apply_supported
+        for plan in report.plans
+        if plan.apply_supported
+        for operation in plan.proposed_operations
+    )
+    if report_executable_count > MAX_AUTOMATIC_PLAN_OPERATIONS:
+        for plan in report.plans:
+            results.append(
+                AppliedPlanResult(
+                    plan_id=plan.plan_id,
+                    action_type=plan.action_type,
+                    status="skipped",
+                    source_review_item_ids=plan.source_review_item_ids,
+                    operation_results=(
+                        [
+                            AppliedOperationResult(
+                                operation_id=f"{plan.plan_id}-report-safety-check",
+                                operation_type="plan_safety_check",
+                                path=None,
+                                destination_path=None,
+                                status="skipped",
+                                message=(
+                                    f"report has {report_executable_count} executable operations; "
+                                    f"the automatic limit is {MAX_AUTOMATIC_PLAN_OPERATIONS}"
+                                ),
+                            )
+                        ]
+                        if plan.apply_supported
+                        else []
+                    ),
+                    resolved_review_item_ids=[],
+                )
+            )
+        return results
+
     for plan in report.plans:
         if not plan.apply_supported:
             results.append(
@@ -459,7 +710,56 @@ def apply_action_plan_report(
             )
             continue
 
+        executable_operations = [operation for operation in plan.proposed_operations if operation.apply_supported]
+        if len(executable_operations) > MAX_AUTOMATIC_PLAN_OPERATIONS:
+            results.append(
+                AppliedPlanResult(
+                    plan_id=plan.plan_id,
+                    action_type=plan.action_type,
+                    status="skipped",
+                    source_review_item_ids=plan.source_review_item_ids,
+                    operation_results=[
+                        AppliedOperationResult(
+                            operation_id=f"{plan.plan_id}-safety-check",
+                            operation_type="plan_safety_check",
+                            path=None,
+                            destination_path=None,
+                            status="skipped",
+                            message=(
+                                f"plan has {len(executable_operations)} executable operations; "
+                                f"the automatic limit is {MAX_AUTOMATIC_PLAN_OPERATIONS}"
+                            ),
+                        )
+                    ],
+                    resolved_review_item_ids=[],
+                )
+            )
+            continue
+
         operation_results: list[AppliedOperationResult] = []
+        if plan.action_type == "exact_duplicate_keep_plan":
+            try:
+                preferred = next(op for op in plan.proposed_operations if op.operation_type == "keep_preferred")
+                if not preferred.path or not Path(preferred.path).is_file():
+                    raise RuntimeError("Preferred copy is missing; regenerate the cleanup plan")
+                current_hash = _content_hash(Path(preferred.path))
+                for op in plan.proposed_operations:
+                    if op.operation_type not in {"keep_preferred", "quarantine_move"}:
+                        raise RuntimeError("Unexpected duplicate cleanup operation")
+                    if not op.path or _content_hash(Path(op.path)) != current_hash:
+                        raise RuntimeError("Duplicate contents changed; regenerate the cleanup plan")
+                    if op.expected_hash and op.expected_hash != current_hash:
+                        raise RuntimeError("Files changed since review; regenerate the cleanup plan")
+            except Exception as exc:
+                results.append(AppliedPlanResult(
+                    plan_id=plan.plan_id, action_type=plan.action_type, status="partial_failure",
+                    source_review_item_ids=plan.source_review_item_ids,
+                    operation_results=[AppliedOperationResult(
+                        operation_id="preflight", operation_type="keep_preferred", path=None,
+                        destination_path=None, status="error", message=str(exc),
+                    )], resolved_review_item_ids=[],
+                ))
+                continue
         all_succeeded = True
         for operation in plan.proposed_operations:
             if not operation.apply_supported:
@@ -476,11 +776,15 @@ def apply_action_plan_report(
                 continue
             try:
                 backup_path = None
+                applied_hash = None
                 if operation.path is not None and backup_dir is not None:
                     backup_path = str(backup_file(Path(operation.path), backup_dir))
                 if operation.operation_type == "write_metadata":
                     if operation.path is None:
                         raise TagWriteError("metadata write operation is missing a source path")
+                    if backup_path is None:
+                        source = Path(operation.path)
+                        backup_path = str(backup_file(source, source.parent / ".nyxcore_backups"))
                     write_tags(
                         Path(operation.path),
                         title=operation.values.get("title"),
@@ -488,6 +792,7 @@ def apply_action_plan_report(
                         album=operation.values.get("album"),
                         fields=list(operation.fields),
                     )
+                    applied_hash = _content_hash(Path(operation.path))
                 elif operation.operation_type == "rename_file":
                     if operation.path is None or operation.destination_path is None:
                         raise RuntimeError("rename operation is missing source or destination path")
@@ -525,6 +830,7 @@ def apply_action_plan_report(
                         status="ok",
                         message="applied",
                         backup_path=backup_path,
+                        applied_hash=applied_hash,
                     )
                 )
             except Exception as exc:
@@ -540,7 +846,12 @@ def apply_action_plan_report(
                     )
                 )
         resolved_review_item_ids: list[str] = []
-        if all_succeeded and operation_results and plan.resolves_review_items:
+        all_mutations_selected = all(
+            operation.apply_supported
+            for operation in plan.proposed_operations
+            if operation.operation_type in MUTATING_OPERATION_TYPES
+        )
+        if all_succeeded and operation_results and plan.resolves_review_items and all_mutations_selected:
             apply_review_action(review_state, item_ids=plan.source_review_item_ids, status="resolved", now=now)
             resolved_review_item_ids = list(plan.source_review_item_ids)
         results.append(

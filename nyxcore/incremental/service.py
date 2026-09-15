@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from nyxcore.core.audio_files import iter_audio_files
+from nyxcore.core.atomic import atomic_write_text
 from nyxcore.core.scanner import scan_audio_files
 from nyxcore.core.track import TrackRecord
 
@@ -208,8 +209,7 @@ def load_incremental_state_for_root(path: Path, *, current_root: Path | None) ->
 
 
 def save_incremental_state(path: Path, state: IncrementalState) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
 
 
 def build_file_snapshots(root: Path) -> dict[str, FileSnapshot]:

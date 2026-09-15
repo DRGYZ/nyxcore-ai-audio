@@ -19,4 +19,8 @@ def is_supported_audio_file(path: Path) -> bool:
 
 
 def iter_audio_files(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if is_supported_audio_file(path))
+    return sorted(
+        path for path in root.rglob("*")
+        if not any(part.lower() in {".nyxcore_quarantine", ".nyxcore_backups"} for part in path.relative_to(root).parts)
+        and is_supported_audio_file(path)
+    )

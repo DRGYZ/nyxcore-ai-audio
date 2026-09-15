@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { isSuccessfulUndoStatus } from "../../lib/contracts";
 import type { HistoryMutationResponse } from "../../lib/types";
 import { useHistoryQuery, useRestoreHistoryMutation, useUndoHistoryMutation } from "../../lib/hooks";
@@ -8,6 +8,15 @@ import { useUrlBackedSelection } from "../../lib/url-selection";
 import { ActionBanner, Button, Chip, EmptyState, Modal, PageHeader, PageQueryStateNotice, Panel, formatDate } from "../components";
 import { HistoryDetailPanel } from "../history/HistoryDetailPanel";
 import { SplitScreen } from "../shell";
+
+type HistoryFilter = "all" | "quarantine" | "metadata" | "restore";
+
+const HISTORY_FILTERS: Array<{ value: HistoryFilter; label: string }> = [
+  { value: "all", label: "All Activity" },
+  { value: "quarantine", label: "Quarantine Moves" },
+  { value: "metadata", label: "Metadata Writes" },
+  { value: "restore", label: "Restore Outcomes" },
+];
 
 export function HistoryPage() {
   const historyQuery = useHistoryQuery();
@@ -19,8 +28,22 @@ export function HistoryPage() {
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [confirm, setConfirm] = useState<{ type: "restore" | "undo"; batchId: string } | null>(null);
   const [mutationResult, setMutationResult] = useState<HistoryMutationResponse | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const filteredHistory = useMemo(
+    () => response.items.filter((item) => {
+      if (historyFilter === "all") return true;
+      if (historyFilter === "quarantine") {
+        return item.operations.some((operation) => operation.operation_type === "quarantine_move");
+      }
+      if (historyFilter === "metadata") {
+        return item.operations.some((operation) => operation.operation_type === "write_metadata");
+      }
+      return item.operations.some((operation) => operation.undo_status !== "pending");
+    }),
+    [historyFilter, response.items],
+  );
   const { selected, selectById } = useUrlBackedSelection({
-    items: response.items,
+    items: filteredHistory,
     param: "batch",
     idKey: "batch_id",
   });
@@ -69,21 +92,24 @@ export function HistoryPage() {
         main={
           <div className="space-y-6">
             <div className="flex overflow-x-auto border-b border-primary/20">
-              {["All Activity", "Quarantine Moves", "Metadata Writes", "Restore Outcomes"].map((label, index) => (
+              {HISTORY_FILTERS.map(({ value, label }) => (
                 <button
-                  key={label}
+                  key={value}
                   type="button"
-                  className={`px-6 py-4 text-sm ${index === 0 ? "border-b-2 border-primary font-bold text-primary" : "font-medium text-slate-500 hover:text-slate-100"}`}
+                  onClick={() => setHistoryFilter(value)}
+                  className={`px-6 py-4 text-sm ${historyFilter === value ? "border-b-2 border-primary font-bold text-primary" : "font-medium text-slate-500 hover:text-slate-100"}`}
                 >
                   {label}
                 </button>
               ))}
             </div>
 
-            {response.items.length === 0 ? (
+            {filteredHistory.length === 0 ? (
               <EmptyState
-                title="No history batches recorded yet"
-                description="Applied review plans will appear here once a reversible or tracked action runs through the NyxCore ledger."
+                title={response.items.length === 0 ? "No history batches recorded yet" : "No batches match this filter"}
+                description={response.items.length === 0
+                  ? "Applied review plans will appear here once a reversible or tracked action runs through the NyxCore ledger."
+                  : "Choose another activity type to inspect the operation ledger."}
               />
             ) : (
               <Panel className="overflow-hidden">
@@ -98,7 +124,7 @@ export function HistoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {response.items.map((item) => {
+                    {filteredHistory.map((item) => {
                       const active = item.batch_id === selected?.batch_id;
                       return (
                         <tr

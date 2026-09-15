@@ -30,6 +30,27 @@ export interface ReportEnvelope<T> {
   data: T;
 }
 
+export interface SearchTrack {
+  path: string;
+  filename: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  duration_seconds: number | null;
+  file_size_bytes: number;
+  has_cover_art: boolean;
+  warnings: string[];
+  match_fields: string[];
+}
+
+export interface SearchResponse {
+  meta: ApiMeta;
+  query: string;
+  total_matches: number;
+  returned_count: number;
+  items: SearchTrack[];
+}
+
 export interface ReviewItem {
   item_id: string;
   item_type: string;
@@ -165,6 +186,15 @@ export interface PlaylistSummary {
   track_count: number;
   latest_summary: Record<string, unknown>;
   latest_refresh_diff: Record<string, unknown>;
+  latest_tracks: Array<{
+    path: string;
+    score: number;
+    reasons: string[];
+    title?: string | null;
+    artist?: string | null;
+    album?: string | null;
+    duration_seconds?: number | null;
+  }>;
 }
 
 export interface PlaylistsResponse {
@@ -187,6 +217,9 @@ export interface HistoryBatch {
     reversible: boolean;
     original_path?: string | null;
     current_path?: string | null;
+    undo_status: UndoExecutionStatus;
+    undone_at?: string | null;
+    undo_message?: string | null;
   }>;
 }
 
@@ -210,6 +243,7 @@ export interface ActionPlanOperation {
   values: Record<string, string | null>;
   apply_supported: boolean;
   notes: string[];
+  expected_hash?: string | null;
 }
 
 export interface ActionPlan {
@@ -240,7 +274,13 @@ export interface ActionPlanReport {
     generated_plan_count: number;
     unsupported_item_count: number;
     apply_supported_plan_count: number;
+    max_automatic_operations?: number;
   };
+}
+
+export interface PlaylistMutationResponse {
+  item: PlaylistSummary;
+  m3u_path?: string | null;
 }
 
 export interface ReviewPlanApplyResponse {

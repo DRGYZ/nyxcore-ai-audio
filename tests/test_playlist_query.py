@@ -115,6 +115,61 @@ class PlaylistQueryTests(unittest.TestCase):
         self.assertEqual(report.ranked_tracks[0].path, str(instrumental))
 
     @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
+    def test_unicode_queries_only_return_matching_tracks(self, _load_analysis_map) -> None:
+        cyrillic = self.root / "snow.mp3"
+        arabic = self.root / "songs.mp3"
+        unrelated = self.root / "other.mp3"
+        for path in (cyrillic, arabic, unrelated):
+            path.write_bytes(b"x")
+        records = [
+            _track(cyrillic, title="Белый снег", artist="Артист", album=None, duration=180.0),
+            _track(arabic, title="أجمل أغاني الثورة", artist="فنان", album=None, duration=180.0),
+            _track(unrelated, title="Quiet Evening", artist="Artist", album=None, duration=180.0),
+        ]
+
+        for query, expected in (("снег", cyrillic), ("أغاني", arabic)):
+            with self.subTest(query=query):
+                report = build_playlist_report(records, query=query)
+                self.assertEqual([track.path for track in report.ranked_tracks], [str(expected)])
+                self.assertEqual(report.parsed_query.keywords, [query])
+
+    @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
+    def test_no_rap_is_a_hard_exclusion_without_matching_trap(self, _load_analysis_map) -> None:
+        rap = self.root / "rap.mp3"
+        trap = self.root / "trap.mp3"
+        rap.write_bytes(b"a")
+        trap.write_bytes(b"b")
+        records = [
+            _track(rap, title="Gangsta Rap", artist="Artist", album=None, duration=180.0),
+            _track(trap, title="A Deadly Trap", artist="Artist", album=None, duration=180.0),
+        ]
+
+        report = build_playlist_report(records, query="no rap")
+
+        self.assertEqual(report.parsed_query.genres, [])
+        self.assertEqual(report.parsed_query.negative_keywords, ["rap"])
+        self.assertEqual([track.path for track in report.ranked_tracks], [str(trap)])
+
+        multiword = parse_playlist_query("no hip hop")
+        self.assertEqual(multiword.genres, [])
+        self.assertEqual(multiword.negative_keywords, ["hip hop"])
+
+    @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
+    def test_genre_query_requires_genre_evidence(self, _load_analysis_map) -> None:
+        instrumental = self.root / "instrumental.mp3"
+        ambient = self.root / "ambient.mp3"
+        instrumental.write_bytes(b"a")
+        ambient.write_bytes(b"b")
+        records = [
+            _track(instrumental, title="Instrumental Focus", artist="Artist", album=None, duration=150.0),
+            _track(ambient, title="Ambient Passage", artist="Artist", album=None, duration=150.0),
+        ]
+
+        report = build_playlist_report(records, query="ambient under 3 minutes")
+
+        self.assertEqual([track.path for track in report.ranked_tracks], [str(ambient)])
+
+    @patch("nyxcore.playlist_query.service._load_analysis_map", return_value={})
     def test_output_serialization(self, _load_analysis_map) -> None:
         track_path = self.root / "track.mp3"
         track_path.write_bytes(b"a")

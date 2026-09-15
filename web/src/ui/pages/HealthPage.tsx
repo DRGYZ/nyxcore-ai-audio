@@ -1,13 +1,17 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_LABELS, HEALTH_BITRATE_BUCKET_ORDER } from "../../lib/contracts";
 import { useHealthQuery } from "../../lib/hooks";
 import { mockHealthReport } from "../../lib/mock-data";
 import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
-import { Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, ProgressBar, formatNumber } from "../components";
+import { ActionBanner, Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, ProgressBar, formatNumber } from "../components";
 
 export function HealthPage() {
+  const navigate = useNavigate();
   const healthQuery = useHealthQuery();
   const healthState = resolveReportQueryData(healthQuery, mockHealthReport);
   const report = healthState.data;
+  const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const bucketValues = HEALTH_BITRATE_BUCKET_ORDER.map((key) => report.quality.bitrate_buckets[key]);
   const maxBucket = bucketValues.length > 0 ? Math.max(1, ...bucketValues) : 1;
   const losslessRatio = report.overview.total_audio_files === 0
@@ -19,6 +23,29 @@ export function HealthPage() {
   const topIssueCategories = report.priorities.top_issue_categories ?? [];
   const topFolders = report.priorities.top_problematic_folders ?? [];
 
+  async function handleRefresh() {
+    setBanner(null);
+    const result = await healthQuery.refetch();
+    setBanner(
+      result.error
+        ? { tone: "error", message: "Health refresh failed. The last available report remains visible." }
+        : { tone: "success", message: "Health audit refreshed from the current library." },
+    );
+  }
+
+  function handleExport() {
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `nyxcore-health-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setBanner({ tone: "success", message: "Health report exported as JSON." });
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -26,12 +53,15 @@ export function HealthPage() {
         title="Technical Audio Audit"
         actions={
           <>
-            <Button tone="ghost" disabled>Export in CLI</Button>
-            <Button tone="primary" disabled>Re-scan in CLI</Button>
+            <Button tone="ghost" onClick={handleExport} disabled={healthState.usingMock}>Export JSON</Button>
+            <Button tone="primary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
+              {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
+            </Button>
           </>
         }
       />
       <PageQueryStateNotice {...toQueryNoticeState(healthState)} />
+      {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         <Panel className="p-5">
           <div className="mb-4 flex justify-between">
@@ -181,8 +211,8 @@ export function HealthPage() {
                 </div>
               ))
             )}
-            <Button tone="secondary" className="w-full justify-center py-2.5 text-xs" disabled>
-              Autorepair Not Available in UI
+            <Button tone="secondary" className="w-full justify-center py-2.5 text-xs" onClick={() => navigate("/review")}>
+              Review Fixes Safely
             </Button>
           </div>
         </Panel>

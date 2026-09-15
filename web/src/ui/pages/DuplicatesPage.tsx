@@ -1,16 +1,45 @@
-import { useDuplicatesQuery } from "../../lib/hooks";
-import { mockDuplicateReport } from "../../lib/mock-data";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useDuplicatesQuery, useReviewQuery } from "../../lib/hooks";
+import { mockDuplicateReport, mockReviewReport } from "../../lib/mock-data";
 import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
+import type { DuplicateGroup, ReviewItem } from "../../lib/types";
 import { Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, PathBlock, formatBytes, formatNumber } from "../components";
 
 export function DuplicatesPage() {
+  const navigate = useNavigate();
   const duplicatesQuery = useDuplicatesQuery();
+  const reviewQuery = useReviewQuery();
   const duplicatesState = resolveReportQueryData(duplicatesQuery, mockDuplicateReport);
+  const reviewState = resolveReportQueryData(reviewQuery, mockReviewReport);
   const report = duplicatesState.data;
+  const [activeTab, setActiveTab] = useState<"exact" | "likely">("exact");
   const reclaimable = report.exact_duplicates.reduce(
     (sum, group) => sum + (group.reclaimable_bytes ?? group.files.slice(1).reduce((acc, item) => acc + item.file_size_bytes, 0)),
     0,
   );
+  const activeGroups = activeTab === "exact" ? report.exact_duplicates : report.likely_duplicates;
+  const totalGroups = report.summary.exact_group_count + report.summary.likely_group_count;
+
+  function findReviewItem(group: DuplicateGroup, itemType: "exact_duplicate_group" | "likely_duplicate_group"): ReviewItem | undefined {
+    const direct = reviewState.data.items.find(
+      (item) => item.item_type === itemType && item.details?.source_group_id === group.group_id,
+    );
+    if (direct) return direct;
+    const groupPaths = new Set(group.files.map((file) => file.path.toLocaleLowerCase().replace(/\\/g, "/")));
+    return reviewState.data.items.find(
+      (item) =>
+        item.item_type === itemType
+        && (item.affected_paths ?? []).some((path) => groupPaths.has(path.toLocaleLowerCase().replace(/\\/g, "/"))),
+    );
+  }
+
+  function openReview(group: DuplicateGroup, itemType: "exact_duplicate_group" | "likely_duplicate_group") {
+    const item = findReviewItem(group, itemType);
+    const params = new URLSearchParams({ type: itemType });
+    if (item) params.set("item", item.item_id);
+    navigate(`/review?${params.toString()}`);
+  }
 
   return (
     <div className="space-y-8">
@@ -35,28 +64,36 @@ export function DuplicatesPage() {
           <p className="text-sm font-medium text-slate-400">System Health Impact</p>
           <div className="mt-2 flex items-center gap-2">
             <span className="material-symbols-outlined text-secondary">verified_user</span>
-            <h3 className="text-xl font-bold text-slate-100">Optimized</h3>
+            <h3 className="text-xl font-bold text-slate-100">{totalGroups > 0 ? "Needs Review" : "Clean"}</h3>
           </div>
         </Panel>
       </div>
       <div className="flex gap-8 border-b border-primary/10">
-        <button type="button" className="flex items-center gap-2 border-b-2 border-primary px-2 pb-4 font-bold text-primary">
+        <button
+          type="button"
+          onClick={() => setActiveTab("exact")}
+          className={`flex items-center gap-2 border-b-2 px-2 pb-4 font-bold ${activeTab === "exact" ? "border-primary text-primary" : "border-transparent text-slate-400"}`}
+        >
           <span className="material-symbols-outlined text-sm">copy_all</span>
-          Exact Duplicates
+          Exact Duplicates ({report.summary.exact_group_count})
         </button>
-        <button type="button" className="flex items-center gap-2 border-b-2 border-transparent px-2 pb-4 font-medium text-slate-400">
+        <button
+          type="button"
+          onClick={() => setActiveTab("likely")}
+          className={`flex items-center gap-2 border-b-2 px-2 pb-4 font-bold ${activeTab === "likely" ? "border-secondary text-secondary" : "border-transparent text-slate-400"}`}
+        >
           <span className="material-symbols-outlined text-sm">difference</span>
-          Likely Duplicates
+          Likely Duplicates ({report.summary.likely_group_count})
         </button>
       </div>
       <div className="space-y-6">
-        {report.exact_duplicates.length === 0 && report.likely_duplicates.length === 0 ? (
+        {activeGroups.length === 0 ? (
           <EmptyState
-            title="No duplicate groups found"
-            description="When exact or likely duplicate clusters are detected, preferred-copy recommendations and reclaimable space will appear here."
+            title={`No ${activeTab} duplicate groups found`}
+            description={`When ${activeTab} duplicate clusters are detected, preferred-copy recommendations and supporting evidence will appear here.`}
           />
         ) : null}
-        {report.exact_duplicates.map((group) => {
+        {activeTab === "exact" ? report.exact_duplicates.map((group) => {
           const reclaim = group.reclaimable_bytes ?? group.files.slice(1).reduce((sum, item) => sum + item.file_size_bytes, 0);
           return (
             <Panel key={group.group_id} className="overflow-hidden">
@@ -79,6 +116,9 @@ export function DuplicatesPage() {
                     <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Potential Saving</p>
                     <p className="text-sm font-bold text-emerald-400">{formatBytes(reclaim)}</p>
                   </div>
+                  <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => openReview(group, "exact_duplicate_group")}>
+                    Open Review
+                  </Button>
                 </div>
               </div>
               <div className="space-y-3 p-4">
@@ -102,15 +142,15 @@ export function DuplicatesPage() {
                             <PathBlock value={file.path} />
                           </div>
                         </div>
-                        <Button tone="ghost" className="shrink-0 px-2 py-1 text-[10px]" disabled>Preserve Instead</Button>
+                        <Button tone="ghost" className="shrink-0 px-2 py-1 text-[10px]" onClick={() => openReview(group, "exact_duplicate_group")}>Review Choice</Button>
                       </div>
                     ))}
                 </div>
               </div>
             </Panel>
           );
-        })}
-        {report.likely_duplicates.map((group) => (
+        }) : null}
+        {activeTab === "likely" ? report.likely_duplicates.map((group) => (
           <Panel key={group.group_id} className="overflow-hidden border-l-2 border-l-secondary/50 opacity-95">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-secondary/10 bg-secondary/5 p-4">
               <div>
@@ -126,25 +166,37 @@ export function DuplicatesPage() {
                   <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Preferred Copy</p>
                   <p className="text-xs font-bold text-slate-300">{group.preferred.path.split(/[\\/]/).pop()}</p>
                 </div>
+                <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => openReview(group, "likely_duplicate_group")}>
+                  Open Review
+                </Button>
               </div>
             </div>
             <div className="p-4">
               <p className="break-words text-xs text-slate-400">{(group.reasons ?? []).join(", ")}</p>
             </div>
           </Panel>
-        ))}
+        )) : null}
       </div>
       <Panel className="overflow-hidden bg-gradient-to-br from-secondary/20 via-background-dark to-primary/10 p-8">
         <div className="flex flex-col items-center justify-between gap-8 md:flex-row">
           <div>
             <h2 className="font-display text-2xl font-bold text-white">Ready to reclaim your space?</h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              NyxCore can generate a review-first action plan from these groups, but this UI pass stays read-only.
+              Exact duplicates can produce quarantine-first plans in the Review Inbox. Likely matches remain manual-review only.
             </p>
           </div>
           <div className="flex flex-col gap-4 sm:flex-row">
-            <Button tone="ghost" disabled>Review Manual</Button>
-            <Button tone="primary" disabled>Plan in Review Inbox</Button>
+            <Button tone="ghost" onClick={() => setActiveTab("likely")} disabled={report.likely_duplicates.length === 0}>Inspect Likely Matches</Button>
+            <Button
+              tone="primary"
+              onClick={() => {
+                const firstExact = report.exact_duplicates[0];
+                if (firstExact) openReview(firstExact, "exact_duplicate_group");
+              }}
+              disabled={report.exact_duplicates.length === 0}
+            >
+              Plan in Review Inbox
+            </Button>
           </div>
         </div>
       </Panel>

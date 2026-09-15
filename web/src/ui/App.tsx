@@ -5,6 +5,7 @@ import { HealthPage } from "./pages/HealthPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { PlaylistsPage } from "./pages/PlaylistsPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { SearchPage } from "./pages/SearchPage";
 import { AppShell } from "./shell";
 
 export function App() {
@@ -17,6 +18,7 @@ export function App() {
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/duplicates" element={<DuplicatesPage />} />
         <Route path="/health" element={<HealthPage />} />
+        <Route path="/search" element={<SearchPage />} />
       </Routes>
     </AppShell>
   );

@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from nyxcore.config import HealthConfig, ReviewConfig
+from nyxcore.core.text import normalize_match_text as _normalize_text
 from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.duplicates.service import DuplicateAnalysisReport, ExactDuplicateGroup, LikelyDuplicateGroup
 from nyxcore.health.service import HealthReport
@@ -25,13 +26,6 @@ REVIEW_ITEM_TYPES = {
 }
 
 PRIORITY_BAND_ORDER = {"high": 0, "medium": 1, "low": 2}
-
-
-def _normalize_text(value: str | None) -> str:
-    if value is None:
-        return ""
-    text = re.sub(r"[^a-z0-9]+", " ", value.lower())
-    return " ".join(text.split())
 
 
 def _is_placeholder(value: str | None, settings: HealthConfig) -> bool:
@@ -406,6 +400,7 @@ class ReviewQueueBuilder:
         missing_artist: set[str] = set()
         missing_album: set[str] = set()
         placeholder: set[str] = set()
+        placeholder_fields_by_path: dict[str, list[str]] = {}
         for record in records:
             if WarningCode.missing_title in record.warnings:
                 missing_title.add(record.path)
@@ -413,8 +408,14 @@ class ReviewQueueBuilder:
                 missing_artist.add(record.path)
             if WarningCode.missing_album in record.warnings:
                 missing_album.add(record.path)
-            if any(_is_placeholder(record.tags.get(field), self.health_settings) for field in ("title", "artist", "album")):
+            placeholder_fields = [
+                field
+                for field in ("title", "artist", "album")
+                if _is_placeholder(record.tags.get(field), self.health_settings)
+            ]
+            if placeholder_fields:
                 placeholder.add(record.path)
+                placeholder_fields_by_path[record.path] = placeholder_fields
 
         items: list[ReviewQueueItem] = []
         impacted = missing_title | missing_artist | missing_album
@@ -448,6 +449,18 @@ class ReviewQueueBuilder:
                         "missing_title_count": len(missing_title),
                         "missing_artist_count": len(missing_artist),
                         "missing_album_count": len(missing_album),
+                        "missing_fields_by_path": {
+                            path: [
+                                field
+                                for field, paths in (
+                                    ("title", missing_title),
+                                    ("artist", missing_artist),
+                                    ("album", missing_album),
+                                )
+                                if path in paths
+                            ]
+                            for path in sorted(impacted)
+                        },
                     },
                 )
             )
@@ -471,6 +484,12 @@ class ReviewQueueBuilder:
                     affected_paths=sorted(placeholder),
                     sample_paths=_sample_paths(placeholder, self.review_settings.sample_limit),
                     file_count=len(placeholder),
+                    details={
+                        "placeholder_fields_by_path": {
+                            path: placeholder_fields_by_path[path]
+                            for path in sorted(placeholder_fields_by_path)
+                        }
+                    },
                 )
             )
         return items

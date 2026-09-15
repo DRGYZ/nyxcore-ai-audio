@@ -1,11 +1,13 @@
-import type { PropsWithChildren, ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent, PropsWithChildren, ReactNode } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useReviewQuery, useStatusQuery } from "../lib/hooks";
 import { mockReviewReport, mockStatus } from "../lib/mock-data";
 import { Chip, Icon } from "./components";
 
 const navItems = [
   { to: "/", label: "Mission Control", icon: "dashboard" },
+  { to: "/search", label: "Archive Search", icon: "manage_search" },
   { to: "/review", label: "Review Inbox", icon: "inbox" },
   { to: "/playlists", label: "Saved Playlists", icon: "auto_awesome" },
   { to: "/history", label: "Operation History", icon: "history_edu" },
@@ -34,13 +36,55 @@ function SidebarLink({ to, label, icon, badge }: { to: string; label: string; ic
 }
 
 export function AppShell({ children }: PropsWithChildren) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const statusQuery = useStatusQuery();
   const reviewQuery = useReviewQuery();
+  const notificationRef = useRef<HTMLDivElement | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
   const status = statusQuery.data ?? mockStatus;
   const review = reviewQuery.data?.data ?? mockReviewReport;
   const reviewCount = review.items.filter((item) => item.review_status === "new").length;
   const unresolvedReviewCount = review.items.filter((item) => item.review_status === "new" || item.review_status === "seen").length;
   const usingMock = !statusQuery.data || !reviewQuery.data;
+  const notificationItems = [...review.items]
+    .filter((item) => item.priority_band === "high" && (item.review_status === "new" || item.review_status === "seen"))
+    .sort((left, right) => right.priority_score - left.priority_score || left.item_id.localeCompare(right.item_id))
+    .slice(0, 5);
+
+  useEffect(() => {
+    if (location.pathname === "/search") {
+      setSearchValue(new URLSearchParams(location.search).get("q") ?? "");
+    }
+    setNotificationsOpen(false);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNotificationsOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [notificationsOpen]);
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchValue.trim();
+    if (query.length < 2) return;
+    const params = new URLSearchParams({ q: query });
+    navigate(`/search?${params.toString()}`);
+  }
 
   return (
     <div className="min-h-screen bg-background-dark text-slate-100">
@@ -101,18 +145,84 @@ export function AppShell({ children }: PropsWithChildren) {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <div className="relative hidden md:block">
-                <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500" />
+              <form className="relative hidden md:block" role="search" onSubmit={handleSearchSubmit}>
+                <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500" />
                 <input
-                  className="w-64 rounded-full border border-primary/10 bg-primary/5 py-1.5 pl-10 pr-4 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-primary focus:ring-1 focus:ring-primary"
+                  aria-label="Search archive"
+                  className="w-64 rounded-full border border-primary/10 bg-primary/5 py-1.5 pl-10 pr-10 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-primary focus:ring-1 focus:ring-primary"
                   placeholder="Search archive..."
-                  type="text"
+                  type="search"
+                  value={searchValue}
+                  onChange={(event) => setSearchValue(event.target.value)}
+                  minLength={2}
+                  maxLength={200}
+                  required
                 />
+                <button
+                  type="submit"
+                  aria-label="Submit archive search"
+                  className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Icon name="arrow_forward" className="text-base" />
+                </button>
+              </form>
+              <div ref={notificationRef} className="relative">
+                <button
+                  type="button"
+                  aria-label={`Review notifications (${notificationItems.length})`}
+                  aria-expanded={notificationsOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setNotificationsOpen((open) => !open)}
+                  className="relative rounded-lg bg-primary/10 p-2 text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Icon name="notifications" className="text-xl" />
+                  {notificationItems.length > 0 ? (
+                    <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full border-2 border-background-dark bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white">
+                      {notificationItems.length}
+                    </span>
+                  ) : null}
+                </button>
+                {notificationsOpen ? (
+                  <div
+                    role="menu"
+                    aria-label="High-priority review notifications"
+                    className="absolute right-0 top-full z-50 mt-3 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-primary/20 bg-surface-dark shadow-2xl"
+                  >
+                    <div className="border-b border-border-dark px-4 py-3">
+                      <p className="text-xs font-bold uppercase tracking-[0.22em] text-primary">Priority Review</p>
+                      <p className="mt-1 text-xs text-slate-500">High-priority items that still need attention.</p>
+                    </div>
+                    {notificationItems.length > 0 ? (
+                      <div className="max-h-80 overflow-y-auto p-2">
+                        {notificationItems.map((item) => (
+                          <Link
+                            key={item.item_id}
+                            role="menuitem"
+                            to={`/review?item=${encodeURIComponent(item.item_id)}`}
+                            className="block rounded-lg px-3 py-3 transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-400">High priority</span>
+                              <span className="font-mono text-[10px] text-slate-500">{item.priority_score.toFixed(1)}</span>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-sm font-medium text-slate-200">{item.summary}</p>
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="px-4 py-6 text-center text-sm text-slate-500">No high-priority Review items right now.</p>
+                    )}
+                    <Link
+                      role="menuitem"
+                      to="/review"
+                      className="flex items-center justify-between border-t border-border-dark px-4 py-3 text-xs font-bold text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                    >
+                      Open Review Inbox
+                      <Icon name="arrow_forward" className="text-base" />
+                    </Link>
+                  </div>
+                ) : null}
               </div>
-              <button className="relative rounded-lg bg-primary/10 p-2 text-primary transition-colors hover:bg-primary/20">
-                <Icon name="notifications" className="text-xl" />
-                <span className="absolute right-2 top-2 size-2 rounded-full border-2 border-background-dark bg-rose-500" />
-              </button>
               <Chip tone="primary">{status.active_profile}</Chip>
               <div className="size-10 rounded-full border border-primary/30 bg-gradient-to-br from-primary/40 to-secondary/40" />
             </div>

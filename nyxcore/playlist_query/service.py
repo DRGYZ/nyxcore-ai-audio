@@ -7,6 +7,7 @@ from pathlib import Path
 
 from nyxcore.audio.cache import AnalysisCache
 from nyxcore.config import PlaylistConfig
+from nyxcore.core.text import contains_match_term, normalize_match_text as _normalize_text, tokenize_match_text
 from nyxcore.core.track import TrackRecord
 
 MOOD_KEYWORDS = {
@@ -46,19 +47,35 @@ VOCAL_NEGATIVE_HINTS = {"vocals", "vocal", "singer", "feat", "featuring"}
 BPM_RANGE_RE = re.compile(r"(\d{2,3})\s*(?:to|-)\s*(\d{2,3})\s*bpm|\baround\s+(\d{2,3})\s*bpm", re.IGNORECASE)
 DURATION_UNDER_RE = re.compile(r"(?:under|below|less than)\s+(\d+)\s*(?:minutes|min)", re.IGNORECASE)
 DURATION_OVER_RE = re.compile(r"(?:over|above|more than)\s+(\d+)\s*(?:minutes|min)", re.IGNORECASE)
-NEGATION_RE = re.compile(r"\b(no|not|without)\s+([a-z][a-z\- ]+)", re.IGNORECASE)
-TOKEN_RE = re.compile(r"[a-z0-9\-]+", re.IGNORECASE)
-
-
-def _normalize_text(value: str | None) -> str:
-    if value is None:
-        return ""
-    text = re.sub(r"[^a-z0-9]+", " ", value.lower())
-    return " ".join(text.split())
+NEGATION_RE = re.compile(r"\b(?:no|not|without)\s+([^\W\d_][\w-]*)", re.IGNORECASE)
 
 
 def _tokenize(value: str) -> list[str]:
-    return TOKEN_RE.findall(value.lower())
+    return tokenize_match_text(value)
+
+
+def _negative_query_terms(query: str) -> set[str]:
+    normalized_query = _normalize_text(query)
+    generic_terms = {_normalize_text(term) for term in NEGATION_RE.findall(query)}
+    known_phrases = {
+        _normalize_text(term)
+        for values in (*MOOD_KEYWORDS.values(), *GENRE_KEYWORDS.values())
+        for term in values
+    }
+    known_phrases.update(_normalize_text(term) for term in VOCAL_NEGATIVE_HINTS)
+    matched_phrases = {
+        phrase
+        for phrase in known_phrases
+        if any(
+            contains_match_term(normalized_query, f"{prefix} {phrase}")
+            for prefix in ("no", "not", "without")
+        )
+    }
+    terms = set(matched_phrases)
+    for term in generic_terms:
+        if not any(phrase.startswith(f"{term} ") for phrase in matched_phrases):
+            terms.add(term)
+    return {term for term in terms if term}
 
 
 @dataclass(slots=True)
@@ -147,7 +164,7 @@ def parse_playlist_query(query: str, *, settings: PlaylistConfig | None = None) 
     genres: set[str] = set()
     cultural_hints: set[str] = set()
     keywords: set[str] = set()
-    negative_keywords: set[str] = set()
+    negative_keywords = _negative_query_terms(query)
     unsupported: list[str] = []
     bpm_min = bpm_max = None
     energy_min = energy_max = None
@@ -156,19 +173,25 @@ def parse_playlist_query(query: str, *, settings: PlaylistConfig | None = None) 
     instrumental_preference: str | None = None
 
     for mood, terms in MOOD_KEYWORDS.items():
-        if any(term in normalized for term in terms):
+        if any(
+            contains_match_term(normalized, term) and _normalize_text(term) not in negative_keywords
+            for term in terms
+        ):
             moods.add(mood)
             if mood in ENERGY_HINTS and energy_min is None and energy_max is None:
                 energy_min, energy_max = ENERGY_HINTS[mood]
 
     for genre, terms in GENRE_KEYWORDS.items():
-        if any(term in normalized for term in terms):
+        if any(
+            contains_match_term(normalized, term) and _normalize_text(term) not in negative_keywords
+            for term in terms
+        ):
             genres.add(genre)
             if genre == "arabic":
                 cultural_hints.add("arabic")
 
     for label, rng in ENERGY_HINTS.items():
-        if label in normalized:
+        if contains_match_term(normalized, label) and _normalize_text(label) not in negative_keywords:
             energy_min, energy_max = rng
 
     bpm_match = BPM_RANGE_RE.search(query)
@@ -193,14 +216,14 @@ def parse_playlist_query(query: str, *, settings: PlaylistConfig | None = None) 
     elif "vocals" in normalized:
         instrumental_preference = "prefer_vocals"
 
-    for neg, tail in NEGATION_RE.findall(query):
-        tail_text = _normalize_text(tail).split()
-        if tail_text:
-            negative_keywords.add(tail_text[0])
-
-    stop = {"with", "and", "for", "the", "music", "tracks", "track", "mostly", "around", "under", "over", "minutes"}
+    stop = {
+        "with", "and", "for", "the", "music", "tracks", "track", "mostly",
+        "around", "under", "over", "minutes", "min", "bpm", "to", "no",
+        "not", "without",
+    }
+    negative_tokens = {token for term in negative_keywords for token in _tokenize(term)}
     for token in tokens:
-        if token in stop or token.isdigit():
+        if token in stop or token in negative_tokens or token.isdigit():
             continue
         if token in {"vocals", "vocal"} and instrumental_preference == "prefer_instrumental":
             continue
@@ -283,17 +306,19 @@ def _score_track(parsed: ParsedPlaylistQuery, features: _TrackFeatures, settings
 
     for mood in parsed.moods:
         terms = MOOD_KEYWORDS.get(mood, ())
-        if any(term in text for term in terms):
+        if any(contains_match_term(text, term) for term in terms):
             score += settings.mood_match_weight
             reasons.append(f"mood:{mood}")
 
     for genre in parsed.genres:
-        if genre in text:
+        if contains_match_term(text, genre) or any(
+            contains_match_term(text, term) for term in GENRE_KEYWORDS.get(genre, ())
+        ):
             score += settings.genre_match_weight
             reasons.append(f"genre:{genre}")
 
     for hint in parsed.cultural_hints:
-        if hint in text:
+        if contains_match_term(text, hint):
             score += settings.cultural_match_weight
             reasons.append(f"culture:{hint}")
 
@@ -336,24 +361,20 @@ def _score_track(parsed: ParsedPlaylistQuery, features: _TrackFeatures, settings
             score -= 2.0
 
     if parsed.instrumental_preference == "prefer_instrumental":
-        if any(term in text for term in INSTRUMENTAL_HINTS):
+        if any(contains_match_term(text, term) for term in INSTRUMENTAL_HINTS):
             score += settings.instrumental_hint_weight
             reasons.append("instrumental_hint")
-        if any(term in text for term in VOCAL_NEGATIVE_HINTS):
+        if any(contains_match_term(text, term) for term in VOCAL_NEGATIVE_HINTS):
             score -= settings.vocal_penalty_weight
     elif parsed.instrumental_preference == "prefer_vocals":
-        if any(term in text for term in VOCAL_NEGATIVE_HINTS):
+        if any(contains_match_term(text, term) for term in VOCAL_NEGATIVE_HINTS):
             score += 0.8
             reasons.append("vocal_hint")
 
     for keyword in parsed.keywords:
-        if keyword in text:
+        if contains_match_term(text, keyword):
             score += settings.keyword_match_weight
             reasons.append(f"keyword:{keyword}")
-
-    for keyword in parsed.negative_keywords:
-        if keyword in text:
-            score -= settings.negative_keyword_penalty
 
     if features.record.has_cover_art:
         score += settings.cover_art_bonus
@@ -384,9 +405,21 @@ def build_playlist_report(
     for record in sorted(records, key=lambda item: item.path):
         row = analysis_map.get(record.path)
         features = _make_features(record, row)
+        if any(contains_match_term(features.normalized_text, term) for term in parsed.negative_keywords):
+            continue
         found_bpm = found_bpm or features.bpm is not None
         found_energy = found_energy or features.energy_0_10 is not None
         score, reasons = _score_track(parsed, features, settings)
+        has_text_request = bool(parsed.moods or parsed.genres or parsed.keywords or parsed.cultural_hints)
+        has_text_reason = any(
+            reason.startswith(("mood:", "genre:", "culture:", "keyword:"))
+            for reason in reasons
+        )
+        has_genre_reason = any(reason.startswith("genre:") for reason in reasons)
+        if parsed.genres and not has_genre_reason and min_score >= 0:
+            continue
+        if has_text_request and not has_text_reason and min_score >= 0:
+            continue
         if score < min_score:
             continue
         ranked.append(

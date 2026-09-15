@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from nyxcore.core.atomic import atomic_write_text
+
 REVIEW_STATUSES = {"new", "seen", "snoozed", "ignored", "resolved"}
 REVIEW_STATE_SCHEMA_VERSION = 2
 
@@ -63,8 +65,7 @@ def load_review_state(path: Path) -> ReviewStateStore:
 
 
 def save_review_state(path: Path, state: ReviewStateStore) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
 
 
 def _parse_iso(value: str | None) -> datetime | None:

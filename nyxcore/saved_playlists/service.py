@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from nyxcore.config import NyxConfig
+from nyxcore.core.atomic import atomic_write_text
+from nyxcore.core.track import TrackRecord
 from nyxcore.incremental.service import RefreshSummary
 from nyxcore.playlist_query.service import PlaylistReport, build_playlist_report
-from nyxcore.core.track import TrackRecord
 
 SAVED_PLAYLIST_LATEST_RESULT_SCHEMA_VERSION = 2
 SAVED_PLAYLIST_PATH_IDENTITY_MODE = "library_relative"
@@ -155,8 +156,7 @@ def load_saved_playlist_store(store_root: Path) -> SavedPlaylistStore:
 
 def save_saved_playlist_definition(store_root: Path, store: SavedPlaylistStore) -> None:
     path = _definitions_path(store_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(store.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(store.to_dict(), indent=2, ensure_ascii=False))
 
 
 def create_saved_playlist_definition(
@@ -240,8 +240,7 @@ def read_saved_playlist_latest_result(store_root: Path, playlist_id: str) -> Sav
 
 def write_saved_playlist_latest_result(store_root: Path, result: SavedPlaylistLatestResult) -> None:
     path = _latest_result_path(store_root, result.playlist_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
 
 
 def _infer_library_root(records: list[TrackRecord]) -> Path | None:
@@ -400,8 +399,7 @@ def refresh_saved_playlist(
 def export_saved_playlist_m3u(store_root: Path, playlist_id: str, latest: SavedPlaylistLatestResult) -> Path:
     path = _latest_m3u_path(store_root, playlist_id)
     lines = ["#EXTM3U"] + [str(track["path"]) for track in latest.report.get("ranked_tracks", [])]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n")
     return path
 
 
@@ -412,6 +410,5 @@ def export_saved_playlist_json(store_root: Path, playlist_id: str, latest: Saved
         "refreshed_at": latest.refreshed_at,
         "tracks": latest.report.get("ranked_tracks", []),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
     return path
