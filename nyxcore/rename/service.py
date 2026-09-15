@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from nyxcore.core.audio_files import iter_audio_files
+from nyxcore.core.filesystem import move_file_no_replace
 from nyxcore.llm.deepseek_client import chat_json_async
 from nyxcore.rename.rules import RenameProposal, deterministic_cleanup
 
@@ -175,15 +176,13 @@ async def propose_rename_for_file(
 def apply_rename(result: RenameResult) -> None:
     if not result.changed:
         return
-    result.old_path.rename(result.new_path)
+    move_file_no_replace(result.old_path, result.new_path)
 
 
 def undo_rename(old_path: Path, new_path: Path, *, force: bool) -> tuple[bool, str]:
     if not new_path.exists():
         return False, "missing_new_path"
     if old_path.exists():
-        if not force:
-            return False, "old_path_exists"
-        old_path.unlink()
-    new_path.rename(old_path)
+        return False, "old_path_exists"
+    move_file_no_replace(new_path, old_path)
     return True, "ok"

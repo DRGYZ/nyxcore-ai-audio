@@ -5,7 +5,7 @@ from .service import (
     ActionPlanSummary,
     AppliedPlanResult,
     build_action_plan_report,
-    apply_action_plan_report,
+    execute_reviewed_action_plan,
 )
 from .ledger import (
     LedgerOperation,
@@ -33,5 +33,5 @@ __all__ = [
     "load_operation_ledger",
     "save_operation_ledger",
     "undo_operation_batch",
-    "apply_action_plan_report",
+    "execute_reviewed_action_plan",
 ]

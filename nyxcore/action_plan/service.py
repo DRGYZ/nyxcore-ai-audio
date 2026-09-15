@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from nyxcore.core.track import TrackRecord, WarningCode
+from nyxcore.core.filesystem import move_file_no_replace
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview_for_paths
 from nyxcore.rename.rules import deterministic_cleanup
 from nyxcore.rename.service import apply_rename, build_rename_result
@@ -382,6 +382,7 @@ class ActionPlanBuilder:
                         values={field: values[field] for field in metadata_fields},
                         apply_supported=True,
                         notes=list(preview.reasons),
+                        expected_hash=_content_hash(Path(preview.path)),
                     )
                 )
             elif preview.would_change:
@@ -398,6 +399,7 @@ class ActionPlanBuilder:
                         destination_path=str(rename_result.new_path),
                         apply_supported=True,
                         notes=list(rename_proposal.rule_notes),
+                        expected_hash=_content_hash(Path(preview.path)),
                     )
                 )
 
@@ -652,6 +654,81 @@ def authorize_action_plan_selection(
     )
 
 
+def _resolved_within(path: Path, root: Path, *, must_exist: bool, label: str) -> Path:
+    resolved_root = root.resolve(strict=True)
+    try:
+        resolved_path = path.resolve(strict=must_exist)
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} does not exist: {path}") from exc
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{label} is outside the configured library root: {resolved_path}") from exc
+    return resolved_path
+
+
+def validate_action_plan_boundaries(library_root: Path, report: ActionPlanReport) -> None:
+    """Reject operation paths that escape the configured library root."""
+
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError(f"library root is not a directory: {root}")
+    for plan in report.plans:
+        for affected_path in plan.affected_files:
+            _resolved_within(Path(affected_path), root, must_exist=True, label="affected file")
+        for operation in plan.proposed_operations:
+            if operation.path is not None:
+                _resolved_within(Path(operation.path), root, must_exist=True, label="operation source")
+            if operation.destination_path is not None:
+                _resolved_within(
+                    Path(operation.destination_path),
+                    root,
+                    must_exist=False,
+                    label="operation destination",
+                )
+
+
+def execute_reviewed_action_plan(
+    library_root: Path,
+    records: list[TrackRecord],
+    review_report: ReviewQueueReport,
+    requested_report: ActionPlanReport,
+    *,
+    review_state: ReviewStateStore,
+    backup_dir: Path | None = None,
+    workspace_root: Path | None = None,
+) -> tuple[ActionPlanReport, list[AppliedPlanResult]]:
+    """Rebuild, authorize, validate, and execute one reviewed plan selection."""
+
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError(f"library root is not a directory: {root}")
+    if backup_dir is not None:
+        if workspace_root is None:
+            raise ValueError("workspace_root is required when backup_dir is provided")
+        resolved_workspace = workspace_root.resolve(strict=False)
+        resolved_backup = backup_dir.resolve(strict=False)
+        try:
+            resolved_backup.relative_to(resolved_workspace)
+        except ValueError as exc:
+            raise ValueError(f"backup directory is outside the configured workspace root: {resolved_backup}") from exc
+        backup_dir = resolved_backup
+
+    generated_report = build_action_plan_report(
+        root,
+        records,
+        review_report,
+        source_review_item_ids=list(requested_report.source_review_item_ids),
+    )
+    authorized_report = authorize_action_plan_selection(generated_report, requested_report)
+    validate_action_plan_boundaries(root, authorized_report)
+    return authorized_report, apply_action_plan_report(
+        authorized_report,
+        review_state=review_state,
+        backup_dir=backup_dir,
+    )
+
+
 def apply_action_plan_report(
     report: ActionPlanReport,
     *,
@@ -737,6 +814,28 @@ def apply_action_plan_report(
             continue
 
         operation_results: list[AppliedOperationResult] = []
+        try:
+            for operation in plan.proposed_operations:
+                if operation.operation_type == "keep_preferred" or operation.apply_supported:
+                    if not operation.path:
+                        raise RuntimeError(f"operation is missing a source path: {operation.operation_id}")
+                    source = Path(operation.path)
+                    if not source.is_file():
+                        raise RuntimeError(f"source file is missing: {source}")
+                    if not operation.expected_hash:
+                        raise RuntimeError(f"operation is missing its source fingerprint: {operation.operation_id}")
+                    if _content_hash(source) != operation.expected_hash:
+                        raise RuntimeError(f"source changed since review: {operation.operation_id}")
+        except Exception as exc:
+            results.append(AppliedPlanResult(
+                plan_id=plan.plan_id, action_type=plan.action_type, status="partial_failure",
+                source_review_item_ids=plan.source_review_item_ids,
+                operation_results=[AppliedOperationResult(
+                    operation_id="preflight", operation_type="plan_safety_check", path=None,
+                    destination_path=None, status="error", message=str(exc),
+                )], resolved_review_item_ids=[],
+            ))
+            continue
         if plan.action_type == "exact_duplicate_keep_plan":
             try:
                 preferred = next(op for op in plan.proposed_operations if op.operation_type == "keep_preferred")
@@ -814,11 +913,7 @@ def apply_action_plan_report(
                 elif operation.operation_type == "quarantine_move":
                     if operation.path is None or operation.destination_path is None:
                         raise RuntimeError("quarantine operation is missing source or destination path")
-                    destination = Path(operation.destination_path)
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    if destination.exists():
-                        raise RuntimeError(f"quarantine destination already exists: {destination}")
-                    shutil.move(operation.path, operation.destination_path)
+                    move_file_no_replace(Path(operation.path), Path(operation.destination_path))
                 else:
                     raise RuntimeError(f"unsupported apply operation: {operation.operation_type}")
                 operation_results.append(

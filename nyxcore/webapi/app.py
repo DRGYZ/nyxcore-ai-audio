@@ -16,9 +16,8 @@ from nyxcore.action_plan.ledger import (
 )
 from nyxcore.action_plan.service import (
     ActionPlanReport,
-    apply_action_plan_report,
-    authorize_action_plan_selection,
     build_action_plan_report,
+    execute_reviewed_action_plan,
 )
 from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
@@ -123,18 +122,6 @@ def _resolve_config(config_path: str | None, profile: str | None) -> NyxConfig:
     else:
         candidate = None if configured_value is None else Path(configured_value).resolve()
     return load_config(candidate, profile=profile)
-
-
-def _validate_history_batch_paths(batch, *, music_root: Path, out_root: Path) -> None:
-    allowed_roots = (music_root, out_root)
-    for operation in batch.operations:
-        for label, value in (
-            ("history original path", operation.original_path),
-            ("history current path", operation.current_path),
-            ("history backup path", operation.backup_path),
-        ):
-            if value is not None:
-                _resolve_bounded_path(value, roots=allowed_roots, label=label)
 
 
 def _meta(music_path: Path, out_path: Path, app_config: NyxConfig) -> ApiMetaResponse:
@@ -399,16 +386,6 @@ def create_app() -> FastAPI:
         )
         del duplicates_report, health_report
         requested_plan_report = ActionPlanReport.from_dict(request.plan_report)
-        generated_plan_report = build_action_plan_report(
-            resolved_music,
-            records,
-            review_report,
-            source_review_item_ids=list(requested_plan_report.source_review_item_ids),
-        )
-        try:
-            plan_report = authorize_action_plan_selection(generated_plan_report, requested_plan_report)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
         backup_dir = (
             None
             if request.backup_dir is None
@@ -418,7 +395,18 @@ def create_app() -> FastAPI:
                 label="backup_dir",
             )
         )
-        results = apply_action_plan_report(plan_report, review_state=review_state, backup_dir=backup_dir)
+        try:
+            plan_report, results = execute_reviewed_action_plan(
+                resolved_music,
+                records,
+                review_report,
+                requested_plan_report,
+                review_state=review_state,
+                backup_dir=backup_dir,
+                workspace_root=resolved_out,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         save_review_state(review_state_path, review_state)
         ledger_path = resolved_out / "review_history.json"
         ledger = load_operation_ledger(ledger_path)
@@ -579,7 +567,6 @@ def create_app() -> FastAPI:
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise HTTPException(status_code=404, detail=f"History batch not found: {batch_id}")
-        _validate_history_batch_paths(batch, music_root=resolved_music, out_root=resolved_out)
         alternate_restore_dir = (
             None
             if request.alternate_restore_dir is None
@@ -601,12 +588,16 @@ def create_app() -> FastAPI:
             )
         )
         review_state = load_review_state(review_state_path)
-        changed = undo_operation_batch(
-            batch,
-            review_state=review_state,
-            alternate_restore_dir=alternate_restore_dir,
-            target_path=target_path,
-        )
+        try:
+            changed = undo_operation_batch(
+                batch,
+                review_state=review_state,
+                allowed_roots=(resolved_music, resolved_out),
+                alternate_restore_dir=alternate_restore_dir,
+                target_path=target_path,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         save_operation_ledger(ledger_path, ledger)
         save_review_state(review_state_path, review_state)
         reactivated_review_item_ids = sorted(

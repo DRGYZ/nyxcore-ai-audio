@@ -10,6 +10,7 @@ from pathlib import Path
 
 from nyxcore.action_plan.service import ActionPlanReport, AppliedPlanResult
 from nyxcore.core.atomic import atomic_write_text
+from nyxcore.core.filesystem import move_file_no_replace
 from nyxcore.review_queue.state import ReviewStateStore, apply_review_action
 
 
@@ -195,14 +196,51 @@ def find_batch(ledger: OperationLedger, batch_id: str) -> OperationBatch | None:
     return None
 
 
+def _validate_bounded_path(path: Path, roots: tuple[Path, ...], *, label: str) -> Path:
+    resolved = path.resolve(strict=False)
+    resolved_roots = tuple(root.resolve(strict=True) for root in roots)
+    if not any(resolved == root or root in resolved.parents for root in resolved_roots):
+        allowed = ", ".join(str(root) for root in resolved_roots)
+        raise ValueError(f"{label} is outside the configured roots: {allowed}")
+    return resolved
+
+
+def validate_history_mutation_paths(
+    batch: OperationBatch,
+    *,
+    allowed_roots: tuple[Path, ...],
+    alternate_restore_dir: Path | None = None,
+    target_path: str | None = None,
+) -> None:
+    for operation in batch.operations:
+        for label, value in (
+            ("history original path", operation.original_path),
+            ("history current path", operation.current_path),
+            ("history backup path", operation.backup_path),
+        ):
+            if value is not None:
+                _validate_bounded_path(Path(value), allowed_roots, label=label)
+    if alternate_restore_dir is not None:
+        _validate_bounded_path(alternate_restore_dir, allowed_roots, label="alternate restore directory")
+    if target_path is not None:
+        _validate_bounded_path(Path(target_path), allowed_roots, label="target path")
+
+
 def undo_operation_batch(
     batch: OperationBatch,
     *,
     review_state: ReviewStateStore,
+    allowed_roots: tuple[Path, ...],
     alternate_restore_dir: Path | None = None,
     target_path: str | None = None,
     now: datetime | None = None,
 ) -> list[LedgerOperation]:
+    validate_history_mutation_paths(
+        batch,
+        allowed_roots=allowed_roots,
+        alternate_restore_dir=alternate_restore_dir,
+        target_path=target_path,
+    )
     now = now or datetime.now(tz=UTC)
     now_iso = now.isoformat()
     changed_operations: list[LedgerOperation] = []
@@ -234,7 +272,7 @@ def undo_operation_batch(
                     if destination.exists():
                         raise RuntimeError(f"alternate restore destination already exists: {destination}")
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(destination))
+                move_file_no_replace(source, destination)
                 operation.current_path = str(destination)
             elif operation.operation_type == "write_metadata" and operation.backup_path:
                 backup = Path(operation.backup_path)

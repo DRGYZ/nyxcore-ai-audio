@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from nyxcore.action_plan.service import execute_reviewed_action_plan
 from nyxcore.saved_playlists.service import (
     create_saved_playlist_definition,
     load_saved_playlist_store,
@@ -247,15 +248,20 @@ class WebApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(plan_response.status_code, 200)
-        apply_response = self.client.post(
-            "/api/review/plan/apply",
-            json={
-                "plan_report": plan_response.json()["data"],
-                "music_path": str(self.music),
-                "out_path": str(self.out),
-            },
-        )
+        with patch(
+            "nyxcore.webapi.app.execute_reviewed_action_plan",
+            wraps=execute_reviewed_action_plan,
+        ) as mutation_service:
+            apply_response = self.client.post(
+                "/api/review/plan/apply",
+                json={
+                    "plan_report": plan_response.json()["data"],
+                    "music_path": str(self.music),
+                    "out_path": str(self.out),
+                },
+            )
         self.assertEqual(apply_response.status_code, 200)
+        mutation_service.assert_called_once()
         apply_payload = apply_response.json()
         self.assertEqual(apply_payload["result_count"], 1)
         self.assertEqual(apply_payload["results"][0]["status"], "ok")

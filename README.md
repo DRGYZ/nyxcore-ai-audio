@@ -256,7 +256,7 @@ Generate a plan from an exact duplicate item:
 
 ```bash
 python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <exact-duplicate-item-id>
-python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --out data/reports
+python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music demo/generated/sample-library --out data/reports
 python -m nyxcore.cli history --out data/reports
 ```
 
@@ -348,6 +348,12 @@ Current command families include:
 - `judge`
 - `apply-judge`
 - `apply-ai`
+
+Safety note:
+
+- mutating use of `apply`, `rename --apply`, `rename-undo`, `apply-ai`, and `apply-judge` is unavailable in this experimental release
+- their preview/report modes remain available where applicable
+- supported mutations must use `review` -> `review-plan` -> `apply-review-plan`, which rebuilds and validates the plan against the current library
 
 Legacy note:
 
