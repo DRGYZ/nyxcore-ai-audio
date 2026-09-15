@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useArchiveSearchQuery } from "../../lib/hooks";
 import { ActionBanner, Button, Chip, EmptyState, Icon, PageHeader, Panel, PathBlock, formatBytes, formatNumber } from "../components";
+import { ApiUnavailableState } from "../feedback";
 
 function formatDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Unknown duration";
@@ -72,11 +73,7 @@ export function SearchPage() {
       ) : searchQuery.isPending ? (
         <ActionBanner tone="info" message={`Scanning the local library for “${query}”…`} />
       ) : searchQuery.isError ? (
-        <ActionBanner
-          tone="error"
-          message={searchQuery.error instanceof Error ? searchQuery.error.message : "Archive search failed."}
-          action={<Button tone="ghost" onClick={() => void searchQuery.refetch()}>Try Again</Button>}
-        />
+        <ApiUnavailableState contextLabel="Archive Search" />
       ) : response && response.items.length === 0 ? (
         <EmptyState
           title={`No matches for “${response.query}”`}

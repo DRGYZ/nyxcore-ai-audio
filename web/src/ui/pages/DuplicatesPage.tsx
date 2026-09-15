@@ -1,19 +1,47 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDuplicatesQuery, useReviewQuery } from "../../lib/hooks";
-import { mockDuplicateReport, mockReviewReport } from "../../lib/mock-data";
-import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
 import type { DuplicateGroup, ReviewItem } from "../../lib/types";
-import { Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, PathBlock, formatBytes, formatNumber } from "../components";
+import { Button, EmptyState, PageHeader, Panel, PathBlock, formatBytes, formatNumber } from "../components";
+import { ApiUnavailableState } from "../feedback";
 
 export function DuplicatesPage() {
   const navigate = useNavigate();
   const duplicatesQuery = useDuplicatesQuery();
   const reviewQuery = useReviewQuery();
-  const duplicatesState = resolveReportQueryData(duplicatesQuery, mockDuplicateReport);
-  const reviewState = resolveReportQueryData(reviewQuery, mockReviewReport);
-  const report = duplicatesState.data;
   const [activeTab, setActiveTab] = useState<"exact" | "likely">("exact");
+
+  if (duplicatesQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Duplicate Detection"
+          title="Duplicates"
+          description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
+        />
+        <ApiUnavailableState contextLabel="Duplicates" />
+      </div>
+    );
+  }
+
+  if (duplicatesQuery.isLoading || !duplicatesQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Duplicate Detection"
+          title="Duplicates"
+          description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading duplicate findings from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const report = duplicatesQuery.data.data;
+  const reviewItems = reviewQuery.data?.data?.items ?? [];
+
   const reclaimable = report.exact_duplicates.reduce(
     (sum, group) => sum + (group.reclaimable_bytes ?? group.files.slice(1).reduce((acc, item) => acc + item.file_size_bytes, 0)),
     0,
@@ -22,12 +50,12 @@ export function DuplicatesPage() {
   const totalGroups = report.summary.exact_group_count + report.summary.likely_group_count;
 
   function findReviewItem(group: DuplicateGroup, itemType: "exact_duplicate_group" | "likely_duplicate_group"): ReviewItem | undefined {
-    const direct = reviewState.data.items.find(
+    const direct = reviewItems.find(
       (item) => item.item_type === itemType && item.details?.source_group_id === group.group_id,
     );
     if (direct) return direct;
     const groupPaths = new Set(group.files.map((file) => file.path.toLocaleLowerCase().replace(/\\/g, "/")));
-    return reviewState.data.items.find(
+    return reviewItems.find(
       (item) =>
         item.item_type === itemType
         && (item.affected_paths ?? []).some((path) => groupPaths.has(path.toLocaleLowerCase().replace(/\\/g, "/"))),
@@ -44,10 +72,10 @@ export function DuplicatesPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Duplicate Analysis"
+        eyebrow="Duplicate Detection"
+        title="Duplicates"
         description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
       />
-      <PageQueryStateNotice {...toQueryNoticeState(duplicatesState)} />
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <Panel className="p-6">
           <p className="text-sm font-medium text-slate-400">Total Reclaimable</p>
@@ -61,7 +89,7 @@ export function DuplicatesPage() {
           <h3 className="mt-2 text-3xl font-bold text-slate-100">{formatNumber(report.summary.exact_group_count + report.summary.likely_group_count)}</h3>
         </Panel>
         <Panel className="border-l-4 border-l-secondary p-6">
-          <p className="text-sm font-medium text-slate-400">System Health Impact</p>
+          <p className="text-sm font-medium text-slate-400">Duplicate Findings Status</p>
           <div className="mt-2 flex items-center gap-2">
             <span className="material-symbols-outlined text-secondary">verified_user</span>
             <h3 className="text-xl font-bold text-slate-100">{totalGroups > 0 ? "Needs Review" : "Clean"}</h3>
@@ -100,7 +128,7 @@ export function DuplicatesPage() {
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-primary/10 bg-primary/5 p-4">
                 <div className="flex items-center gap-4">
                   <div className="flex size-12 items-center justify-center rounded-lg bg-secondary/20 text-secondary">
-                    <span className="material-symbols-outlined">movie</span>
+                    <span className="material-symbols-outlined">audio_file</span>
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-100">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>

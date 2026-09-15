@@ -2,16 +2,43 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_LABELS, HEALTH_BITRATE_BUCKET_ORDER } from "../../lib/contracts";
 import { useHealthQuery } from "../../lib/hooks";
-import { mockHealthReport } from "../../lib/mock-data";
-import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
-import { ActionBanner, Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, ProgressBar, formatNumber } from "../components";
+import { ActionBanner, Button, EmptyState, PageHeader, Panel, ProgressBar, formatNumber } from "../components";
+import { ApiUnavailableState } from "../feedback";
 
 export function HealthPage() {
   const navigate = useNavigate();
   const healthQuery = useHealthQuery();
-  const healthState = resolveReportQueryData(healthQuery, mockHealthReport);
-  const report = healthState.data;
   const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+
+  if (healthQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Library Health"
+          title="Library Health"
+          description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
+        />
+        <ApiUnavailableState contextLabel="Library Health" />
+      </div>
+    );
+  }
+
+  if (healthQuery.isLoading || !healthQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Library Health"
+          title="Library Health"
+          description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading library health audit from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const report = healthQuery.data.data;
   const bucketValues = HEALTH_BITRATE_BUCKET_ORDER.map((key) => report.quality.bitrate_buckets[key]);
   const maxBucket = bucketValues.length > 0 ? Math.max(1, ...bucketValues) : 1;
   const losslessRatio = report.overview.total_audio_files === 0
@@ -28,7 +55,7 @@ export function HealthPage() {
     const result = await healthQuery.refetch();
     setBanner(
       result.error
-        ? { tone: "error", message: "Health refresh failed. The last available report remains visible." }
+        ? { tone: "error", message: "Health refresh failed. Local API may be offline." }
         : { tone: "success", message: "Health audit refreshed from the current library." },
     );
   }
@@ -49,18 +76,18 @@ export function HealthPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="System Diagnostics"
-        title="Technical Audio Audit"
+        eyebrow="Library Health"
+        title="Library Health"
+        description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
         actions={
           <>
-            <Button tone="ghost" onClick={handleExport} disabled={healthState.usingMock}>Export JSON</Button>
+            <Button tone="ghost" onClick={handleExport}>Export JSON</Button>
             <Button tone="primary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
               {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
             </Button>
           </>
         }
       />
-      <PageQueryStateNotice {...toQueryNoticeState(healthState)} />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         <Panel className="p-5">
@@ -89,11 +116,11 @@ export function HealthPage() {
         </Panel>
         <Panel className="border border-rose-500/20 p-5 shadow-[0_0_20px_-5px_rgba(244,63,94,0.2)]">
           <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Critical Errors</p>
-            <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-500">ACTION REQ</span>
+            <p className="text-sm font-medium text-slate-400">Unreadable Files</p>
+            <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-500">Needs Attention</span>
           </div>
           <p className="text-3xl font-bold text-rose-500">{formatNumber(report.quality.unreadable_or_unparseable_files?.count ?? 0)}</p>
-          <p className="mt-2 text-xs font-medium text-slate-500">Corrupt containers detected</p>
+          <p className="mt-2 text-xs font-medium text-slate-500">Files with unreadable metadata or unparseable headers</p>
         </Panel>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

@@ -20,15 +20,13 @@ export function HistoryDetailPanel({
   mutationResult,
   usingMock,
   busy,
-  onUndo,
-  onRestore,
+  onReverse,
 }: {
   batch?: HistoryBatch;
   mutationResult?: HistoryMutationResponse | null;
-  usingMock: boolean;
+  usingMock?: boolean;
   busy: boolean;
-  onUndo: () => void;
-  onRestore: () => void;
+  onReverse: () => void;
 }) {
   const changedById = new Map((mutationResult?.changed_operations ?? []).map((operation) => [operation.operation_id, operation]));
   const mutationSummary = mutationResult
@@ -44,14 +42,9 @@ export function HistoryDetailPanel({
       title="Batch Details"
       subtitle={batch ? `BATCH: ${batch.batch_id}` : "No batch selected"}
       footer={
-        <>
-          <Button tone="ghost" className="w-full" disabled={usingMock || busy || !batch?.reversible} onClick={onUndo}>
-            Undo Batch
-          </Button>
-          <Button tone="primary" className="w-full" disabled={usingMock || busy || !batch?.reversible} onClick={onRestore}>
-            Restore Batch
-          </Button>
-        </>
+        <Button tone="primary" className="w-full" disabled={usingMock || busy || !batch?.reversible} onClick={onReverse}>
+          Reverse Batch
+        </Button>
       }
     >
       {!batch ? (
@@ -83,15 +76,9 @@ export function HistoryDetailPanel({
             </div>
           </Panel>
 
-          <Panel className="border-primary/10 bg-background-dark/40 p-4">
-            <p className="text-xs text-slate-400">
-              Restore and Undo currently call the same safe reversal path. Separate labels are preserved for command and API compatibility.
-            </p>
-          </Panel>
-
           {mutationResult ? (
             <Panel className="border-primary/20 bg-primary/5 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Latest Restore / Undo Outcome</p>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Latest Reversal Outcome</p>
               <p className="mt-2 text-sm text-slate-300">
                 {mutationSummary?.successful ?? 0} successful,
                 {" "}

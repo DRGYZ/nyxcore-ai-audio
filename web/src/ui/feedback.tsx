@@ -1,6 +1,87 @@
 import { useEffect, useId, useRef } from "react";
 import type { PropsWithChildren, ReactNode } from "react";
-import { Icon, Panel } from "./primitives";
+import { useCheckConnection } from "../lib/hooks";
+import { Button, Icon, Panel } from "./primitives";
+
+export function ApiUnavailableState({
+  contextLabel,
+  onRetry,
+  checking,
+}: {
+  contextLabel?: string;
+  onRetry?: () => void;
+  checking?: boolean;
+}) {
+  const { checkConnection: defaultCheck, checking: defaultChecking } = useCheckConnection();
+  const handleCheck = onRetry ?? defaultCheck;
+  const isChecking = checking !== undefined ? checking : defaultChecking;
+
+  return (
+    <Panel className="p-8">
+      <div className="flex max-w-3xl flex-col gap-6">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400">
+            <Icon name="cloud_off" className="text-xl" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-amber-400">Local Connection</p>
+            <h2 className="font-display text-xl font-bold text-slate-100">
+              Local API is not connected {contextLabel ? `• ${contextLabel}` : ""}
+            </h2>
+          </div>
+        </div>
+
+        <p className="text-sm leading-relaxed text-slate-300">
+          NyxCore is an experimental local-first toolkit. It connects to a local FastAPI backend running on your machine
+          at <code className="rounded bg-background-dark px-1.5 py-0.5 font-mono text-xs text-primary">http://127.0.0.1:8000</code>.
+          The local server is not currently reachable.
+        </p>
+
+        <div className="space-y-4 rounded-xl border border-border-dark bg-background-dark/70 p-5">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Setup Instructions</p>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-200">
+              1. Start the local API pointed at your music library & reports directory:
+            </p>
+            <pre className="overflow-x-auto rounded-lg bg-background-dark p-3 font-mono text-xs text-slate-300">
+{`export NYXCORE_WEB_MUSIC_DIR="/path/to/your/music"
+export NYXCORE_WEB_OUT_DIR="data/reports"
+uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
+            </pre>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-200">
+              2. Or generate and inspect the built-in demo library:
+            </p>
+            <pre className="overflow-x-auto rounded-lg bg-background-dark p-3 font-mono text-xs text-slate-300">
+{`python demo/create_demo_library.py --force
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+python -m nyxcore.cli review demo/generated/sample-library --out data/reports
+uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
+            </pre>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            For step-by-step setup guides (including Windows WSL2 setup and dependencies), refer to <span className="font-mono text-primary">INSTALL_WSL.md</span> in the project root.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <Button tone="primary" onClick={handleCheck} disabled={isChecking}>
+            <Icon name="refresh" className={`text-base ${isChecking ? "animate-spin" : ""}`} />
+            {isChecking ? "Checking Connection…" : "Check Connection"}
+          </Button>
+          <span className="text-xs text-slate-500">
+            NyxCore operates locally. No cloud services or external network requests are made.
+          </span>
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 export function QueryNotice({
   loading,
@@ -14,20 +95,20 @@ export function QueryNotice({
   if (loading) {
     return (
       <div className="rounded-lg border border-border-dark bg-background-dark/70 px-4 py-3 text-sm text-slate-400">
-        Loading live NyxCore data…
+        Loading library data from local API…
       </div>
     );
   }
   if (error || usingMock) {
     return (
       <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-        Fallback mode: showing local mock data because the live API is unavailable. Mutating actions stay disabled in this state.
+        Local API unavailable. Connect the backend to inspect live library data.
       </div>
     );
   }
   return (
     <div className="rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">
-      Live API connected. Data and mutation state are current.
+      Live API connected. Data and review state are current.
     </div>
   );
 }

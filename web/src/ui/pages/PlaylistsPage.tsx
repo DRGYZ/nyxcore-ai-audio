@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { useCreatePlaylistMutation, usePlaylistsQuery, useRefreshPlaylistMutation } from "../../lib/hooks";
-import { mockPlaylistsResponse } from "../../lib/mock-data";
-import { resolveQueryData, toQueryNoticeState } from "../../lib/query-state";
 import { useUrlBackedSelection } from "../../lib/url-selection";
-import { ActionBanner, Button, Chip, Drawer, EmptyState, Modal, PageHeader, PageQueryStateNotice, Panel, PathBlock, formatDate } from "../components";
+import { ActionBanner, Button, Chip, Drawer, EmptyState, Modal, PageHeader, Panel, PathBlock, formatDate } from "../components";
+import { ApiUnavailableState } from "../feedback";
 import { SplitScreen } from "../shell";
 
 type PlaylistFilter = "all" | "recent" | "never";
@@ -12,15 +11,43 @@ export function PlaylistsPage() {
   const playlistsQuery = usePlaylistsQuery();
   const createMutation = useCreatePlaylistMutation();
   const refreshMutation = useRefreshPlaylistMutation();
-  const playlistsState = resolveQueryData(playlistsQuery, mockPlaylistsResponse);
-  const response = playlistsState.data;
-  const usingMock = playlistsState.usingMock;
   const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [maxTracks, setMaxTracks] = useState("25");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
+
+  if (playlistsQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Playlists"
+          title="Saved Playlists"
+          description="Dynamic collections synthesized from natural-language queries and refreshed against the current local library."
+        />
+        <ApiUnavailableState contextLabel="Saved Playlists" />
+      </div>
+    );
+  }
+
+  if (playlistsQuery.isLoading || !playlistsQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Playlists"
+          title="Saved Playlists"
+          description="Dynamic collections synthesized from natural-language queries and refreshed against the current local library."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading saved playlists from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const response = playlistsQuery.data;
+  const usingMock = false;
   const filtered = useMemo(() => response.items.filter((item) => {
     if (playlistFilter === "all") return true;
     if (playlistFilter === "never") return !item.last_refreshed_at;
@@ -85,7 +112,6 @@ export function PlaylistsPage() {
           </>
         }
       />
-      <PageQueryStateNotice {...toQueryNoticeState(playlistsState)} />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       <div className="flex flex-wrap gap-3">
         {([

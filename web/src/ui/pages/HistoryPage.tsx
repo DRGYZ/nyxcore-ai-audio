@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
 import { isSuccessfulUndoStatus } from "../../lib/contracts";
 import type { HistoryMutationResponse } from "../../lib/types";
-import { useHistoryQuery, useRestoreHistoryMutation, useUndoHistoryMutation } from "../../lib/hooks";
-import { mockHistoryResponse } from "../../lib/mock-data";
-import { resolveQueryData, toQueryNoticeState } from "../../lib/query-state";
+import { useHistoryQuery, useReverseHistoryMutation } from "../../lib/hooks";
 import { useUrlBackedSelection } from "../../lib/url-selection";
-import { ActionBanner, Button, Chip, EmptyState, Modal, PageHeader, PageQueryStateNotice, Panel, formatDate } from "../components";
+import { ActionBanner, Button, Chip, EmptyState, Modal, PageHeader, Panel, formatDate } from "../components";
+import { ApiUnavailableState } from "../feedback";
 import { HistoryDetailPanel } from "../history/HistoryDetailPanel";
 import { SplitScreen } from "../shell";
 
@@ -20,15 +19,41 @@ const HISTORY_FILTERS: Array<{ value: HistoryFilter; label: string }> = [
 
 export function HistoryPage() {
   const historyQuery = useHistoryQuery();
-  const restoreMutation = useRestoreHistoryMutation();
-  const undoMutation = useUndoHistoryMutation();
-  const historyState = resolveQueryData(historyQuery, mockHistoryResponse);
-  const response = historyState.data;
-  const usingMock = historyState.usingMock;
+  const reverseMutation = useReverseHistoryMutation();
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
-  const [confirm, setConfirm] = useState<{ type: "restore" | "undo"; batchId: string } | null>(null);
+  const [confirmBatchId, setConfirmBatchId] = useState<string | null>(null);
   const [mutationResult, setMutationResult] = useState<HistoryMutationResponse | null>(null);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+
+  if (historyQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Operation History"
+          title="History"
+          description="Inspect applied batches, track ledger operations, and safely reverse changes back to their original paths."
+        />
+        <ApiUnavailableState contextLabel="History" />
+      </div>
+    );
+  }
+
+  if (historyQuery.isLoading || !historyQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Operation History"
+          title="History"
+          description="Inspect applied batches, track ledger operations, and safely reverse changes back to their original paths."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading operation history from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const response = historyQuery.data;
   const filteredHistory = useMemo(
     () => response.items.filter((item) => {
       if (historyFilter === "all") return true;
@@ -48,43 +73,34 @@ export function HistoryPage() {
     idKey: "batch_id",
   });
 
-  async function handleHistoryMutation(kind: "restore" | "undo", batchId: string) {
-    if (usingMock) return;
+  async function handleReverse(batchId: string) {
     try {
-      const responsePayload =
-        kind === "restore"
-          ? await restoreMutation.mutateAsync({ batchId })
-          : await undoMutation.mutateAsync({ batchId });
+      const responsePayload = await reverseMutation.mutateAsync({ batchId });
       setMutationResult(responsePayload);
       const successful = responsePayload.changed_operations.filter((item) => isSuccessfulUndoStatus(item.undo_status)).length;
       const unsupported = responsePayload.changed_operations.filter((item) => item.undo_status === "not_supported").length;
       const failed = responsePayload.changed_operations.filter((item) => item.undo_status === "error");
-      const actionLabel = kind === "restore" ? "Restore" : "Undo";
       setBanner({
         tone: failed.length > 0 ? "error" : unsupported > 0 ? "info" : "success",
         message:
           failed.length > 0
-            ? `${actionLabel} completed for ${batchId}. ${successful} successful, ${unsupported} not supported, ${failed.length} errors. ${failed.map((item) => item.undo_message ?? "operation failed").join(" ")}`
-            : `${actionLabel} completed for ${batchId}. ${successful} successful, ${unsupported} not supported.`,
+            ? `Reversal completed for ${batchId}. ${successful} successful, ${unsupported} not supported, ${failed.length} errors. ${failed.map((item) => item.undo_message ?? "operation failed").join(" ")}`
+            : `Reversal completed for ${batchId}. ${successful} successful, ${unsupported} not supported.`,
       });
-      setConfirm(null);
+      setConfirmBatchId(null);
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to mutate history batch." });
+      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to reverse history batch." });
     }
   }
 
-  const busy = restoreMutation.isPending || undoMutation.isPending;
+  const busy = reverseMutation.isPending;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="System Integrity Secure"
-        title="Operation Audit Trail"
-        description="Inspect reversible plan batches, confirm restore or undo explicitly, and keep review state honest when changes bring issues back. Restore and Undo labels are both kept for compatibility and currently use the same safe reversal path."
-      />
-      <PageQueryStateNotice
-        {...toQueryNoticeState(historyState)}
-        fallbackMessage="Mock fallback is active. Restore and Undo are disabled until the live API is available; in live mode they currently use the same safe reversal path."
+        eyebrow="Operation History"
+        title="History"
+        description="Inspect applied batches, track ledger operations, and safely reverse changes back to their original paths."
       />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
 
@@ -119,7 +135,7 @@ export function HistoryPage() {
                     <tr className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
                       <th className="px-6 py-4">Timestamp</th>
                       <th className="px-6 py-4">Operation</th>
-                      <th className="px-6 py-4">Integrity</th>
+                      <th className="px-6 py-4">Reversibility</th>
                       <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -153,30 +169,17 @@ export function HistoryPage() {
                             <Chip tone={item.reversible ? "primary" : "warning"}>{item.reversible ? "reversible" : "mixed"}</Chip>
                           </td>
                           <td className="px-6 py-5 text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                tone="ghost"
-                                className="px-3 py-1 text-xs"
-                                disabled={usingMock || !item.reversible}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setConfirm({ type: "undo", batchId: item.batch_id });
-                                }}
-                              >
-                                Undo
-                              </Button>
-                              <Button
-                                tone="primary"
-                                className="px-3 py-1 text-xs"
-                                disabled={usingMock || !item.reversible}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setConfirm({ type: "restore", batchId: item.batch_id });
-                                }}
-                              >
-                                Restore
-                              </Button>
-                            </div>
+                            <Button
+                              tone="primary"
+                              className="px-3 py-1 text-xs"
+                              disabled={!item.reversible || busy}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setConfirmBatchId(item.batch_id);
+                              }}
+                            >
+                              Reverse
+                            </Button>
                           </td>
                         </tr>
                       );
@@ -193,10 +196,8 @@ export function HistoryPage() {
             <HistoryDetailPanel
               batch={selected}
               mutationResult={mutationResult && mutationResult.batch_id === selected?.batch_id ? mutationResult : null}
-              usingMock={usingMock}
               busy={busy}
-              onUndo={() => selected && setConfirm({ type: "undo", batchId: selected.batch_id })}
-              onRestore={() => selected && setConfirm({ type: "restore", batchId: selected.batch_id })}
+              onReverse={() => selected && setConfirmBatchId(selected.batch_id)}
             />
             <Panel className="p-6">
               <h3 className="mb-4 flex items-center gap-2 font-display text-lg font-bold text-slate-100">
@@ -209,7 +210,7 @@ export function HistoryPage() {
                   <p className="text-xl font-bold">{response.items.reduce((sum, item) => sum + item.affected_count, 0)}</p>
                 </div>
                 <div>
-                  <span className="text-xs text-slate-500">Undoable</span>
+                  <span className="text-xs text-slate-500">Reversible</span>
                   <p className="text-xl font-bold text-primary">{response.items.filter((item) => item.reversible).length}</p>
                 </div>
                 <div>
@@ -227,33 +228,32 @@ export function HistoryPage() {
       />
 
       <Modal
-        open={!!confirm}
-        title={confirm?.type === "restore" ? "Confirm Restore" : "Confirm Undo"}
-        subtitle={confirm?.batchId}
-        onClose={() => setConfirm(null)}
+        open={!!confirmBatchId}
+        title="Confirm Reversal"
+        subtitle={confirmBatchId ?? undefined}
+        onClose={() => setConfirmBatchId(null)}
         footer={
           <>
-            <Button tone="ghost" onClick={() => setConfirm(null)} disabled={busy}>
+            <Button tone="ghost" onClick={() => setConfirmBatchId(null)} disabled={busy}>
               Cancel
             </Button>
             <Button
               tone="primary"
-              disabled={busy || !confirm}
+              disabled={busy || !confirmBatchId}
               onClick={() => {
-                if (confirm) {
-                  void handleHistoryMutation(confirm.type, confirm.batchId);
+                if (confirmBatchId) {
+                  void handleReverse(confirmBatchId);
                 }
               }}
             >
-              {busy ? "Processing..." : confirm?.type === "restore" ? "Restore Batch" : "Undo Batch"}
+              {busy ? "Reversing..." : "Reverse Batch"}
             </Button>
           </>
         }
       >
         <div className="space-y-4 text-sm text-slate-300">
-          <p>This action uses the persisted operation ledger and recorded original paths for the selected batch.</p>
-          <p>Restore and Undo currently call the same safe reversal path. Separate labels are preserved for CLI and API compatibility.</p>
-          <p>If a restore target is occupied or a file has moved outside NyxCore, the API will fail safely and report the conflict instead of overwriting anything.</p>
+          <p>This action uses the persisted operation ledger and recorded original paths to safely reverse the selected batch.</p>
+          <p>If a target path is occupied or a file has moved outside NyxCore, the operation halts safely and reports the conflict without overwriting.</p>
         </div>
       </Modal>
     </div>

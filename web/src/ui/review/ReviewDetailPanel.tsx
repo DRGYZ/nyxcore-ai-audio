@@ -71,8 +71,8 @@ export function ReviewDetailPanel({
             </div>
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">
-                <span>Priority Confidence</span>
-                <span className="text-primary">{item.priority_score}%</span>
+                <span>Priority Score</span>
+                <span className="font-mono text-primary">{item.priority_score}</span>
               </div>
               <ProgressBar value={item.priority_score} />
             </div>

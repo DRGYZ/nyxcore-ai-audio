@@ -6,22 +6,22 @@ import {
 } from "../../lib/action-plan";
 import {
   useApplyReviewPlanMutation,
+  useCheckConnection,
   useGenerateReviewPlanMutation,
   useReviewQuery,
   useReviewStateMutation,
 } from "../../lib/hooks";
-import { mockReviewReport } from "../../lib/mock-data";
-import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
 import { useUrlBackedSelection } from "../../lib/url-selection";
 import {
   ActionBanner,
+  ApiUnavailableState,
   Button,
   Chip,
   EmptyState,
+  Icon,
   Modal,
-  PageQueryStateNotice,
   PageHeader,
   Panel,
   ProgressBar,
@@ -45,9 +45,7 @@ export function ReviewPage() {
   const reviewMutation = useReviewStateMutation();
   const planMutation = useGenerateReviewPlanMutation();
   const applyPlanMutation = useApplyReviewPlanMutation();
-  const reviewState = resolveReportQueryData(reviewQuery, mockReviewReport);
-  const report = reviewState.data;
-  const usingMock = reviewState.usingMock;
+  const { checkConnection, checking } = useCheckConnection();
   const [priority, setPriority] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
   const [itemType, setItemType] = useState<string>(() => requestedItemType ?? "all");
@@ -60,6 +58,37 @@ export function ReviewPage() {
   useEffect(() => {
     if (requestedItemType) setItemType(requestedItemType);
   }, [requestedItemType]);
+
+  if (reviewQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Review Findings"
+          title="Review Inbox"
+          description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
+        />
+        <ApiUnavailableState contextLabel="Review Inbox" />
+      </div>
+    );
+  }
+
+  if (reviewQuery.isLoading || !reviewQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Review Findings"
+          title="Review Inbox"
+          description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading review findings from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const report = reviewQuery.data.data;
+  const usingMock = false;
 
   const filtered = useMemo(
     () =>
@@ -80,7 +109,7 @@ export function ReviewPage() {
   });
 
   async function handleReviewAction(action: "seen" | "ignored" | "snoozed" | "resolved") {
-    if (!selected || usingMock) return;
+    if (!selected) return;
     try {
       setApplyResult(null);
       await reviewMutation.mutateAsync({ item_ids: [selected.item_id], action, days: action === "snoozed" ? 7 : undefined });
@@ -97,14 +126,16 @@ export function ReviewPage() {
 
   async function handleRefreshInbox() {
     setBanner(null);
-    const result = await reviewQuery.refetch();
-    setBanner(result.error
-      ? { tone: "error", message: "Inbox refresh failed. The last available review data remains visible." }
-      : { tone: "success", message: "Inbox refreshed. Findings that still exist are active again as Seen." });
+    try {
+      await checkConnection();
+      setBanner({ tone: "success", message: "Inbox refreshed from local API." });
+    } catch {
+      setBanner({ tone: "error", message: "Inbox refresh failed. Local API may be offline." });
+    }
   }
 
   async function handleGeneratePlan() {
-    if (!selected || usingMock) return;
+    if (!selected) return;
     try {
       const response = await planMutation.mutateAsync({ item_ids: [selected.item_id] });
       setApplyResult(null);
@@ -117,7 +148,7 @@ export function ReviewPage() {
   }
 
   async function handleApplyPlan() {
-    if (!planReport || usingMock) return;
+    if (!planReport) return;
     try {
       const response = await applyPlanMutation.mutateAsync({
         plan_report: buildSelectedActionPlanReport(planReport, selectedOperationIds),
@@ -137,22 +168,20 @@ export function ReviewPage() {
 
   const applyCapable = selectedOperationIds.size > 0;
   const selectedOperations = selectedOperationIds.size;
-  const busy = reviewMutation.isPending || planMutation.isPending || applyPlanMutation.isPending;
+  const busy = reviewMutation.isPending || planMutation.isPending || applyPlanMutation.isPending || checking;
 
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Review Findings"
         title="Review Inbox"
-        description="Review findings, use scan-aware triage states, inspect explicit plans, and hand off applied changes into operation history without leaving the command-center workflow."
+        description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
         actions={
           <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
-            {reviewQuery.isFetching ? "Refreshing…" : "Refresh Inbox"}
+            <Icon name="refresh" className={`text-base ${reviewQuery.isFetching || checking ? "animate-spin" : ""}`} />
+            {reviewQuery.isFetching || checking ? "Refreshing…" : "Refresh Inbox"}
           </Button>
         }
-      />
-      <PageQueryStateNotice
-        {...toQueryNoticeState(reviewState)}
-        fallbackMessage="Mock fallback is active. Mutation actions are disabled until the live API is available."
       />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       {applyResult ? (

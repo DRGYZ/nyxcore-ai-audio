@@ -2,17 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, PropsWithChildren, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useReviewQuery, useStatusQuery } from "../lib/hooks";
-import { mockReviewReport, mockStatus } from "../lib/mock-data";
 import { Chip, Icon } from "./components";
 
 const navItems = [
-  { to: "/", label: "Mission Control", icon: "dashboard" },
+  { to: "/", label: "Overview", icon: "dashboard" },
   { to: "/search", label: "Archive Search", icon: "manage_search" },
   { to: "/review", label: "Review Inbox", icon: "inbox" },
-  { to: "/playlists", label: "Saved Playlists", icon: "auto_awesome" },
-  { to: "/history", label: "Operation History", icon: "history_edu" },
   { to: "/duplicates", label: "Duplicates", icon: "copy_all" },
-  { to: "/health", label: "Health", icon: "analytics" },
+  { to: "/health", label: "Library Health", icon: "health_and_safety" },
+  { to: "/history", label: "History", icon: "history" },
 ];
 
 function SidebarLink({ to, label, icon, badge }: { to: string; label: string; icon: string; badge?: number }) {
@@ -43,15 +41,17 @@ export function AppShell({ children }: PropsWithChildren) {
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
-  const status = statusQuery.data ?? mockStatus;
-  const review = reviewQuery.data?.data ?? mockReviewReport;
-  const reviewCount = review.items.filter((item) => item.review_status === "new").length;
-  const unresolvedReviewCount = review.items.filter((item) => item.review_status === "new" || item.review_status === "seen").length;
-  const usingMock = !statusQuery.data || !reviewQuery.data;
-  const notificationItems = [...review.items]
-    .filter((item) => item.priority_band === "high" && (item.review_status === "new" || item.review_status === "seen"))
-    .sort((left, right) => right.priority_score - left.priority_score || left.item_id.localeCompare(right.item_id))
-    .slice(0, 5);
+  const isConnected = !!statusQuery.data && !statusQuery.isError;
+  const status = statusQuery.data;
+  const review = isConnected ? reviewQuery.data?.data : undefined;
+  const reviewCount = review ? review.items.filter((item) => item.review_status === "new").length : 0;
+  const unresolvedReviewCount = review ? review.items.filter((item) => item.review_status === "new" || item.review_status === "seen").length : 0;
+  const notificationItems = review
+    ? [...review.items]
+        .filter((item) => item.priority_band === "high" && (item.review_status === "new" || item.review_status === "seen"))
+        .sort((left, right) => right.priority_score - left.priority_score || left.item_id.localeCompare(right.item_id))
+        .slice(0, 5)
+    : [];
 
   useEffect(() => {
     if (location.pathname === "/search") {
@@ -96,7 +96,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </div>
             <div>
               <h1 className="font-display text-lg font-bold">NyxCore</h1>
-              <p className="text-xs font-medium text-primary/60">Local library control surface</p>
+              <p className="text-xs font-medium text-primary/60">Local music-library review toolkit</p>
             </div>
           </div>
           <nav className="space-y-6 px-4 pb-6">
@@ -104,28 +104,36 @@ export function AppShell({ children }: PropsWithChildren) {
               <p className="px-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Navigation</p>
               <div className="mt-3 space-y-1">
                 {navItems.map((item) => (
-                  <SidebarLink key={item.to} {...item} badge={item.to === "/review" ? reviewCount : undefined} />
+                  <SidebarLink key={item.to} {...item} badge={item.to === "/review" ? (reviewCount || undefined) : undefined} />
                 ))}
               </div>
             </div>
             <div className="rounded-xl border border-primary/10 bg-gradient-to-br from-primary/10 to-transparent p-4">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Workspace Snapshot</p>
-                <Chip tone={usingMock ? "warning" : "primary"}>{usingMock ? "mock" : "live"}</Chip>
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Workspace Status</p>
+                <Chip tone={isConnected ? "primary" : "warning"}>{isConnected ? "connected" : "offline"}</Chip>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Open Review</p>
-                  <p className="mt-1 text-lg font-bold text-slate-100">{unresolvedReviewCount}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Saved Playlists</p>
-                  <p className="mt-1 text-lg font-bold text-primary">{status.saved_playlist_count}</p>
-                </div>
-              </div>
-              <p className="mt-3 text-[10px] text-slate-400">
-                {usingMock ? "Showing fallback examples because live API data is unavailable." : "Live status is sourced from the current API session."}
-              </p>
+              {isConnected ? (
+                <>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Open Review</p>
+                      <p className="mt-1 text-lg font-bold text-slate-100">{unresolvedReviewCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Ledger</p>
+                      <p className="mt-1 text-lg font-bold text-primary">{status?.history_exists ? "Active" : "Empty"}</p>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-[10px] text-slate-400">
+                    Live status is sourced from the local API session.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+                  Local API is not connected. Start the local backend to inspect and review your library.
+                </p>
+              )}
             </div>
           </nav>
         </aside>
@@ -133,14 +141,16 @@ export function AppShell({ children }: PropsWithChildren) {
           <header className="sticky top-0 z-30 flex items-center justify-between border-b border-primary/10 bg-background-dark/70 px-6 py-4 backdrop-blur-md">
             <div className="flex min-w-0 items-center gap-6">
               <div className="hidden items-center gap-2 text-primary sm:flex">
-                <Icon name="folder_open" className="text-lg" />
-                <span className="truncate font-mono text-xs text-slate-300">{status.music_path}</span>
+                <Icon name={isConnected ? "folder_open" : "cloud_off"} className="text-lg" />
+                <span className="truncate font-mono text-xs text-slate-300">
+                  {isConnected ? status?.music_path : "Local API Disconnected"}
+                </span>
               </div>
               <div className="hidden h-4 w-px bg-primary/20 md:block" />
               <div className="hidden items-center gap-2 md:flex">
-                <span className={`size-2 rounded-full ${usingMock ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.55)]" : "bg-primary shadow-[0_0_8px_#25e2f4]"}`} />
+                <span className={`size-2 rounded-full ${isConnected ? "bg-primary shadow-[0_0_8px_#25e2f4]" : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.55)]"}`} />
                 <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
-                  {usingMock ? "Mock Fallback" : "Live API"}
+                  {isConnected ? "Local API" : "Disconnected"}
                 </span>
               </div>
             </div>
@@ -210,7 +220,7 @@ export function AppShell({ children }: PropsWithChildren) {
                         ))}
                       </div>
                     ) : (
-                      <p className="px-4 py-6 text-center text-sm text-slate-500">No high-priority Review items right now.</p>
+                      <p className="px-4 py-6 text-center text-sm text-slate-500">No high-priority review items right now.</p>
                     )}
                     <Link
                       role="menuitem"
@@ -223,7 +233,6 @@ export function AppShell({ children }: PropsWithChildren) {
                   </div>
                 ) : null}
               </div>
-              <Chip tone="primary">{status.active_profile}</Chip>
               <div className="size-10 rounded-full border border-primary/30 bg-gradient-to-br from-primary/40 to-secondary/40" />
             </div>
           </header>
@@ -234,16 +243,19 @@ export function AppShell({ children }: PropsWithChildren) {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap items-center gap-6">
                 <span className="flex items-center gap-2">
-                  <span className={`size-1.5 rounded-full ${usingMock ? "bg-amber-400" : "animate-pulse bg-primary"}`} />
-                  {usingMock ? "Mock Fallback Active" : "Live API Connected"}
+                  <span className={`size-1.5 rounded-full ${isConnected ? "animate-pulse bg-primary" : "bg-amber-400"}`} />
+                  {isConnected ? "Local API Connected (127.0.0.1:8000)" : "Local API Unavailable"}
                 </span>
-                <span>Profile: {status.active_profile}</span>
-                <span>Saved Playlists: {status.saved_playlist_count}</span>
+                {isConnected && status?.music_path ? <span>Library: {status.music_path}</span> : null}
               </div>
-              <div className="flex flex-wrap gap-6">
-                <span>Review State: {status.review_state_exists ? "Loaded" : "Missing"}</span>
-                <span>History: {status.history_exists ? "Available" : "Empty"}</span>
-              </div>
+              {isConnected ? (
+                <div className="flex flex-wrap gap-6">
+                  <span>Review State: {status?.review_state_exists ? "Loaded" : "Empty"}</span>
+                  <span>History Ledger: {status?.history_exists ? "Available" : "Empty"}</span>
+                </div>
+              ) : (
+                <span>NyxCore runs locally</span>
+              )}
             </div>
           </footer>
         </div>
