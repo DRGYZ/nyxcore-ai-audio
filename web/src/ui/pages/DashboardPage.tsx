@@ -204,10 +204,10 @@ export function DashboardPage() {
               ) : (
                 <div className="divide-y divide-white/[0.05]">
                   {actionableReviewItems.slice(0, 4).map((item) => (
-                    <div
+                    <Link
                       key={item.item_id}
-                      onClick={() => navigate(`/review?item=${encodeURIComponent(item.item_id)}`)}
-                      className="group -mx-2 flex cursor-pointer items-center justify-between gap-4 rounded-[3px] px-3 py-3 transition-colors hover:bg-surface-raised/80"
+                      to={`/review?item=${encodeURIComponent(item.item_id)}`}
+                      className="group -mx-2 flex items-center justify-between gap-4 rounded-[3px] px-3 py-3 transition-colors hover:bg-surface-raised/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <Chip
@@ -231,7 +231,7 @@ export function DashboardPage() {
                           Inspect →
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}

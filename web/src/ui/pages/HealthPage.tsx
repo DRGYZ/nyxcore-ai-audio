@@ -153,17 +153,21 @@ export function HealthPage() {
                 <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent" /> High Fidelity</span>
               </div>
             </div>
-            <div className="flex h-48 items-end justify-between gap-3 px-2">
+            <div className="flex h-48 items-end justify-between gap-1.5 px-1 sm:gap-3 sm:px-2">
               {HEALTH_BITRATE_BUCKET_ORDER.map((key) => {
                 const value = report.quality.bitrate_buckets[key];
                 const barTone = key === ">=256k" ? "bg-accent" : key === "unknown" ? "bg-amber-400/60" : "bg-accent/40";
+                const label = HEALTH_BITRATE_BUCKET_LABELS[key];
                 return (
-                  <div key={key} className="flex flex-1 flex-col items-center gap-2">
+                  <div key={key} className="flex min-w-0 flex-1 flex-col items-center gap-2">
                     <div
+                      role="img"
+                      aria-label={`${label}: ${formatNumber(value)} files`}
+                      title={`${label}: ${formatNumber(value)} files`}
                       className={`w-full rounded-t-[2px] transition-all duration-300 ${barTone}`}
                       style={{ height: `${Math.max(6, (value / maxBucket) * 100)}%` }}
                     />
-                    <span className="font-mono text-[10px] text-primary-subtle">{HEALTH_BITRATE_BUCKET_LABELS[key]}</span>
+                    <span className="w-full truncate text-center font-mono text-[9px] text-primary-subtle sm:text-[10px]">{label}</span>
                   </div>
                 );
               })}

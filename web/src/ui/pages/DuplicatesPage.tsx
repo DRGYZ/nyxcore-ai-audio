@@ -120,13 +120,14 @@ export function DuplicatesPage() {
         />
       </div>
 
-      <div className="flex gap-2 border-b border-white/[0.07] pb-3">
+      <div className="flex flex-wrap gap-2 border-b border-white/[0.07] pb-3">
         <button
           type="button"
+          aria-pressed={activeTab === "exact"}
           onClick={() => setActiveTab("exact")}
           className={`flex items-center gap-2 rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
             activeTab === "exact"
-              ? "bg-white/[0.08] text-accent shadow-sm"
+              ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
               : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
           }`}
         >
@@ -138,10 +139,11 @@ export function DuplicatesPage() {
         </button>
         <button
           type="button"
+          aria-pressed={activeTab === "likely"}
           onClick={() => setActiveTab("likely")}
           className={`flex items-center gap-2 rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
             activeTab === "likely"
-              ? "bg-white/[0.08] text-accent shadow-sm"
+              ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
               : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
           }`}
         >
@@ -165,22 +167,22 @@ export function DuplicatesPage() {
           const reclaim = group.reclaimable_bytes ?? group.files.slice(1).reduce((sum, item) => sum + item.file_size_bytes, 0);
           return (
             <Panel key={group.group_id} className="overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-7 items-center justify-center rounded-[2px] border border-white/[0.08] bg-surface text-accent">
+              <div className="flex flex-col gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-[2px] border border-white/[0.08] bg-surface text-accent">
                     <Icon name="audio_file" className="text-sm" />
                   </div>
-                  <div>
-                    <h4 className="font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
+                  <div className="min-w-0">
+                    <h4 className="truncate font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
                     <p className="font-editorial text-xs italic text-primary-subtle">{group.files.length} redundant copies identified across library</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-5">
-                  <div className="text-right">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                  <div className="text-left sm:text-right">
                     <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Confidence</p>
                     <p className="font-mono text-xs font-medium text-accent">100% (Bit-Exact)</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-left sm:text-right">
                     <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reclaimable</p>
                     <p className="font-mono text-xs font-medium text-emerald-400">{formatBytes(reclaim)}</p>
                   </div>
@@ -193,7 +195,7 @@ export function DuplicatesPage() {
               <div className="space-y-3 p-5">
                 <div className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/[0.03] p-3.5">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Chip tone="success">Preferred Copy</Chip>
                       <span className="font-editorial text-xs italic text-primary-subtle">
                         {group.preferred.reasons.join(" • ")}
@@ -213,14 +215,14 @@ export function DuplicatesPage() {
                     {group.files
                       .filter((file) => file.path !== group.preferred.path)
                       .map((file) => (
-                        <div key={file.path} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div key={file.path} className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                            <Icon name="delete_sweep" className="text-sm text-primary-subtle/70" />
+                            <Icon name="delete_sweep" className="shrink-0 text-sm text-primary-subtle/70" />
                             <div className="min-w-0 flex-1">
                               <PathBlock value={file.path} />
                             </div>
                           </div>
-                          <Button tone="ghost" className="shrink-0 px-2 py-1 text-[11px]" onClick={() => openReview(group, "exact_duplicate_group")}>
+                          <Button tone="ghost" className="shrink-0 self-end px-2 py-1 text-[11px] sm:self-auto" onClick={() => openReview(group, "exact_duplicate_group")}>
                             Review Choice
                           </Button>
                         </div>
@@ -234,19 +236,19 @@ export function DuplicatesPage() {
 
         {activeTab === "likely" ? report.likely_duplicates.map((group) => (
           <Panel key={group.group_id} className="overflow-hidden border-l-2 border-l-accent/70">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5">
-              <div>
-                <h4 className="font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
+            <div className="flex flex-col gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h4 className="truncate font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
                 <p className="font-editorial text-xs italic text-primary-subtle">Similar content detected with metadata or tag variance</p>
               </div>
-              <div className="flex items-center gap-5">
-                <div className="text-right">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                <div className="text-left sm:text-right">
                   <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Match Score</p>
                   <p className="font-mono text-xs font-medium text-accent">{((group.confidence ?? 0) * 100).toFixed(0)}%</p>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right">
                   <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Preferred</p>
-                  <p className="font-mono text-xs font-medium text-primary">{group.preferred.path.split(/[\\/]/).pop()}</p>
+                  <p className="max-w-[160px] truncate font-mono text-xs font-medium text-primary">{group.preferred.path.split(/[\\/]/).pop()}</p>
                 </div>
                 <Button tone="secondary" className="px-3 py-1 text-xs" onClick={() => openReview(group, "likely_duplicate_group")}>
                   Inspect →

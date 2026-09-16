@@ -108,15 +108,16 @@ export function HistoryPage() {
       <SplitScreen
         main={
           <div className="space-y-4">
-            <div className="flex gap-2 border-b border-white/[0.07] pb-3">
+            <div className="flex flex-wrap gap-2 border-b border-white/[0.07] pb-3">
               {HISTORY_FILTERS.map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={historyFilter === value}
                   onClick={() => setHistoryFilter(value)}
                   className={`rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
                     historyFilter === value
-                      ? "bg-white/[0.08] text-accent shadow-sm"
+                      ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
                       : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
                   }`}
                 >
@@ -150,18 +151,23 @@ export function HistoryPage() {
                         return (
                           <tr
                             key={item.batch_id}
-                            className={`cursor-pointer transition-colors ${
+                            className={`transition-colors ${
                               active
                                 ? "border-l-2 border-l-accent bg-surface-raised"
                                 : "hover:bg-surface-raised/50"
                             }`}
-                            onClick={() => selectById(item.batch_id)}
                           >
                             <td className="px-5 py-3.5">
-                              <div className="flex flex-col">
-                                <span className="font-sans text-xs font-medium text-primary">{formatDate(item.applied_at)}</span>
+                              <button
+                                type="button"
+                                id={`history-batch-trigger-${item.batch_id}`}
+                                onClick={() => selectById(item.batch_id)}
+                                aria-label={`Inspect batch ${item.batch_id}, applied ${formatDate(item.applied_at)}`}
+                                className="flex flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-[2px] group"
+                              >
+                                <span className="font-sans text-xs font-medium text-primary group-hover:text-accent transition-colors">{formatDate(item.applied_at)}</span>
                                 <span className="font-mono text-[10px] text-primary-subtle">{item.batch_id}</span>
-                              </div>
+                              </button>
                             </td>
                             <td className="px-5 py-3.5">
                               <div className="flex items-center gap-2.5">
@@ -182,10 +188,10 @@ export function HistoryPage() {
                             <td className="px-5 py-3.5 text-right">
                               <Button
                                 tone="secondary"
+                                id={`reverse-button-${item.batch_id}`}
                                 className="px-3 py-1 text-xs"
                                 disabled={!item.reversible || busy}
-                                onClick={(event) => {
-                                  event.stopPropagation();
+                                onClick={() => {
                                   setConfirmBatchId(item.batch_id);
                                 }}
                               >

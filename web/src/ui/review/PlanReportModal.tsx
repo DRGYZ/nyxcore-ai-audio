@@ -119,6 +119,7 @@ function PlanCard({
           {plan.proposed_operations.length > OPERATION_PAGE_SIZE ? (
             <input
               type="search"
+              aria-label="Filter proposed operations"
               value={filter}
               onChange={(event) => {
                 setFilter(event.target.value);
@@ -141,6 +142,7 @@ function PlanCard({
                       {selectable ? (
                         <input
                           type="checkbox"
+                          aria-label={`Select ${operation.operation_type} operation`}
                           checked={checked}
                           disabled={disabled || (!checked && selectedTotal >= maximum)}
                           onChange={(event) => onToggleOperation(plan.plan_id, operation.operation_id, event.target.checked)}

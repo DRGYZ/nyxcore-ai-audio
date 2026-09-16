@@ -1,6 +1,6 @@
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ReviewItem } from "../../lib/types";
-import { Button, Chip, Drawer, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
+import { Button, Chip, Drawer, Icon, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
 
 const AFFECTED_PATH_PREVIEW_LIMIT = 20;
 
@@ -13,6 +13,7 @@ export function ReviewDetailPanel({
   onIgnore,
   onSnooze,
   onResolve,
+  onClose,
 }: {
   item?: ReviewItem;
   usingMock: boolean;
@@ -22,6 +23,7 @@ export function ReviewDetailPanel({
   onIgnore: () => void;
   onSnooze: () => void;
   onResolve: () => void;
+  onClose?: () => void;
 }) {
   const affectedPaths = item?.affected_paths ?? item?.sample_paths ?? [];
   const displayedAffectedPaths = affectedPaths.slice(0, AFFECTED_PATH_PREVIEW_LIMIT);
@@ -31,6 +33,18 @@ export function ReviewDetailPanel({
     <Drawer
       title="Finding Inspector"
       subtitle={item ? `ID: ${item.item_id}` : "No finding selected"}
+      action={
+        onClose ? (
+          <button
+            type="button"
+            aria-label="Close inspector"
+            onClick={onClose}
+            className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            <Icon name="close" />
+          </button>
+        ) : undefined
+      }
       footer={
         <>
           <Button tone="secondary" className="w-full" onClick={onGeneratePlan} disabled={usingMock || busy || !item}>

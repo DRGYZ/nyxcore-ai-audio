@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, PropsWithChildren, ReactNode } from "react";
 
 export function Icon({ name, className = "" }: { name: string; className?: string }) {
-  return <span className={`material-symbols-outlined select-none text-[20px] ${className}`}>{name}</span>;
+  return <span aria-hidden="true" className={`material-symbols-outlined select-none text-[20px] ${className}`}>{name}</span>;
 }
 
 export function PageHeader({
@@ -175,12 +175,16 @@ export function Drawer({
   subtitle,
   children,
   footer,
-}: PropsWithChildren<{ title: string; subtitle?: string; footer?: ReactNode }>) {
+  action,
+}: PropsWithChildren<{ title: string; subtitle?: string; footer?: ReactNode; action?: ReactNode }>) {
   return (
     <Panel className="flex h-full min-h-[520px] flex-col rounded-[3px] xl:max-h-[calc(100vh-10rem)]">
-      <div className="border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5">
-        <h3 className="font-display text-base font-bold text-primary">{title}</h3>
-        {subtitle ? <p className="mt-0.5 truncate font-mono text-[10px] text-primary-subtle">{subtitle}</p> : null}
+      <div className="flex items-start justify-between border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-bold text-primary">{title}</h3>
+          {subtitle ? <p className="mt-0.5 truncate font-mono text-[10px] text-primary-subtle">{subtitle}</p> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">{children}</div>
       {footer ? <div className="grid grid-cols-1 gap-2.5 border-t border-white/[0.07] bg-surface-low/80 p-3.5 sm:grid-cols-2">{footer}</div> : null}
@@ -201,10 +205,12 @@ export function PathBlock({
   value,
   tone = "default",
   strike = false,
+  className = "",
 }: {
   value: string;
   tone?: "default" | "primary" | "success" | "danger";
   strike?: boolean;
+  className?: string;
 }) {
   const tones = {
     default: "bg-surface-low border-white/[0.06] text-primary-muted",
@@ -213,7 +219,10 @@ export function PathBlock({
     danger: "bg-rose-500/[0.06] border-rose-500/20 text-rose-300",
   };
   return (
-    <div className={`break-all rounded-[3px] border px-2.5 py-1.5 font-mono text-xs ${tones[tone]} ${strike ? "line-through opacity-70" : ""}`}>
+    <div
+      title={value}
+      className={`min-w-0 break-words [overflow-wrap:anywhere] rounded-[3px] border px-2.5 py-1.5 font-mono text-xs ${tones[tone]} ${strike ? "line-through opacity-70" : ""} ${className}`}
+    >
       {value}
     </div>
   );
