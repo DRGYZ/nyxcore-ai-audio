@@ -89,16 +89,16 @@ NyxCore is designed around defensive, local-first safety primitives:
 *Duplicates view showing exact SHA-256 and likely duplicate groups with comparison metrics.*
 
 ### Library Health
-![NyxCore Library Health](screenshots/04_health_1440.png)
+![NyxCore Library Health](screenshots/04_library_health_1440.png)
 *Health diagnostic report detailing missing tags, placeholder titles, artwork coverage, and bitrate distribution.*
 
 ### Operation History & Reversal
 ![NyxCore History](screenshots/05_history_1440.png)
 *Audit history displaying executed batches, affected paths, and reversible action controls.*
 
-### Plan Execution Report Modal
-![NyxCore Plan Report Modal](screenshots/06_plan_report_modal_1440.png)
-*Execution summary modal detailing succeeded, failed, or skipped operations following a plan application.*
+### Action Plan Review Modal
+![NyxCore Action Plan Review Modal](screenshots/08_plan_modal_1440.png)
+*Focus-trapped dialog displaying generated action plan operations, individual operation selection checkboxes, and preflight safety checks.*
 
 ### Tablet & Responsive Support
 ![NyxCore Tablet Review](screenshots/09_review_inbox_tablet_768.png)
@@ -257,8 +257,10 @@ nyxcore-ai-audio/
 ├── screenshots/             # Release screenshots and responsive verifications
 ├── tests/                   # Backend pytest test suite (142 tests)
 └── web/                     # React 18 + TypeScript + Vite frontend
-    ├── src/                 # Components, pages, hooks, state
-    └── tests/               # Frontend Vitest test suite
+    └── src/
+        ├── test/            # Frontend test setup and render utilities
+        └── ui/              # Components, pages, hooks, state
+            └── __tests__/   # Frontend Vitest test suite (12 tests)
 ```
 
 ---

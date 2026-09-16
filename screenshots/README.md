@@ -13,7 +13,7 @@ This directory contains the curated release and responsive verification screensh
 | [`05_history_1440.png`](05_history_1440.png) | **Operation History** | Ledger mutation audit trail with category filter toggles and canonical "Reverse Batch" action. |
 | [`06_archive_search_1440.png`](06_archive_search_1440.png) | **Archive Search** | Read-only search across filenames, tags, and folders with URL query persistence. |
 | [`07_api_unavailable_1440.png`](07_api_unavailable_1440.png) | **Offline State** | Truthful API-disconnected state with exact uvicorn startup instructions and zero fabricated data. |
-| [`08_plan_modal_1440.png`](08_plan_modal_1440.png) | **Plan Report Modal** | Focus-trapped dialog displaying generated action plan, operation checkboxes, and safety levels. |
+| [`08_plan_modal_1440.png`](08_plan_modal_1440.png) | **Action Plan Review Modal** | Focus-trapped dialog displaying generated action plan, operation checkboxes, and safety levels. |
 
 ## Responsive & Mobile Verification
 

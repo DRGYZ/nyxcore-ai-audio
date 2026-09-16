@@ -699,8 +699,9 @@ def _write_playlist_md(out_dir: Path, report: PlaylistReport, *, config_meta: di
         lines.append("| 0.0 | _None_ | _None_ |")
     else:
         for track in report.ranked_tracks:
+            escaped_path = track.path.replace('|', r'\|')
             lines.append(
-                f"| {track.score:.3f} | `{track.path.replace('|', '\\|')}` | `{', '.join(track.reasons) or 'none'}` |"
+                f"| {track.score:.3f} | `{escaped_path}` | `{', '.join(track.reasons) or 'none'}` |"
             )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -986,8 +987,9 @@ def _write_normalize_md(out_dir: Path, records: list[NormalizePreviewRecord]) ->
                 f"album={rec.proposed_album or 'UNKNOWN'}"
             )
             reasons = ", ".join(rec.reasons) if rec.reasons else "none"
+            escaped_path = rec.path.replace('|', r'\|')
             lines.append(
-                f"| `{rec.path.replace('|', '\\|')}` | `{current}` | `{proposed}` | {rec.confidence:.2f} | `{reasons}` |"
+                f"| `{escaped_path}` | `{current}` | `{proposed}` | {rec.confidence:.2f} | `{reasons}` |"
             )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -1054,8 +1056,9 @@ def _write_apply_plan(path: Path, selected: list[dict], min_confidence: float) -
         lines.append("| _None_ | _None_ | _None_ | _None_ | 0.0 |")
     else:
         for rec in selected[:100]:
+            escaped_path = str(rec['path']).replace('|', r'\|')
             lines.append(
-                f"| `{str(rec['path']).replace('|', '\\|')}` | `{rec.get('proposed_title') or 'UNKNOWN'}` | "
+                f"| `{escaped_path}` | `{rec.get('proposed_title') or 'UNKNOWN'}` | "
                 f"`{rec.get('proposed_artist') or 'UNKNOWN'}` | `{rec.get('proposed_album') or 'UNKNOWN'}` | "
                 f"{float(rec.get('confidence', 0.0)):.2f} |"
             )
