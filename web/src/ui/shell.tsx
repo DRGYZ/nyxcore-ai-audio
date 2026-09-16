@@ -13,11 +13,24 @@ const navItems = [
   { to: "/history", label: "History", icon: "history" },
 ];
 
-function SidebarLink({ to, label, icon, badge }: { to: string; label: string; icon: string; badge?: number }) {
+function SidebarLink({
+  to,
+  label,
+  icon,
+  badge,
+  onClick,
+}: {
+  to: string;
+  label: string;
+  icon: string;
+  badge?: number;
+  onClick?: () => void;
+}) {
   return (
     <NavLink
       to={to}
       end={to === "/"}
+      onClick={onClick}
       className={({ isActive }) =>
         `group relative flex items-center gap-2.5 rounded-[3px] px-3 py-2 font-sans text-xs font-medium transition-colors ${
           isActive
@@ -44,6 +57,7 @@ export function AppShell({ children }: PropsWithChildren) {
   const reviewQuery = useReviewQuery();
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const isConnected = !!statusQuery.data && !statusQuery.isError;
   const status = statusQuery.data;
@@ -62,7 +76,17 @@ export function AppShell({ children }: PropsWithChildren) {
       setSearchValue(new URLSearchParams(location.search).get("q") ?? "");
     }
     setNotificationsOpen(false);
+    setMobileNavOpen(false);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     if (!notificationsOpen) return;
@@ -92,9 +116,40 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="min-h-screen bg-background text-primary">
+      {/* Compact mobile navigation header on < lg */}
+      <div className="flex items-center justify-between border-b border-white/[0.07] bg-surface px-4 py-3 lg:hidden">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-7 items-center justify-center rounded-[3px] border border-white/[0.08] bg-surface-low text-accent">
+            <span className="size-2 rounded-[1px] bg-accent" />
+          </div>
+          <div>
+            <span className="font-display text-sm font-bold tracking-tight text-primary">NyxCore</span>
+            <span className="block font-mono text-[9px] uppercase tracking-[0.16em] text-primary-subtle">Audio Library Toolkit</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Chip tone={isConnected ? "accent" : "neutral"}>{isConnected ? "Connected" : "Offline"}</Chip>
+          <button
+            type="button"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileNavOpen}
+            aria-controls="main-sidebar-nav"
+            onClick={() => setMobileNavOpen((open) => !open)}
+            className="flex size-8 items-center justify-center rounded-[3px] border border-white/[0.08] bg-surface-low text-primary-muted hover:border-white/[0.14] hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            <Icon name={mobileNavOpen ? "close" : "menu"} className="text-lg" />
+          </button>
+        </div>
+      </div>
+
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-r border-white/[0.07] bg-surface lg:w-64 lg:shrink-0">
-          <div className="flex items-center gap-3 border-b border-white/[0.07] px-5 py-4">
+        <aside
+          id="main-sidebar-nav"
+          className={`border-r border-white/[0.07] bg-surface lg:w-64 lg:shrink-0 ${
+            mobileNavOpen ? "block border-b border-white/[0.07] lg:border-b-0" : "hidden lg:block"
+          }`}
+        >
+          <div className="hidden items-center gap-3 border-b border-white/[0.07] px-5 py-4 lg:flex">
             <div className="flex size-7 items-center justify-center rounded-[3px] border border-white/[0.08] bg-surface-low text-accent">
               <span className="size-2 rounded-[1px] bg-accent" />
             </div>
@@ -103,12 +158,17 @@ export function AppShell({ children }: PropsWithChildren) {
               <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-primary-subtle">Audio Library Toolkit</p>
             </div>
           </div>
-          <nav className="space-y-5 p-3.5">
+          <nav className="space-y-5 p-3.5" aria-label="Main navigation">
             <div>
               <p className="px-2.5 font-mono text-[9px] font-semibold uppercase tracking-[0.2em] text-primary-subtle">Navigation</p>
               <div className="mt-1.5 space-y-0.5">
                 {navItems.map((item) => (
-                  <SidebarLink key={item.to} {...item} badge={item.to === "/review" ? (reviewCount || undefined) : undefined} />
+                  <SidebarLink
+                    key={item.to}
+                    {...item}
+                    badge={item.to === "/review" ? (reviewCount || undefined) : undefined}
+                    onClick={() => setMobileNavOpen(false)}
+                  />
                 ))}
               </div>
             </div>

@@ -54,6 +54,7 @@ export function ReviewPage() {
   const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
   const [confirmApply, setConfirmApply] = useState(false);
   const [applyResult, setApplyResult] = useState<ReviewPlanApplyResponse | null>(null);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
 
   useEffect(() => {
     if (requestedItemType) setItemType(requestedItemType);
@@ -80,6 +81,32 @@ export function ReviewPage() {
     param: "item",
     idKey: "item_id",
   });
+
+  function handleSelectFinding(itemId: string) {
+    selectById(itemId);
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      setMobileInspectorOpen(true);
+    }
+  }
+
+  function handleCloseMobileInspector() {
+    setMobileInspectorOpen(false);
+    if (selected) {
+      const trigger = document.getElementById(`finding-row-trigger-${selected.item_id}`);
+      trigger?.focus();
+    }
+  }
+
+  useEffect(() => {
+    if (!mobileInspectorOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        handleCloseMobileInspector();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileInspectorOpen, selected]);
 
   if (reviewQuery.isError) {
     return (
@@ -215,22 +242,22 @@ export function ReviewPage() {
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Priority</span>
                 <div className="flex flex-wrap gap-1">
-                  <button type="button" onClick={() => setPriority("all")}>
+                  <button type="button" aria-pressed={priority === "all"} onClick={() => setPriority("all")}>
                     <Chip tone="neutral" active={priority === "all"}>
                       All
                     </Chip>
                   </button>
-                  <button type="button" onClick={() => setPriority("high")}>
+                  <button type="button" aria-pressed={priority === "high"} onClick={() => setPriority("high")}>
                     <Chip tone="danger" active={priority === "high"}>
                       High ({highCount})
                     </Chip>
                   </button>
-                  <button type="button" onClick={() => setPriority("medium")}>
+                  <button type="button" aria-pressed={priority === "medium"} onClick={() => setPriority("medium")}>
                     <Chip tone="warning" active={priority === "medium"}>
                       Med ({mediumCount})
                     </Chip>
                   </button>
-                  <button type="button" onClick={() => setPriority("low")}>
+                  <button type="button" aria-pressed={priority === "low"} onClick={() => setPriority("low")}>
                     <Chip tone="neutral" active={priority === "low"}>
                       Low ({lowCount})
                     </Chip>
@@ -242,7 +269,7 @@ export function ReviewPage() {
                 <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Status</span>
                 <div className="flex flex-wrap gap-1">
                   {REVIEW_STATUS_FILTERS.map(({ value, label }) => (
-                    <button key={value} type="button" onClick={() => setStatus(value)}>
+                    <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}>
                       <Chip
                         tone={value === "new" ? "primary" : value === "snoozed" ? "warning" : value === "resolved" ? "success" : "neutral"}
                         active={status === value}
@@ -257,6 +284,7 @@ export function ReviewPage() {
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Type</span>
                 <select
+                  aria-label="Filter findings by type"
                   className="rounded-[3px] border border-white/[0.08] bg-surface px-2 py-1 font-sans text-xs text-primary outline-none focus:border-accent/50"
                   value={itemType}
                   onChange={(event) => setItemType(event.target.value)}
@@ -310,8 +338,7 @@ export function ReviewPage() {
                         return (
                           <tr
                             key={item.item_id}
-                            onClick={() => selectById(item.item_id)}
-                            className={`cursor-pointer transition-colors ${
+                            className={`transition-colors ${
                               active
                                 ? "border-l-2 border-l-accent bg-surface-high"
                                 : "border-l-2 border-l-transparent hover:bg-white/[0.02]"
@@ -321,12 +348,18 @@ export function ReviewPage() {
                               <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                             </td>
                             <td className="px-4 py-3">
-                              <div className="min-w-0 max-w-xl">
+                              <button
+                                type="button"
+                                id={`finding-row-trigger-${item.item_id}`}
+                                onClick={() => handleSelectFinding(item.item_id)}
+                                aria-label={`Inspect finding: ${item.summary}, Priority ${item.priority_band}, Score ${item.priority_score.toFixed(0)}`}
+                                className="group flex w-full flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-[2px]"
+                              >
                                 <div className="flex items-center gap-2">
-                                  <span className={`font-sans text-xs ${active ? "text-primary font-medium" : "text-primary/90"}`}>
+                                  <span className={`font-sans text-xs transition-colors group-hover:text-accent ${active ? "font-medium text-primary" : "text-primary/90"}`}>
                                     {item.summary}
                                   </span>
-                                  <span className="font-mono text-[9px] text-primary-subtle/80 rounded-[2px] bg-white/[0.03] px-1.5 py-0.5 border border-white/[0.05]">
+                                  <span className="rounded-[2px] border border-white/[0.05] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[9px] text-primary-subtle/80">
                                     {item.item_type}
                                   </span>
                                 </div>
@@ -335,12 +368,12 @@ export function ReviewPage() {
                                     {item.reason_summary}
                                   </p>
                                 ) : null}
-                              </div>
+                              </button>
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-xs font-semibold text-primary">{item.priority_score.toFixed(0)}</span>
-                                <div className="w-12 hidden sm:block">
+                                <div className="hidden w-12 sm:block">
                                   <ProgressBar value={item.priority_score} />
                                 </div>
                               </div>
@@ -349,9 +382,15 @@ export function ReviewPage() {
                               <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className={`inline-flex p-0.5 ${active ? "text-accent" : "text-primary-subtle/60"}`}>
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                aria-label={`Open details for ${item.summary}`}
+                                onClick={() => handleSelectFinding(item.item_id)}
+                                className={`inline-flex p-0.5 rounded-[2px] transition-colors ${active ? "text-accent" : "text-primary-subtle/60 hover:text-primary"}`}
+                              >
                                 <Icon name="chevron_right" className="text-base" />
-                              </span>
+                              </button>
                             </td>
                           </tr>
                         );
@@ -368,18 +407,64 @@ export function ReviewPage() {
           </div>
         }
         side={
-          <ReviewDetailPanel
-            item={selected}
-            usingMock={usingMock}
-            busy={busy}
-            onGeneratePlan={() => void handleGeneratePlan()}
-            onMarkSeen={() => void handleReviewAction("seen")}
-            onIgnore={() => void handleReviewAction("ignored")}
-            onSnooze={() => void handleReviewAction("snoozed")}
-            onResolve={() => void handleReviewAction("resolved")}
-          />
+          !mobileInspectorOpen ? (
+            <div className="hidden xl:block">
+              <ReviewDetailPanel
+                item={selected}
+                usingMock={usingMock}
+                busy={busy}
+                onGeneratePlan={() => void handleGeneratePlan()}
+                onMarkSeen={() => void handleReviewAction("seen")}
+                onIgnore={() => void handleReviewAction("ignored")}
+                onSnooze={() => void handleReviewAction("snoozed")}
+                onResolve={() => void handleReviewAction("resolved")}
+              />
+            </div>
+          ) : null
         }
       />
+
+      {/* Responsive Inspector Overlay for < xl (tablet & mobile) */}
+      {mobileInspectorOpen && selected ? (
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-sm xl:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Finding Inspector: ${selected.summary}`}
+          onMouseDown={handleCloseMobileInspector}
+        >
+          <div
+            className="flex h-full w-full max-w-lg flex-col border-l border-white/[0.1] bg-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/[0.07] bg-surface-low/80 px-4 py-3">
+              <button
+                type="button"
+                onClick={handleCloseMobileInspector}
+                className="flex items-center gap-1.5 rounded-[2px] px-2 py-1 font-sans text-xs text-primary-muted transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                aria-label="Back to finding list"
+              >
+                <Icon name="arrow_back" className="text-base" />
+                <span>Back to Findings</span>
+              </button>
+              <Chip tone={reviewPriorityTone(selected.priority_band)}>{selected.priority_band}</Chip>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <ReviewDetailPanel
+                item={selected}
+                usingMock={usingMock}
+                busy={busy}
+                onGeneratePlan={() => void handleGeneratePlan()}
+                onMarkSeen={() => void handleReviewAction("seen")}
+                onIgnore={() => void handleReviewAction("ignored")}
+                onSnooze={() => void handleReviewAction("snoozed")}
+                onResolve={() => void handleReviewAction("resolved")}
+                onClose={handleCloseMobileInspector}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PlanReportModal
         report={planReport}
