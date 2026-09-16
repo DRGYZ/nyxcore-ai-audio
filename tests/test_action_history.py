@@ -164,7 +164,7 @@ class ActionHistoryTests(unittest.TestCase):
         ledger = load_operation_ledger(self.out / "review_history.json")
         batch = append_operation_batch(ledger, plan_report=plan_report, results=results)
 
-        changed = undo_operation_batch(batch, review_state=review_state)
+        changed = undo_operation_batch(batch, review_state=review_state, allowed_roots=(self.music, self.out))
 
         self.assertTrue(any(item.undo_status == "ok" for item in changed if item.operation_type == "quarantine_move"))
         self.assertTrue((self.music / "dup-a.mp3").exists())
@@ -181,7 +181,7 @@ class ActionHistoryTests(unittest.TestCase):
         batch = append_operation_batch(ledger, plan_report=plan_report, results=results)
         (self.music / "dup-a.mp3").write_bytes(b"occupied")
 
-        changed = undo_operation_batch(batch, review_state=review_state)
+        changed = undo_operation_batch(batch, review_state=review_state, allowed_roots=(self.music, self.out))
 
         conflict = next(item for item in changed if item.operation_type == "quarantine_move")
         self.assertEqual(conflict.undo_status, "error")
@@ -218,7 +218,7 @@ class ActionHistoryTests(unittest.TestCase):
         ledger = load_operation_ledger(self.out / "review_history.json")
         batch = append_operation_batch(ledger, plan_report=rename_only, results=results)
 
-        undo_operation_batch(batch, review_state=review_state)
+        undo_operation_batch(batch, review_state=review_state, allowed_roots=(self.music, self.out))
 
         self.assertTrue(target.exists())
 
@@ -254,7 +254,7 @@ class ActionHistoryTests(unittest.TestCase):
         ledger = load_operation_ledger(self.out / "review_history.json")
         batch = append_operation_batch(ledger, plan_report=metadata_only, results=results)
 
-        undo_operation_batch(batch, review_state=review_state)
+        undo_operation_batch(batch, review_state=review_state, allowed_roots=(self.music, self.out))
 
         operation = next(item for item in batch.operations if item.operation_type == "write_metadata")
         self.assertEqual(operation.undo_status, "ok")
@@ -295,14 +295,20 @@ class ActionHistoryTests(unittest.TestCase):
 
         plan_result = runner.invoke(app, ["review-plan", str(self.music), "--out", str(self.out), "--item-id", exact_item_id])
         self.assertEqual(plan_result.exit_code, 0, msg=plan_result.stdout)
-        apply_result = runner.invoke(app, ["apply-review-plan", str(self.out / "review_plan.json"), "--out", str(self.out)])
+        apply_result = runner.invoke(app, [
+            "apply-review-plan", str(self.out / "review_plan.json"),
+            "--music", str(self.music), "--out", str(self.out),
+        ])
         self.assertEqual(apply_result.exit_code, 0, msg=apply_result.stdout)
 
         history_payload = json.loads((self.out / "review_history.json").read_text(encoding="utf-8"))
         batch_id = history_payload["batches"][0]["batch_id"]
         history_result = runner.invoke(app, ["history", "--out", str(self.out)])
         self.assertEqual(history_result.exit_code, 0, msg=history_result.stdout)
-        restore_result = runner.invoke(app, ["restore-review-action", batch_id, "--out", str(self.out)])
+        restore_result = runner.invoke(app, [
+            "restore-review-action", batch_id,
+            "--music", str(self.music), "--out", str(self.out),
+        ])
         self.assertEqual(restore_result.exit_code, 0, msg=restore_result.stdout)
 
         state_payload = json.loads((self.out / "review_state.json").read_text(encoding="utf-8"))

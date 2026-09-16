@@ -1,6 +1,6 @@
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ReviewItem } from "../../lib/types";
-import { Button, Chip, Drawer, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
+import { Button, Chip, Drawer, Icon, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
 
 const AFFECTED_PATH_PREVIEW_LIMIT = 20;
 
@@ -13,6 +13,7 @@ export function ReviewDetailPanel({
   onIgnore,
   onSnooze,
   onResolve,
+  onClose,
 }: {
   item?: ReviewItem;
   usingMock: boolean;
@@ -22,6 +23,7 @@ export function ReviewDetailPanel({
   onIgnore: () => void;
   onSnooze: () => void;
   onResolve: () => void;
+  onClose?: () => void;
 }) {
   const affectedPaths = item?.affected_paths ?? item?.sample_paths ?? [];
   const displayedAffectedPaths = affectedPaths.slice(0, AFFECTED_PATH_PREVIEW_LIMIT);
@@ -29,11 +31,23 @@ export function ReviewDetailPanel({
 
   return (
     <Drawer
-      title="Review Details"
-      subtitle={item ? `ITEM: ${item.item_id}` : "No item selected"}
+      title="Finding Inspector"
+      subtitle={item ? `ID: ${item.item_id}` : "No finding selected"}
+      action={
+        onClose ? (
+          <button
+            type="button"
+            aria-label="Close inspector"
+            onClick={onClose}
+            className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            <Icon name="close" />
+          </button>
+        ) : undefined
+      }
       footer={
         <>
-          <Button tone="ghost" className="w-full" onClick={onGeneratePlan} disabled={usingMock || busy || !item}>
+          <Button tone="secondary" className="w-full" onClick={onGeneratePlan} disabled={usingMock || busy || !item}>
             Generate Plan
           </Button>
           <Button
@@ -48,71 +62,70 @@ export function ReviewDetailPanel({
       }
     >
       {!item ? (
-        <div className="rounded-xl border border-dashed border-border-dark bg-background-dark/50 px-4 py-8 text-sm text-slate-500">
-          Select a review item to inspect its affected files, triage state, and plan options.
+        <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/50 px-4 py-8 font-sans text-xs text-primary-subtle text-center">
+          Select a review finding from the stream to inspect details and plan actions.
         </div>
       ) : (
         <>
-          <Panel className="border-primary/20 bg-background-dark/50 p-4">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex size-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-                  <span className="material-symbols-outlined">audio_file</span>
-                </div>
-                <div>
-                  <h3 className="font-display text-base font-bold text-slate-200">{item.summary}</h3>
-                  <p className="mt-1 text-[10px] font-mono uppercase tracking-[0.18em] text-slate-500">{item.item_type}</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                 <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
               </div>
+              <span className="font-mono text-[10px] text-primary-subtle truncate max-w-[140px]">{item.item_type}</span>
             </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">
-                <span>Priority Confidence</span>
-                <span className="text-primary">{item.priority_score}%</span>
-              </div>
-              <ProgressBar value={item.priority_score} />
+            <h3 className="font-display text-base font-bold text-primary leading-snug">{item.summary}</h3>
+            {item.reason_summary ? (
+              <p className="font-editorial text-xs italic text-primary-muted leading-relaxed">{item.reason_summary}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5 rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
+            <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">
+              <span>Priority Score</span>
+              <span className="font-bold text-primary">{item.priority_score} / 100</span>
             </div>
-          </Panel>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Button tone="secondary" disabled={usingMock || busy} onClick={onMarkSeen}>
-              Mark Seen
-            </Button>
-            <Button tone="ghost" disabled={usingMock || busy} onClick={onIgnore}>
-              Ignore
-            </Button>
-            <Button tone="ghost" disabled={usingMock || busy} onClick={onSnooze}>
-              Snooze 7d
-            </Button>
-            <Button tone="secondary" disabled={usingMock || busy} onClick={onGeneratePlan}>
-              Plan
-            </Button>
+            <ProgressBar value={item.priority_score} />
           </div>
 
-          <div className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-5 text-slate-400" role="note">
-            <span className="font-bold text-primary">Resolve Until Refresh</span> hides this finding without editing audio.
-            If the next library refresh still detects it, NyxCore returns it as <span className="font-bold text-slate-300">Seen</span>.
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reclaimable</p>
+              <p className="mt-1 font-display text-lg font-bold tracking-tight text-emerald-400">{formatBytes(item.reclaimable_bytes ?? 0)}</p>
+            </div>
+            <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Confidence</p>
+              <p className="mt-1 font-display text-lg font-bold tracking-tight text-accent">
+                {item.confidence !== undefined && item.confidence !== null ? `${Math.round(item.confidence * 100)}%` : "n/a"}
+              </p>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Panel className="p-3">
-              <p className="text-[10px] text-slate-500">Reclaimable</p>
-              <p className="mt-1 text-lg font-bold text-amber-400">{formatBytes(item.reclaimable_bytes ?? 0)}</p>
-            </Panel>
-            <Panel className="p-3">
-              <p className="text-[10px] text-slate-500">Confidence</p>
-              <p className="mt-1 text-lg font-bold text-primary">{item.confidence ? `${Math.round(item.confidence * 100)}%` : "n/a"}</p>
-            </Panel>
+          <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-3.5 py-2.5 font-sans text-xs text-primary-muted leading-relaxed" role="note">
+            <p className="font-medium text-accent/90 mb-0.5">Resolution Behavior</p>
+            <p className="text-[11px] text-primary-subtle">
+              Executing <span className="text-primary font-medium">Resolve Until Refresh</span> hides this finding without modifying files. If the next library refresh still detects it, NyxCore returns it as Seen.
+            </p>
           </div>
 
-          <LabeledValue
-            label="Reason Summary"
-            value={<div className="break-words rounded-xl bg-background-dark px-4 py-3 text-sm text-slate-300">{item.reason_summary}</div>}
-          />
+          <div className="space-y-2">
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary-subtle">Triage State</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button tone="secondary" disabled={usingMock || busy} onClick={onMarkSeen}>
+                Mark Seen
+              </Button>
+              <Button tone="ghost" disabled={usingMock || busy} onClick={onIgnore}>
+                Ignore
+              </Button>
+              <Button tone="ghost" disabled={usingMock || busy} onClick={onSnooze}>
+                Snooze 7d
+              </Button>
+              <Button tone="secondary" disabled={usingMock || busy} onClick={onGeneratePlan}>
+                Generate Plan
+              </Button>
+            </div>
+          </div>
 
           {item.preferred_path ? (
             <LabeledValue
@@ -122,24 +135,28 @@ export function ReviewDetailPanel({
           ) : null}
 
           <LabeledValue
-            label="Affected Paths"
+            label={`Affected Files (${affectedPaths.length})`}
             value={
               affectedPaths.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {displayedAffectedPaths.map((path) => (
                     <PathBlock key={path} value={path} />
                   ))}
                   {remainingAffectedPathCount > 0 ? (
-                    <p className="px-1 text-xs text-slate-500">
-                      {remainingAffectedPathCount} more paths. Generate a plan to inspect the paginated operations.
+                    <p className="px-1 font-sans text-[11px] text-primary-subtle">
+                      {remainingAffectedPathCount} more paths. Generate a plan to inspect full operations.
                     </p>
                   ) : null}
                 </div>
               ) : (
-                <div className="rounded-xl bg-background-dark px-4 py-3 text-sm text-slate-500">No affected paths were attached to this finding.</div>
+                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low px-3 py-2 font-sans text-xs text-primary-subtle">No affected paths attached.</div>
               )
             }
           />
+
+          <p className="pt-2 text-center font-editorial text-xs italic text-primary-subtle/80">
+            NyxCore records mutation intent in the local ledger before execution.
+          </p>
         </>
       )}
     </Drawer>

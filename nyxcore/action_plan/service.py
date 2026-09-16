@@ -3,18 +3,22 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable
 
 from nyxcore.core.track import TrackRecord, WarningCode
+from nyxcore.core.filesystem import move_file_no_replace
 from nyxcore.normalize.parser import NormalizePreviewRecord, build_normalize_preview_for_paths
 from nyxcore.rename.rules import deterministic_cleanup
 from nyxcore.rename.service import apply_rename, build_rename_result
 from nyxcore.review_queue.service import ReviewQueueItem, ReviewQueueReport
 from nyxcore.review_queue.state import ReviewStateStore, apply_review_action
-from nyxcore.tagging.writer import TagWriteError, backup_file, write_tags
+from nyxcore.tagging.writer import TagWriteError, backup_file, plan_backup_path, write_tags
+
+if TYPE_CHECKING:
+    from nyxcore.action_plan.ledger import OperationBatch
 
 SUPPORTED_ACTION_TYPES = {
     "exact_duplicate_keep_plan",
@@ -382,6 +386,7 @@ class ActionPlanBuilder:
                         values={field: values[field] for field in metadata_fields},
                         apply_supported=True,
                         notes=list(preview.reasons),
+                        expected_hash=_content_hash(Path(preview.path)),
                     )
                 )
             elif preview.would_change:
@@ -398,6 +403,7 @@ class ActionPlanBuilder:
                         destination_path=str(rename_result.new_path),
                         apply_supported=True,
                         notes=list(rename_proposal.rule_notes),
+                        expected_hash=_content_hash(Path(preview.path)),
                     )
                 )
 
@@ -652,11 +658,141 @@ def authorize_action_plan_selection(
     )
 
 
+def _resolved_within(path: Path, root: Path, *, must_exist: bool, label: str) -> Path:
+    resolved_root = root.resolve(strict=True)
+    try:
+        resolved_path = path.resolve(strict=must_exist)
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} does not exist: {path}") from exc
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{label} is outside the configured library root: {resolved_path}") from exc
+    return resolved_path
+
+
+def validate_action_plan_boundaries(library_root: Path, report: ActionPlanReport) -> None:
+    """Reject operation paths that escape the configured library root."""
+
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError(f"library root is not a directory: {root}")
+    for plan in report.plans:
+        for affected_path in plan.affected_files:
+            _resolved_within(Path(affected_path), root, must_exist=True, label="affected file")
+        for operation in plan.proposed_operations:
+            if operation.path is not None:
+                _resolved_within(Path(operation.path), root, must_exist=True, label="operation source")
+            if operation.destination_path is not None:
+                _resolved_within(
+                    Path(operation.destination_path),
+                    root,
+                    must_exist=False,
+                    label="operation destination",
+                )
+
+
+def execute_reviewed_action_plan(
+    library_root: Path,
+    records: list[TrackRecord],
+    review_report: ReviewQueueReport,
+    requested_report: ActionPlanReport,
+    *,
+    review_state: ReviewStateStore,
+    review_state_path: Path,
+    ledger_path: Path,
+    backup_dir: Path | None = None,
+    workspace_root: Path | None = None,
+) -> tuple[ActionPlanReport, list[AppliedPlanResult], "OperationBatch"]:
+    """Rebuild, authorize, validate, and execute one reviewed plan selection."""
+
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError(f"library root is not a directory: {root}")
+    if backup_dir is not None:
+        if workspace_root is None:
+            raise ValueError("workspace_root is required when backup_dir is provided")
+        resolved_workspace = workspace_root.resolve(strict=False)
+        resolved_backup = backup_dir.resolve(strict=False)
+        try:
+            resolved_backup.relative_to(resolved_workspace)
+        except ValueError as exc:
+            raise ValueError(f"backup directory is outside the configured workspace root: {resolved_backup}") from exc
+        backup_dir = resolved_backup
+
+    generated_report = build_action_plan_report(
+        root,
+        records,
+        review_report,
+        source_review_item_ids=list(requested_report.source_review_item_ids),
+    )
+    authorized_report = authorize_action_plan_selection(generated_report, requested_report)
+    validate_action_plan_boundaries(root, authorized_report)
+    from nyxcore.action_plan.ledger import (
+        finalize_operation_batch,
+        load_operation_ledger,
+        mark_journal_operation_result,
+        mark_journal_operation_started,
+        prepare_operation_batch,
+        save_operation_ledger,
+    )
+    from nyxcore.action_plan.lock import LibraryMutationLock
+    from nyxcore.review_queue.state import load_review_state, save_review_state
+
+    planned_backup_paths: dict[str, str] = {}
+    for plan in authorized_report.plans:
+        for operation in plan.proposed_operations:
+            if operation.apply_supported and operation.operation_type == "write_metadata" and operation.path:
+                source = Path(operation.path)
+                target_dir = backup_dir or source.parent / ".nyxcore_backups"
+                planned_backup_paths[operation.operation_id] = str(plan_backup_path(source, target_dir))
+
+    with LibraryMutationLock(root):
+        current_review_state = load_review_state(review_state_path)
+        ledger = load_operation_ledger(ledger_path)
+        batch = prepare_operation_batch(
+            ledger,
+            plan_report=authorized_report,
+            planned_backup_paths=planned_backup_paths,
+        )
+        save_operation_ledger(ledger_path, ledger)
+
+        def persist_lifecycle(
+            event: str,
+            operation: ActionPlanOperation,
+            result: AppliedOperationResult | None,
+        ) -> None:
+            if event == "started":
+                mark_journal_operation_started(
+                    batch,
+                    operation.operation_id,
+                    expected_hash=operation.expected_hash,
+                )
+            elif event == "finished" and result is not None:
+                mark_journal_operation_result(batch, result)
+            save_operation_ledger(ledger_path, ledger)
+
+        results = apply_action_plan_report(
+            authorized_report,
+            review_state=current_review_state,
+            backup_dir=backup_dir,
+            planned_backup_paths=planned_backup_paths,
+            lifecycle_callback=persist_lifecycle,
+        )
+        finalize_operation_batch(batch, results)
+        save_operation_ledger(ledger_path, ledger)
+        save_review_state(review_state_path, current_review_state)
+        review_state.items = current_review_state.items
+    return authorized_report, results, batch
+
+
 def apply_action_plan_report(
     report: ActionPlanReport,
     *,
     review_state: ReviewStateStore,
     backup_dir: Path | None = None,
+    planned_backup_paths: dict[str, str] | None = None,
+    lifecycle_callback: Callable[[str, ActionPlanOperation, AppliedOperationResult | None], None] | None = None,
 ) -> list[AppliedPlanResult]:
     results: list[AppliedPlanResult] = []
     now = datetime.now(tz=UTC)
@@ -737,6 +873,28 @@ def apply_action_plan_report(
             continue
 
         operation_results: list[AppliedOperationResult] = []
+        try:
+            for operation in plan.proposed_operations:
+                if operation.operation_type == "keep_preferred" or operation.apply_supported:
+                    if not operation.path:
+                        raise RuntimeError(f"operation is missing a source path: {operation.operation_id}")
+                    source = Path(operation.path)
+                    if not source.is_file():
+                        raise RuntimeError(f"source file is missing: {source}")
+                    if not operation.expected_hash:
+                        raise RuntimeError(f"operation is missing its source fingerprint: {operation.operation_id}")
+                    if _content_hash(source) != operation.expected_hash:
+                        raise RuntimeError(f"source changed since review: {operation.operation_id}")
+        except Exception as exc:
+            results.append(AppliedPlanResult(
+                plan_id=plan.plan_id, action_type=plan.action_type, status="partial_failure",
+                source_review_item_ids=plan.source_review_item_ids,
+                operation_results=[AppliedOperationResult(
+                    operation_id="preflight", operation_type="plan_safety_check", path=None,
+                    destination_path=None, status="error", message=str(exc),
+                )], resolved_review_item_ids=[],
+            ))
+            continue
         if plan.action_type == "exact_duplicate_keep_plan":
             try:
                 preferred = next(op for op in plan.proposed_operations if op.operation_type == "keep_preferred")
@@ -761,6 +919,7 @@ def apply_action_plan_report(
                 ))
                 continue
         all_succeeded = True
+        halt_remaining = False
         for operation in plan.proposed_operations:
             if not operation.apply_supported:
                 operation_results.append(
@@ -774,17 +933,37 @@ def apply_action_plan_report(
                     )
                 )
                 continue
+            if halt_remaining:
+                operation_results.append(AppliedOperationResult(
+                    operation_id=operation.operation_id,
+                    operation_type=operation.operation_type,
+                    path=operation.path,
+                    destination_path=operation.destination_path,
+                    status="skipped",
+                    message="not attempted after an earlier operation failed",
+                ))
+                continue
             try:
                 backup_path = None
                 applied_hash = None
-                if operation.path is not None and backup_dir is not None:
-                    backup_path = str(backup_file(Path(operation.path), backup_dir))
+                if operation.operation_type in {"rename_file", "quarantine_move"}:
+                    if operation.path is None:
+                        raise RuntimeError("move operation is missing a source path")
+                    # An earlier operation in this batch may have intentionally
+                    # changed the file. Journal the identity the move will preserve.
+                    operation.expected_hash = _content_hash(Path(operation.path))
+                if lifecycle_callback is not None:
+                    lifecycle_callback("started", operation, None)
                 if operation.operation_type == "write_metadata":
                     if operation.path is None:
                         raise TagWriteError("metadata write operation is missing a source path")
-                    if backup_path is None:
-                        source = Path(operation.path)
-                        backup_path = str(backup_file(source, source.parent / ".nyxcore_backups"))
+                    source = Path(operation.path)
+                    planned_backup = (planned_backup_paths or {}).get(operation.operation_id)
+                    if planned_backup is not None:
+                        planned_path = Path(planned_backup)
+                        backup_path = str(backup_file(source, planned_path.parent, destination=planned_path))
+                    else:
+                        backup_path = str(backup_file(source, backup_dir or source.parent / ".nyxcore_backups"))
                     write_tags(
                         Path(operation.path),
                         title=operation.values.get("title"),
@@ -811,18 +990,15 @@ def apply_action_plan_report(
                         changed=Path(operation.path) != Path(operation.destination_path),
                     )
                     apply_rename(rename_result)
+                    applied_hash = _content_hash(Path(operation.destination_path))
                 elif operation.operation_type == "quarantine_move":
                     if operation.path is None or operation.destination_path is None:
                         raise RuntimeError("quarantine operation is missing source or destination path")
-                    destination = Path(operation.destination_path)
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    if destination.exists():
-                        raise RuntimeError(f"quarantine destination already exists: {destination}")
-                    shutil.move(operation.path, operation.destination_path)
+                    move_file_no_replace(Path(operation.path), Path(operation.destination_path))
+                    applied_hash = _content_hash(Path(operation.destination_path))
                 else:
                     raise RuntimeError(f"unsupported apply operation: {operation.operation_type}")
-                operation_results.append(
-                    AppliedOperationResult(
+                applied_result = AppliedOperationResult(
                         operation_id=operation.operation_id,
                         operation_type=operation.operation_type,
                         path=operation.path,
@@ -832,11 +1008,13 @@ def apply_action_plan_report(
                         backup_path=backup_path,
                         applied_hash=applied_hash,
                     )
-                )
+                operation_results.append(applied_result)
+                if lifecycle_callback is not None:
+                    lifecycle_callback("finished", operation, applied_result)
             except Exception as exc:
                 all_succeeded = False
-                operation_results.append(
-                    AppliedOperationResult(
+                halt_remaining = True
+                failed_result = AppliedOperationResult(
                         operation_id=operation.operation_id,
                         operation_type=operation.operation_type,
                         path=operation.path,
@@ -844,7 +1022,9 @@ def apply_action_plan_report(
                         status="error",
                         message=str(exc),
                     )
-                )
+                operation_results.append(failed_result)
+                if lifecycle_callback is not None:
+                    lifecycle_callback("finished", operation, failed_result)
         resolved_review_item_ids: list[str] = []
         all_mutations_selected = all(
             operation.apply_supported

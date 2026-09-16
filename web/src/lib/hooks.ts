@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyReviewPlan,
@@ -17,16 +18,38 @@ import {
 } from "./api";
 import type { ReportEnvelope, ReviewReport } from "./types";
 
+export function useCheckConnection() {
+  const queryClient = useQueryClient();
+  const [checking, setChecking] = useState(false);
+
+  const checkConnection = useCallback(async () => {
+    setChecking(true);
+    try {
+      await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: ["status"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] }),
+        queryClient.invalidateQueries({ queryKey: ["review"] }),
+        queryClient.invalidateQueries({ queryKey: ["duplicates"] }),
+        queryClient.invalidateQueries({ queryKey: ["history"] }),
+      ]);
+    } finally {
+      setChecking(false);
+    }
+  }, [queryClient]);
+
+  return { checkConnection, checking };
+}
+
 export function useStatusQuery() {
-  return useQuery({ queryKey: ["status"], queryFn: fetchStatus });
+  return useQuery({ queryKey: ["status"], queryFn: fetchStatus, retry: 1 });
 }
 
 export function useHealthQuery() {
-  return useQuery({ queryKey: ["health"], queryFn: fetchHealth });
+  return useQuery({ queryKey: ["health"], queryFn: fetchHealth, retry: 1 });
 }
 
 export function useReviewQuery() {
-  return useQuery({ queryKey: ["review"], queryFn: fetchReview });
+  return useQuery({ queryKey: ["review"], queryFn: fetchReview, retry: 1 });
 }
 
 export function useDuplicatesQuery() {
@@ -137,11 +160,13 @@ export function useRestoreHistoryMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["health"] });
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
-      queryClient.invalidateQueries({ queryKey: ["history"] });
       queryClient.invalidateQueries({ queryKey: ["review"] });
+      queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
     },
   });
 }
+
 
 export function useUndoHistoryMutation() {
   const queryClient = useQueryClient();
@@ -153,6 +178,21 @@ export function useUndoHistoryMutation() {
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
       queryClient.invalidateQueries({ queryKey: ["history"] });
       queryClient.invalidateQueries({ queryKey: ["review"] });
+    },
+  });
+}
+
+export function useReverseHistoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, target_path, alternate_restore_dir }: { batchId: string; target_path?: string; alternate_restore_dir?: string }) =>
+      restoreHistoryBatch(batchId, { target_path, alternate_restore_dir }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["health"] });
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
     },
   });
 }

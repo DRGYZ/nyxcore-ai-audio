@@ -2,16 +2,43 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_LABELS, HEALTH_BITRATE_BUCKET_ORDER } from "../../lib/contracts";
 import { useHealthQuery } from "../../lib/hooks";
-import { mockHealthReport } from "../../lib/mock-data";
-import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
-import { ActionBanner, Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, ProgressBar, formatNumber } from "../components";
+import { ActionBanner, Button, Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, ProgressBar, formatNumber } from "../components";
+import { ApiUnavailableState } from "../feedback";
 
 export function HealthPage() {
   const navigate = useNavigate();
   const healthQuery = useHealthQuery();
-  const healthState = resolveReportQueryData(healthQuery, mockHealthReport);
-  const report = healthState.data;
   const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+
+  if (healthQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Library Diagnostics"
+          title="Library Health"
+          description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
+        />
+        <ApiUnavailableState contextLabel="Library Health" />
+      </div>
+    );
+  }
+
+  if (healthQuery.isLoading || !healthQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Library Diagnostics"
+          title="Library Health"
+          description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
+        />
+        <Panel className="p-8 text-center text-sm text-primary-muted">
+          Loading library health audit from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const report = healthQuery.data.data;
   const bucketValues = HEALTH_BITRATE_BUCKET_ORDER.map((key) => report.quality.bitrate_buckets[key]);
   const maxBucket = bucketValues.length > 0 ? Math.max(1, ...bucketValues) : 1;
   const losslessRatio = report.overview.total_audio_files === 0
@@ -28,7 +55,7 @@ export function HealthPage() {
     const result = await healthQuery.refetch();
     setBanner(
       result.error
-        ? { tone: "error", message: "Health refresh failed. The last available report remains visible." }
+        ? { tone: "error", message: "Health refresh failed. Local API may be offline." }
         : { tone: "success", message: "Health audit refreshed from the current library." },
     );
   }
@@ -49,89 +76,111 @@ export function HealthPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="System Diagnostics"
-        title="Technical Audio Audit"
+        eyebrow="Library Diagnostics"
+        title="Library Health"
+        description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
         actions={
           <>
-            <Button tone="ghost" onClick={handleExport} disabled={healthState.usingMock}>Export JSON</Button>
-            <Button tone="primary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
+            <Button tone="ghost" onClick={handleExport}>
+              <Icon name="download" className="text-sm" />
+              Export JSON
+            </Button>
+            <Button tone="secondary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
+              <Icon name="refresh" className={`text-sm ${healthQuery.isFetching ? "animate-spin" : ""}`} />
               {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
             </Button>
           </>
         }
       />
-      <PageQueryStateNotice {...toQueryNoticeState(healthState)} />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <Panel className="p-5">
-          <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Audio Files</p>
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">LIVE</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-100">{formatNumber(report.overview.total_audio_files)}</p>
-          <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.overview.total_folders_touched)} folders touched</p>
-        </Panel>
-        <Panel className="p-5">
-          <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Artwork Coverage</p>
-            <span className="text-[10px] font-bold text-slate-500">{formatNumber(report.artwork.with_artwork)} files with artwork</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-100">{report.artwork.coverage_percent.toFixed(1)}%</p>
-          <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.artwork.without_artwork)} files still missing artwork</p>
-        </Panel>
-        <Panel className="p-5">
-          <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Lossless Ratio</p>
-            <span className="text-[10px] font-bold text-slate-500">{formatNumber(report.quality.lossy_files)} lossy files</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-100">{losslessRatio.toFixed(1)}%</p>
-          <p className="mt-2 text-xs font-medium text-slate-500">{formatNumber(report.quality.lossless_files)} tracks</p>
-        </Panel>
-        <Panel className="border border-rose-500/20 p-5 shadow-[0_0_20px_-5px_rgba(244,63,94,0.2)]">
-          <div className="mb-4 flex justify-between">
-            <p className="text-sm font-medium text-slate-400">Critical Errors</p>
-            <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-500">ACTION REQ</span>
-          </div>
-          <p className="text-3xl font-bold text-rose-500">{formatNumber(report.quality.unreadable_or_unparseable_files?.count ?? 0)}</p>
-          <p className="mt-2 text-xs font-medium text-slate-500">Corrupt containers detected</p>
-        </Panel>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Audio Files"
+          value={formatNumber(report.overview.total_audio_files)}
+          icon="library_music"
+          accent={<Chip tone="primary">Live</Chip>}
+          meta={<p className="font-sans text-[11px] text-primary-subtle">{formatNumber(report.overview.total_folders_touched)} folders scanned</p>}
+        />
+        <MetricCard
+          label="Artwork Coverage"
+          value={`${report.artwork.coverage_percent.toFixed(1)}%`}
+          icon="image"
+          meta={
+            <p className="font-sans text-[11px] text-primary-subtle">
+              <span className="font-mono text-accent">{formatNumber(report.artwork.with_artwork)}</span> embedded • <span className="font-mono text-primary-subtle">{formatNumber(report.artwork.without_artwork)}</span> missing
+            </p>
+          }
+        />
+        <MetricCard
+          label="Lossless Ratio"
+          value={`${losslessRatio.toFixed(1)}%`}
+          icon="graphic_eq"
+          meta={
+            <p className="font-sans text-[11px] text-primary-subtle">
+              <span className="font-mono text-primary">{formatNumber(report.quality.lossless_files)}</span> lossless • <span className="font-mono text-primary-subtle">{formatNumber(report.quality.lossy_files)}</span> lossy
+            </p>
+          }
+        />
+        <MetricCard
+          label="Unreadable Files"
+          value={formatNumber(report.quality.unreadable_or_unparseable_files?.count ?? 0)}
+          icon="broken_image"
+          accent={
+            (report.quality.unreadable_or_unparseable_files?.count ?? 0) > 0 ? (
+              <Chip tone="danger">Attention</Chip>
+            ) : undefined
+          }
+          meta={<p className="font-sans text-[11px] text-primary-subtle">Unparseable headers or corrupted files</p>}
+        />
       </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <Panel className="p-6">
-            <div className="mb-6 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 font-display text-lg font-bold text-slate-100">
-                <span className="material-symbols-outlined text-primary">equalizer</span>
-                Bitrate Distribution
-              </h3>
-              <div className="flex gap-2 text-[10px] font-bold text-slate-400">
-                <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-primary/40" /> LOSSY</span>
-                <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-secondary" /> HIGH BITRATE</span>
+          <Panel className="p-5">
+            <div className="mb-6 flex items-center justify-between border-b border-white/[0.07] pb-4">
+              <div>
+                <h3 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
+                  <Icon name="equalizer" className="text-base text-accent" />
+                  Bitrate Distribution
+                </h3>
+                <p className="mt-0.5 font-editorial text-xs italic text-primary-subtle">
+                  Fidelity composition across all indexed audio streams
+                </p>
+              </div>
+              <div className="flex gap-4 font-sans text-xs text-primary-subtle">
+                <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent/40" /> Lossy</span>
+                <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent" /> High Fidelity</span>
               </div>
             </div>
-            <div className="flex h-56 items-end justify-between gap-3">
+            <div className="flex h-48 items-end justify-between gap-1.5 px-1 sm:gap-3 sm:px-2">
               {HEALTH_BITRATE_BUCKET_ORDER.map((key) => {
                 const value = report.quality.bitrate_buckets[key];
-                const barTone = key === ">=256k" ? "bg-secondary" : key === "unknown" ? "bg-amber-500/60" : "bg-primary/50";
+                const barTone = key === ">=256k" ? "bg-accent" : key === "unknown" ? "bg-amber-400/60" : "bg-accent/40";
+                const label = HEALTH_BITRATE_BUCKET_LABELS[key];
                 return (
-                  <div key={key} className="flex flex-1 flex-col items-center gap-2">
+                  <div key={key} className="flex min-w-0 flex-1 flex-col items-center gap-2">
                     <div
-                      className={`w-full rounded-t ${barTone}`}
-                      style={{ height: `${Math.max(12, (value / maxBucket) * 100)}%` }}
+                      role="img"
+                      aria-label={`${label}: ${formatNumber(value)} files`}
+                      title={`${label}: ${formatNumber(value)} files`}
+                      className={`w-full rounded-t-[2px] transition-all duration-300 ${barTone}`}
+                      style={{ height: `${Math.max(6, (value / maxBucket) * 100)}%` }}
                     />
-                    <span className="text-[10px] font-bold text-slate-500">{HEALTH_BITRATE_BUCKET_LABELS[key]}</span>
+                    <span className="w-full truncate text-center font-mono text-[9px] text-primary-subtle sm:text-[10px]">{label}</span>
                   </div>
                 );
               })}
             </div>
           </Panel>
+
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            <Panel className="p-6">
-              <h3 className="mb-6 flex items-center gap-2 font-display text-lg font-bold text-slate-100">
-                <span className="material-symbols-outlined text-secondary">grid_view</span>
+            <Panel className="p-5">
+              <h3 className="mb-4 flex items-center gap-2 border-b border-white/[0.07] pb-3 font-display text-sm font-semibold tracking-wide text-primary">
+                <Icon name="grid_view" className="text-base text-accent" />
                 Metadata Issues
               </h3>
-              <div className="space-y-3">
+              <div className="divide-y divide-white/[0.05] rounded-[3px] border border-white/[0.06] bg-surface-low/50">
                 {[
                   ["Missing Title", report.metadata.missing_title.count],
                   ["Missing Artist", report.metadata.missing_artist.count],
@@ -139,35 +188,36 @@ export function HealthPage() {
                   ["Placeholder Metadata", report.metadata.placeholder_metadata.count],
                   ["Suspicious Swaps", report.metadata.suspicious_title_artist_swaps.count],
                 ].map(([label, count]) => (
-                  <div key={label} className="flex items-center justify-between rounded-lg border border-border-dark bg-background-dark/50 px-4 py-3">
-                    <span className="text-sm text-slate-300">{label}</span>
-                    <span className="text-sm font-bold text-primary">{formatNumber(Number(count))}</span>
+                  <div key={label} className="flex items-center justify-between px-3.5 py-2.5 font-sans text-xs">
+                    <span className="text-primary-subtle">{label}</span>
+                    <span className="font-mono font-medium text-primary">{formatNumber(Number(count))}</span>
                   </div>
                 ))}
               </div>
               {topFolders.length > 0 ? (
-                <p className="mt-4 text-xs text-slate-500">
-                  Most concentrated folder: <span className="text-primary">{topFolders[0].folder}</span>
+                <p className="mt-3 font-sans text-[11px] text-primary-subtle">
+                  Concentrated in: <span className="font-mono text-accent">{topFolders[0].folder}</span>
                 </p>
               ) : null}
             </Panel>
-            <Panel className="p-6">
-              <h3 className="mb-6 flex items-center gap-2 font-display text-lg font-bold text-slate-100">
-                <span className="material-symbols-outlined text-primary">image</span>
-                Artwork Coverage Breakdown
+
+            <Panel className="p-5">
+              <h3 className="mb-4 flex items-center gap-2 border-b border-white/[0.07] pb-3 font-display text-sm font-semibold tracking-wide text-primary">
+                <Icon name="image" className="text-base text-accent" />
+                Artwork Coverage
               </h3>
               <div className="space-y-4">
                 <div>
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="text-slate-400">With Artwork</span>
-                    <span className="font-bold text-primary">{formatNumber(report.artwork.with_artwork)}</span>
+                  <div className="mb-2 flex items-center justify-between font-sans text-xs">
+                    <span className="text-primary-subtle">Embedded Artwork</span>
+                    <span className="font-mono font-semibold text-accent">{formatNumber(report.artwork.with_artwork)}</span>
                   </div>
                   <ProgressBar value={report.artwork.coverage_percent} />
                 </div>
                 <div>
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Without Artwork</span>
-                    <span className="font-bold text-slate-200">{formatNumber(report.artwork.without_artwork)}</span>
+                  <div className="mb-2 flex items-center justify-between font-sans text-xs">
+                    <span className="text-primary-subtle">Missing Cover Art</span>
+                    <span className="font-mono font-semibold text-primary">{formatNumber(report.artwork.without_artwork)}</span>
                   </div>
                   <ProgressBar value={withoutArtworkRatio} tone="warning" />
                 </div>
@@ -175,15 +225,18 @@ export function HealthPage() {
             </Panel>
           </div>
         </div>
-        <Panel className="flex flex-col">
-          <div className="border-b border-border-dark p-6">
-            <h3 className="flex items-center gap-2 font-display text-lg font-bold text-slate-100">
-              <span className="material-symbols-outlined text-amber-500">auto_fix_high</span>
+
+        <Panel className="flex flex-col p-5">
+          <div className="mb-4 border-b border-white/[0.07] pb-3.5">
+            <h3 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
+              <Icon name="auto_fix_high" className="text-base text-accent" />
               What to Fix First
             </h3>
-            <p className="mt-1 text-xs text-slate-500">Current report recommendations based on issue counts and priority rules.</p>
+            <p className="mt-1 font-editorial text-xs italic text-primary-subtle">
+              Prioritized recommendations based on issue severity and count
+            </p>
           </div>
-          <div className="space-y-4 p-4">
+          <div className="flex-1 space-y-3">
             {report.priorities.recommended_actions.length === 0 ? (
               <EmptyState
                 title="No priority recommendations"
@@ -193,26 +246,26 @@ export function HealthPage() {
               (topIssueCategories.length > 0 ? topIssueCategories.map((item) => item.action) : report.priorities.recommended_actions).map((action, index) => (
                 <div
                   key={action}
-                  className={`rounded-lg border-l-4 bg-background-dark p-4 transition-colors hover:bg-border-dark ${
-                    index === 0 ? "border-rose-500" : index === 1 ? "border-amber-500" : "border-primary"
+                  className={`rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3.5 transition-colors hover:border-white/[0.12] ${
+                    index === 0 ? "border-l-2 border-l-rose-500" : index === 1 ? "border-l-2 border-l-amber-500" : "border-l-2 border-l-accent"
                   }`}
                 >
                   <div className="mb-2 flex justify-between gap-3">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                      index === 0 ? "bg-rose-500/10 text-rose-500" : index === 1 ? "bg-amber-500/10 text-amber-500" : "bg-primary/10 text-primary"
-                    }`}>
+                    <Chip tone={index === 0 ? "danger" : index === 1 ? "warning" : "primary"}>
                       {topIssueCategories[index]?.category ? topIssueCategories[index].category.replace(/_/g, " ") : index === 0 ? "primary" : index === 1 ? "secondary" : "follow-up"}
-                    </span>
+                    </Chip>
                     {topIssueCategories[index]?.count !== undefined ? (
-                      <span className="shrink-0 text-[10px] text-slate-500">{formatNumber(topIssueCategories[index].count)} items</span>
+                      <span className="shrink-0 font-mono text-[10px] text-primary-subtle">{formatNumber(topIssueCategories[index].count)} items</span>
                     ) : null}
                   </div>
-                  <p className="break-words text-sm font-medium text-slate-200">{action}</p>
+                  <p className="break-words font-sans text-xs text-primary">{action}</p>
                 </div>
               ))
             )}
-            <Button tone="secondary" className="w-full justify-center py-2.5 text-xs" onClick={() => navigate("/review")}>
-              Review Fixes Safely
+          </div>
+          <div className="mt-4 border-t border-white/[0.06] pt-3.5">
+            <Button tone="secondary" className="w-full justify-center py-2 text-xs" onClick={() => navigate("/review")}>
+              Review Fixes in Inbox →
             </Button>
           </div>
         </Panel>

@@ -5,7 +5,7 @@ from .service import (
     ActionPlanSummary,
     AppliedPlanResult,
     build_action_plan_report,
-    apply_action_plan_report,
+    execute_reviewed_action_plan,
 )
 from .ledger import (
     LedgerOperation,
@@ -16,7 +16,9 @@ from .ledger import (
     load_operation_ledger,
     save_operation_ledger,
     undo_operation_batch,
+    reverse_operation_batch,
 )
+from .lifecycle import inspect_recorded_batch, recover_recorded_batch, reverse_recorded_batch
 
 __all__ = [
     "ActionPlan",
@@ -33,5 +35,9 @@ __all__ = [
     "load_operation_ledger",
     "save_operation_ledger",
     "undo_operation_batch",
-    "apply_action_plan_report",
+    "reverse_operation_batch",
+    "inspect_recorded_batch",
+    "recover_recorded_batch",
+    "reverse_recorded_batch",
+    "execute_reviewed_action_plan",
 ]

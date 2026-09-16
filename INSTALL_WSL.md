@@ -1,43 +1,65 @@
 # NyxCore on Windows via WSL2 (Ubuntu)
 
-This guide covers the current NyxCore CLI, FastAPI backend, demo fixture, and local web UI on Windows through WSL2.
+This guide walks through setting up the NyxCore CLI, FastAPI backend, demo library, and local web UI on Windows using WSL2 (Ubuntu).
 
-## 1. Install WSL2 and Ubuntu
+---
 
-Run PowerShell as Administrator:
+## 1. Prerequisites
+
+### Windows Subsystem for Linux (WSL2)
+Open PowerShell as Administrator:
 
 ```powershell
 wsl --install -d Ubuntu
 ```
 
-Reboot if prompted, then confirm:
+Reboot if prompted, then verify WSL2 is active:
 
 ```powershell
 wsl -l -v
 ```
 
-Ubuntu should show version `2`.
+Ensure the Ubuntu distribution shows version `2`.
 
-## 2. Install system packages in Ubuntu
+---
 
-```bash
-sudo apt update
-sudo apt upgrade -y
-sudo apt install -y python3 python3-venv python3-pip git ffmpeg curl
-```
+## 2. System Packages in Ubuntu
 
-If you plan to run the frontend from WSL, also install Node 18+.
-
-## 3. Open the project folder from WSL
-
-If the repo is at `C:\Users\YAZAN\Desktop\YMusic`:
+Open your Ubuntu terminal and install the core build and runtime packages:
 
 ```bash
-cd /mnt/c/Users/YAZAN/Desktop/YMusic
-pwd
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3 python3-venv python3-pip git curl
 ```
 
-## 4. Create a virtual environment and install NyxCore
+### Optional Media & Audio Tools
+- **`ffmpeg`**: Optional for core library review. `mutagen` reads and writes audio metadata in pure Python. FFmpeg is only required if you plan to synthesize test audio using `demo/create_demo_library.py`, or if using experimental CLAP audio transcoding:
+  ```bash
+  sudo apt install -y ffmpeg
+  ```
+- **Node.js (18+)**: Required if running the frontend inside WSL:
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt install -y nodejs
+  ```
+
+---
+
+## 3. Clone or Navigate to the Repository
+
+Navigate to your workspace directory:
+
+```bash
+# If cloned inside WSL:
+cd ~/nyxcore-ai-audio
+
+# Or if accessing from a Windows drive mount:
+cd /mnt/c/path/to/nyxcore-ai-audio
+```
+
+---
+
+## 4. Virtual Environment & Python Installation
 
 ```bash
 python3 -m venv .venv
@@ -46,47 +68,56 @@ python -m pip install --upgrade pip
 pip install -e ".[web,dev]"
 ```
 
-Optional extras:
+Verify the environment:
 
 ```bash
-pip install -e ".[audio-analysis]"
-pip install -e ".[clap]"
-pip install -e ".[audio-analysis,clap,web,dev]"
+which python
+python -V
 ```
 
-## 5. Generate the demo library
+The output should point to `.venv/bin/python` with Python 3.11 or newer.
 
-Use the built-in demo fixture for the safest first run:
+---
+
+## 5. Demo Fixture Setup
+
+For a clean, risk-free first run, generate the synthetic demo fixture:
 
 ```bash
-python demo/create_demo_library.py --force
+python demo/create_demo_library.py demo/generated/sample-library --force
 ```
 
-Default output:
+> **Note**: Generating synthetic audio requires `ffmpeg` on `PATH`. If you already have an audio folder, you can skip this step and point directly to your music directory.
 
-- `demo/generated/sample-library`
-
-## 6. Run the CLI demo flow
+Run the core detection and review pipeline against the sample library:
 
 ```bash
 python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
 python -m nyxcore.cli health demo/generated/sample-library --out data/reports
 python -m nyxcore.cli review demo/generated/sample-library --out data/reports
-python -m nyxcore.cli save-playlist demo/generated/sample-library --out data/reports --name "Ambient Focus" --query "ambient focus instrumental"
-python -m nyxcore.cli list-playlists --out data/reports
 ```
 
-If you want history data too, generate and apply one plan:
+To test the safe mutation and history pipeline:
 
 ```bash
-python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <item-id-from-review.json>
-python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --out data/reports
+# Generate a review plan for an exact duplicate item (check data/reports/review.json for item_id)
+python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <exact-duplicate-item-id>
+
+# Apply the action plan (moves non-preferred copy to .nyxcore_quarantine)
+python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music demo/generated/sample-library --out data/reports
+
+# Inspect the recorded history ledger
 python -m nyxcore.cli history --out data/reports
+
+# Reverse the batch back to original file locations when supported
+python -m nyxcore.cli undo-review-action <batch-id> --music demo/generated/sample-library --out data/reports
 ```
 
-## 7. Run the FastAPI backend
+---
 
-Point the API at the generated demo library:
+## 6. Running the Local FastAPI Backend
+
+Launch the local API server pointed at your target music folder and reports directory:
 
 ```bash
 source .venv/bin/activate
@@ -95,13 +126,15 @@ export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
 uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-API URL:
+Verify the API is running:
+- **API Status**: [http://127.0.0.1:8000/api/status](http://127.0.0.1:8000/api/status)
+- **Interactive OpenAPI Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-- `http://127.0.0.1:8000`
+---
 
-## 8. Run the frontend
+## 7. Running the React Web UI
 
-If Node.js is already available in WSL:
+In a separate terminal window:
 
 ```bash
 cd web
@@ -109,57 +142,24 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Frontend URL:
+Open your browser:
+- **Web UI**: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
-- `http://127.0.0.1:5173`
+---
 
-If the frontend shows mock fallback instead of live data:
+## 8. Troubleshooting
 
-- confirm the backend is running on `127.0.0.1:8000`
-- confirm `NYXCORE_WEB_MUSIC_DIR` points to the generated demo library
-- confirm `NYXCORE_WEB_OUT_DIR` points to `data/reports`
+### Frontend shows "Local API Disconnected"
+1. Verify the backend process is running on `127.0.0.1:8000`.
+2. Confirm `NYXCORE_WEB_MUSIC_DIR` and `NYXCORE_WEB_OUT_DIR` are exported in the terminal running `uvicorn`.
+3. Check that WSL port forwarding is working or connect directly via `127.0.0.1:5173`.
 
-## 9. Optional analysis extras
+### "ffmpeg is required to generate the NyxCore demo library"
+The `demo/create_demo_library.py` script requires `ffmpeg` to synthesize sine-wave audio tones. Install FFmpeg in Ubuntu (`sudo apt install -y ffmpeg`) or test with an existing audio directory.
 
-Essentia and CLAP are optional for the demo, review, history, playlist, API, and frontend workflows.
-
-Try:
-
+### Interrupted or Lock-Stalled Mutations
+NyxCore employs a library-scoped lock during plan execution. If a process was terminated mid-operation:
 ```bash
-pip install essentia
-python -c "import essentia; print('essentia ok')"
+python -m nyxcore.cli recover-review-action --action inspect --music <music-dir> --out data/reports
 ```
-
-Optional deeper import check:
-
-```bash
-python -c "import essentia.standard as es; print('essentia.standard ok')"
-```
-
-## 10. Troubleshooting
-
-### If `ffmpeg` is missing
-
-```bash
-which ffmpeg
-ffmpeg -version
-```
-
-The demo fixture generator depends on `ffmpeg`.
-
-### If the API starts but the frontend falls back to mock data
-
-- confirm the backend is running on `127.0.0.1:8000`
-- confirm the frontend is running on `127.0.0.1:5173`
-- confirm `NYXCORE_WEB_MUSIC_DIR` and `NYXCORE_WEB_OUT_DIR` are exported in the API terminal
-- check the browser console and API terminal output for request failures
-
-### If the wrong Python is active
-
-```bash
-which python
-python -V
-pip -V
-```
-
-Those paths should point inside `.venv`.
+Incomplete operations will be safely classified; only provably safe states offer `finalize` or `abort`.

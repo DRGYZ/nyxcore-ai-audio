@@ -189,6 +189,7 @@ class HistoryMutationRequest(BaseModel):
     out_path: str | None = None
     alternate_restore_dir: str | None = None
     target_path: str | None = None
+    stale_lock_token: str | None = None
 
 
 class HistoryMutationOperationResponse(BaseModel):

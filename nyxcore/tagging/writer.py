@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 from pathlib import Path
@@ -34,8 +35,7 @@ def _load_mutagen_writer(path: Path):
     return audio
 
 
-def backup_file(src: Path, backup_dir: Path) -> Path:
-    backup_dir.mkdir(parents=True, exist_ok=True)
+def plan_backup_path(src: Path, backup_dir: Path) -> Path:
     label_parts = [part for part in (src.parent.name, src.stem) if part]
     label = "__".join(_sanitize_backup_label(part) for part in label_parts if part) or "backup"
     digest = hashlib.sha1(str(src).encode("utf-8")).hexdigest()[:10]
@@ -50,7 +50,24 @@ def backup_file(src: Path, backup_dir: Path) -> Path:
                 destination = candidate
                 break
             i += 1
-    shutil.copy2(src, destination)
+    return destination
+
+
+def backup_file(src: Path, backup_dir: Path, *, destination: Path | None = None) -> Path:
+    destination = plan_backup_path(src, backup_dir) if destination is None else destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    created = False
+    try:
+        with src.open("rb") as source_stream, destination.open("xb") as destination_stream:
+            created = True
+            shutil.copyfileobj(source_stream, destination_stream)
+            destination_stream.flush()
+            os.fsync(destination_stream.fileno())
+        shutil.copystat(src, destination)
+    except Exception:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
     return destination
 
 

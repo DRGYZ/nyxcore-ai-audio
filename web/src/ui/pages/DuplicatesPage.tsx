@@ -1,19 +1,47 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDuplicatesQuery, useReviewQuery } from "../../lib/hooks";
-import { mockDuplicateReport, mockReviewReport } from "../../lib/mock-data";
-import { resolveReportQueryData, toQueryNoticeState } from "../../lib/query-state";
 import type { DuplicateGroup, ReviewItem } from "../../lib/types";
-import { Button, EmptyState, PageHeader, PageQueryStateNotice, Panel, PathBlock, formatBytes, formatNumber } from "../components";
+import { Button, Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, PathBlock, formatBytes, formatNumber } from "../components";
+import { ApiUnavailableState } from "../feedback";
 
 export function DuplicatesPage() {
   const navigate = useNavigate();
   const duplicatesQuery = useDuplicatesQuery();
   const reviewQuery = useReviewQuery();
-  const duplicatesState = resolveReportQueryData(duplicatesQuery, mockDuplicateReport);
-  const reviewState = resolveReportQueryData(reviewQuery, mockReviewReport);
-  const report = duplicatesState.data;
   const [activeTab, setActiveTab] = useState<"exact" | "likely">("exact");
+
+  if (duplicatesQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Duplicate Detection"
+          title="Duplicates"
+          description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
+        />
+        <ApiUnavailableState contextLabel="Duplicates" />
+      </div>
+    );
+  }
+
+  if (duplicatesQuery.isLoading || !duplicatesQuery.data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Duplicate Detection"
+          title="Duplicates"
+          description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading duplicate findings from local API…
+        </Panel>
+      </div>
+    );
+  }
+
+  const report = duplicatesQuery.data.data;
+  const reviewItems = reviewQuery.data?.data?.items ?? [];
+
   const reclaimable = report.exact_duplicates.reduce(
     (sum, group) => sum + (group.reclaimable_bytes ?? group.files.slice(1).reduce((acc, item) => acc + item.file_size_bytes, 0)),
     0,
@@ -22,12 +50,12 @@ export function DuplicatesPage() {
   const totalGroups = report.summary.exact_group_count + report.summary.likely_group_count;
 
   function findReviewItem(group: DuplicateGroup, itemType: "exact_duplicate_group" | "likely_duplicate_group"): ReviewItem | undefined {
-    const direct = reviewState.data.items.find(
+    const direct = reviewItems.find(
       (item) => item.item_type === itemType && item.details?.source_group_id === group.group_id,
     );
     if (direct) return direct;
     const groupPaths = new Set(group.files.map((file) => file.path.toLocaleLowerCase().replace(/\\/g, "/")));
-    return reviewState.data.items.find(
+    return reviewItems.find(
       (item) =>
         item.item_type === itemType
         && (item.affected_paths ?? []).some((path) => groupPaths.has(path.toLocaleLowerCase().replace(/\\/g, "/"))),
@@ -44,149 +72,208 @@ export function DuplicatesPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Duplicate Analysis"
+        eyebrow="Duplicate Detection"
+        title="Duplicates"
         description="Exact duplicates and likely duplicate clusters, with preferred-copy recommendations and reclaimable space summaries."
+        actions={
+          <Button
+            tone="primary"
+            onClick={() => {
+              const firstExact = report.exact_duplicates[0];
+              if (firstExact) openReview(firstExact, "exact_duplicate_group");
+            }}
+            disabled={report.exact_duplicates.length === 0}
+          >
+            Plan in Review Inbox →
+          </Button>
+        }
       />
-      <PageQueryStateNotice {...toQueryNoticeState(duplicatesState)} />
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <Panel className="p-6">
-          <p className="text-sm font-medium text-slate-400">Total Reclaimable</p>
-          <div className="mt-2 flex items-baseline gap-2">
-            <h3 className="text-3xl font-bold text-primary">{formatBytes(reclaimable)}</h3>
-            <span className="text-sm font-bold text-emerald-400">review only</span>
-          </div>
-        </Panel>
-        <Panel className="p-6">
-          <p className="text-sm font-medium text-slate-400">Duplicate Groups</p>
-          <h3 className="mt-2 text-3xl font-bold text-slate-100">{formatNumber(report.summary.exact_group_count + report.summary.likely_group_count)}</h3>
-        </Panel>
-        <Panel className="border-l-4 border-l-secondary p-6">
-          <p className="text-sm font-medium text-slate-400">System Health Impact</p>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="material-symbols-outlined text-secondary">verified_user</span>
-            <h3 className="text-xl font-bold text-slate-100">{totalGroups > 0 ? "Needs Review" : "Clean"}</h3>
-          </div>
-        </Panel>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <MetricCard
+          label="Total Reclaimable"
+          value={formatBytes(reclaimable)}
+          icon="data_saver_on"
+          accent={<Chip tone="success">Review Only</Chip>}
+          meta={<p className="font-sans text-[11px] text-primary-subtle">Space reclaimable via non-destructive quarantine</p>}
+        />
+        <MetricCard
+          label="Duplicate Sets"
+          value={formatNumber(totalGroups)}
+          icon="copy_all"
+          meta={
+            <p className="font-sans text-[11px] text-primary-subtle">
+              Exact: <span className="font-mono font-semibold text-primary">{report.summary.exact_group_count}</span> • Likely: <span className="font-mono font-semibold text-amber-400">{report.summary.likely_group_count}</span>
+            </p>
+          }
+        />
+        <MetricCard
+          label="Triage Status"
+          value={totalGroups > 0 ? "Action Required" : "Clean"}
+          icon="checklist"
+          accent={
+            <Chip tone={totalGroups > 0 ? "warning" : "success"}>
+              {totalGroups > 0 ? `${totalGroups} Unresolved` : "Optimal"}
+            </Chip>
+          }
+          meta={<p className="font-sans text-[11px] text-primary-subtle">Operator confirmation required before execution</p>}
+        />
       </div>
-      <div className="flex gap-8 border-b border-primary/10">
+
+      <div className="flex flex-wrap gap-2 border-b border-white/[0.07] pb-3">
         <button
           type="button"
+          aria-pressed={activeTab === "exact"}
           onClick={() => setActiveTab("exact")}
-          className={`flex items-center gap-2 border-b-2 px-2 pb-4 font-bold ${activeTab === "exact" ? "border-primary text-primary" : "border-transparent text-slate-400"}`}
+          className={`flex items-center gap-2 rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
+            activeTab === "exact"
+              ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
+              : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
+          }`}
         >
-          <span className="material-symbols-outlined text-sm">copy_all</span>
-          Exact Duplicates ({report.summary.exact_group_count})
+          <Icon name="copy_all" className="text-sm" />
+          <span>Exact Duplicates</span>
+          <span className="rounded-[2px] bg-white/[0.06] px-1.5 py-0.2 font-mono text-[10px] text-primary-muted">
+            {report.summary.exact_group_count}
+          </span>
         </button>
         <button
           type="button"
+          aria-pressed={activeTab === "likely"}
           onClick={() => setActiveTab("likely")}
-          className={`flex items-center gap-2 border-b-2 px-2 pb-4 font-bold ${activeTab === "likely" ? "border-secondary text-secondary" : "border-transparent text-slate-400"}`}
+          className={`flex items-center gap-2 rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
+            activeTab === "likely"
+              ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
+              : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
+          }`}
         >
-          <span className="material-symbols-outlined text-sm">difference</span>
-          Likely Duplicates ({report.summary.likely_group_count})
+          <Icon name="difference" className="text-sm" />
+          <span>Likely Duplicates</span>
+          <span className="rounded-[2px] bg-white/[0.06] px-1.5 py-0.2 font-mono text-[10px] text-primary-muted">
+            {report.summary.likely_group_count}
+          </span>
         </button>
       </div>
-      <div className="space-y-6">
+
+      <div className="space-y-4">
         {activeGroups.length === 0 ? (
           <EmptyState
             title={`No ${activeTab} duplicate groups found`}
             description={`When ${activeTab} duplicate clusters are detected, preferred-copy recommendations and supporting evidence will appear here.`}
           />
         ) : null}
+
         {activeTab === "exact" ? report.exact_duplicates.map((group) => {
           const reclaim = group.reclaimable_bytes ?? group.files.slice(1).reduce((sum, item) => sum + item.file_size_bytes, 0);
           return (
             <Panel key={group.group_id} className="overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-primary/10 bg-primary/5 p-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex size-12 items-center justify-center rounded-lg bg-secondary/20 text-secondary">
-                    <span className="material-symbols-outlined">movie</span>
+              <div className="flex flex-col gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-[2px] border border-white/[0.08] bg-surface text-accent">
+                    <Icon name="audio_file" className="text-sm" />
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-100">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
-                    <p className="text-xs text-slate-400">{group.files.length} occurrences found across the library</p>
+                  <div className="min-w-0">
+                    <h4 className="truncate font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
+                    <p className="font-editorial text-xs italic text-primary-subtle">{group.files.length} redundant copies identified across library</p>
                   </div>
                 </div>
-                <div className="flex gap-6">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Confidence</p>
-                    <p className="text-xs font-bold text-primary">100%</p>
+                <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                  <div className="text-left sm:text-right">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Confidence</p>
+                    <p className="font-mono text-xs font-medium text-accent">100% (Bit-Exact)</p>
                   </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Potential Saving</p>
-                    <p className="text-sm font-bold text-emerald-400">{formatBytes(reclaim)}</p>
+                  <div className="text-left sm:text-right">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reclaimable</p>
+                    <p className="font-mono text-xs font-medium text-emerald-400">{formatBytes(reclaim)}</p>
                   </div>
-                  <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => openReview(group, "exact_duplicate_group")}>
-                    Open Review
+                  <Button tone="secondary" className="px-3 py-1 text-xs" onClick={() => openReview(group, "exact_duplicate_group")}>
+                    Triage →
                   </Button>
                 </div>
               </div>
-              <div className="space-y-3 p-4">
-                <div className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Preferred Copy</p>
-                    <div className="mt-2">
-                      <PathBlock value={group.preferred.path} tone="success" />
+
+              <div className="space-y-3 p-5">
+                <div className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/[0.03] p-3.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Chip tone="success">Preferred Copy</Chip>
+                      <span className="font-editorial text-xs italic text-primary-subtle">
+                        {group.preferred.reasons.join(" • ")}
+                      </span>
                     </div>
                   </div>
-                  <p className="max-w-xs text-right text-xs font-bold text-slate-400">{group.preferred.reasons.join(" • ")}</p>
+                  <div className="mt-2.5">
+                    <PathBlock value={group.preferred.path} tone="success" />
+                  </div>
                 </div>
-                <div className="space-y-2 pl-4">
-                  {group.files
-                    .filter((file) => file.path !== group.preferred.path)
-                    .map((file) => (
-                      <div key={file.path} className="flex items-center justify-between gap-3 rounded bg-background-dark/50 p-2">
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span className="material-symbols-outlined text-sm text-slate-500">delete_sweep</span>
-                          <div className="min-w-0 flex-1">
-                            <PathBlock value={file.path} />
+
+                <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">
+                    Redundant Copies ({group.files.length - 1})
+                  </p>
+                  <div className="divide-y divide-white/[0.05] rounded-[3px] border border-white/[0.06] bg-surface-low/50">
+                    {group.files
+                      .filter((file) => file.path !== group.preferred.path)
+                      .map((file) => (
+                        <div key={file.path} className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                            <Icon name="delete_sweep" className="shrink-0 text-sm text-primary-subtle/70" />
+                            <div className="min-w-0 flex-1">
+                              <PathBlock value={file.path} />
+                            </div>
                           </div>
+                          <Button tone="ghost" className="shrink-0 self-end px-2 py-1 text-[11px] sm:self-auto" onClick={() => openReview(group, "exact_duplicate_group")}>
+                            Review Choice
+                          </Button>
                         </div>
-                        <Button tone="ghost" className="shrink-0 px-2 py-1 text-[10px]" onClick={() => openReview(group, "exact_duplicate_group")}>Review Choice</Button>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
               </div>
             </Panel>
           );
         }) : null}
+
         {activeTab === "likely" ? report.likely_duplicates.map((group) => (
-          <Panel key={group.group_id} className="overflow-hidden border-l-2 border-l-secondary/50 opacity-95">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-secondary/10 bg-secondary/5 p-4">
-              <div>
-                <h4 className="font-bold text-slate-100">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
-                <p className="text-xs text-slate-400">Similar content detected with metadata mismatch</p>
+          <Panel key={group.group_id} className="overflow-hidden border-l-2 border-l-accent/70">
+            <div className="flex flex-col gap-4 border-b border-white/[0.07] bg-surface-low/80 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h4 className="truncate font-sans text-xs font-semibold text-primary">{group.files[0]?.path.split(/[\\/]/).pop()}</h4>
+                <p className="font-editorial text-xs italic text-primary-subtle">Similar content detected with metadata or tag variance</p>
               </div>
-              <div className="flex gap-6">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Confidence</p>
-                  <p className="text-xs font-bold text-secondary">{((group.confidence ?? 0) * 100).toFixed(0)}%</p>
+              <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                <div className="text-left sm:text-right">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Match Score</p>
+                  <p className="font-mono text-xs font-medium text-accent">{((group.confidence ?? 0) * 100).toFixed(0)}%</p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500">Preferred Copy</p>
-                  <p className="text-xs font-bold text-slate-300">{group.preferred.path.split(/[\\/]/).pop()}</p>
+                <div className="text-left sm:text-right">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Preferred</p>
+                  <p className="max-w-[160px] truncate font-mono text-xs font-medium text-primary">{group.preferred.path.split(/[\\/]/).pop()}</p>
                 </div>
-                <Button tone="secondary" className="px-3 py-2 text-xs" onClick={() => openReview(group, "likely_duplicate_group")}>
-                  Open Review
+                <Button tone="secondary" className="px-3 py-1 text-xs" onClick={() => openReview(group, "likely_duplicate_group")}>
+                  Inspect →
                 </Button>
               </div>
             </div>
-            <div className="p-4">
-              <p className="break-words text-xs text-slate-400">{(group.reasons ?? []).join(", ")}</p>
+            <div className="p-5">
+              <p className="font-editorial text-xs italic text-primary-subtle">{(group.reasons ?? []).join(", ")}</p>
             </div>
           </Panel>
         )) : null}
       </div>
-      <Panel className="overflow-hidden bg-gradient-to-br from-secondary/20 via-background-dark to-primary/10 p-8">
-        <div className="flex flex-col items-center justify-between gap-8 md:flex-row">
+
+      <Panel className="border border-white/[0.08] bg-surface-low p-6">
+        <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
           <div>
-            <h2 className="font-display text-2xl font-bold text-white">Ready to reclaim your space?</h2>
-            <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Exact duplicates can produce quarantine-first plans in the Review Inbox. Likely matches remain manual-review only.
+            <h2 className="font-display text-base font-semibold tracking-wide text-primary">Reclaim Library Space</h2>
+            <p className="mt-1 max-w-2xl font-sans text-xs text-primary-muted">
+              Exact duplicates generate quarantine-first plans in the Review Inbox. Likely matches remain manual-review only to safeguard audio fidelity.
             </p>
           </div>
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <Button tone="ghost" onClick={() => setActiveTab("likely")} disabled={report.likely_duplicates.length === 0}>Inspect Likely Matches</Button>
+          <div className="flex flex-col gap-2.5 sm:flex-row">
+            <Button tone="secondary" onClick={() => setActiveTab("likely")} disabled={report.likely_duplicates.length === 0}>
+              Inspect Likely Matches
+            </Button>
             <Button
               tone="primary"
               onClick={() => {
@@ -195,7 +282,7 @@ export function DuplicatesPage() {
               }}
               disabled={report.exact_duplicates.length === 0}
             >
-              Plan in Review Inbox
+              Plan in Review Inbox →
             </Button>
           </div>
         </div>

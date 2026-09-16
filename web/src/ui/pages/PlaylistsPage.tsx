@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { useCreatePlaylistMutation, usePlaylistsQuery, useRefreshPlaylistMutation } from "../../lib/hooks";
-import { mockPlaylistsResponse } from "../../lib/mock-data";
-import { resolveQueryData, toQueryNoticeState } from "../../lib/query-state";
 import { useUrlBackedSelection } from "../../lib/url-selection";
-import { ActionBanner, Button, Chip, Drawer, EmptyState, Modal, PageHeader, PageQueryStateNotice, Panel, PathBlock, formatDate } from "../components";
+import { ActionBanner, Button, Chip, Drawer, EmptyState, Modal, PageHeader, Panel, PathBlock, formatDate } from "../components";
+import { ApiUnavailableState } from "../feedback";
 import { SplitScreen } from "../shell";
 
 type PlaylistFilter = "all" | "recent" | "never";
@@ -12,27 +11,56 @@ export function PlaylistsPage() {
   const playlistsQuery = usePlaylistsQuery();
   const createMutation = useCreatePlaylistMutation();
   const refreshMutation = useRefreshPlaylistMutation();
-  const playlistsState = resolveQueryData(playlistsQuery, mockPlaylistsResponse);
-  const response = playlistsState.data;
-  const usingMock = playlistsState.usingMock;
   const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [maxTracks, setMaxTracks] = useState("25");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
-  const filtered = useMemo(() => response.items.filter((item) => {
+
+  const response = playlistsQuery.data;
+  const usingMock = false;
+  const items = useMemo(() => response?.items ?? [], [response?.items]);
+  const filtered = useMemo(() => items.filter((item) => {
     if (playlistFilter === "all") return true;
     if (playlistFilter === "never") return !item.last_refreshed_at;
     if (!item.last_refreshed_at) return false;
     return Date.now() - Date.parse(item.last_refreshed_at) <= 7 * 24 * 60 * 60 * 1000;
-  }), [playlistFilter, response.items]);
+  }), [playlistFilter, items]);
   const { selected, selectById } = useUrlBackedSelection({
     items: filtered,
     param: "playlist",
     idKey: "playlist_id",
   });
   const busy = createMutation.isPending || refreshMutation.isPending;
+
+  if (playlistsQuery.isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Playlists"
+          title="Saved Playlists"
+          description="Dynamic collections synthesized from natural-language queries and refreshed against the current local library."
+        />
+        <ApiUnavailableState contextLabel="Saved Playlists" />
+      </div>
+    );
+  }
+
+  if (playlistsQuery.isLoading || !response) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Playlists"
+          title="Saved Playlists"
+          description="Dynamic collections synthesized from natural-language queries and refreshed against the current local library."
+        />
+        <Panel className="p-8 text-center text-sm text-slate-400">
+          Loading saved playlists from local API…
+        </Panel>
+      </div>
+    );
+  }
 
   async function handleCreate() {
     const parsedMaxTracks = Number.parseInt(maxTracks, 10);
@@ -85,7 +113,6 @@ export function PlaylistsPage() {
           </>
         }
       />
-      <PageQueryStateNotice {...toQueryNoticeState(playlistsState)} />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       <div className="flex flex-wrap gap-3">
         {([
@@ -123,33 +150,30 @@ export function PlaylistsPage() {
                     className="block w-full text-left"
                     onClick={() => selectById(item.playlist_id)}
                   >
-                    <Panel className={`p-5 transition-all ${active ? "border-primary/40 shadow-[0_0_20px_rgba(37,226,244,0.08)]" : "hover:border-primary/30"}`}>
+                    <Panel className={`p-5 transition-all ${active ? "border-accent/40 bg-surface-raised" : "hover:border-white/[0.12]"}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                          <p className="mb-1 truncate font-mono text-[10px] text-primary/60">QUERY: {item.query}</p>
-                          <h3 className="truncate font-display text-xl font-bold text-slate-100">{item.name}</h3>
+                          <p className="mb-1 truncate font-mono text-[10px] text-accent/80">QUERY: {item.query}</p>
+                          <h3 className="truncate font-sans text-base font-semibold text-primary">{item.name}</h3>
                         </div>
                         <div className="flex shrink-0 gap-2">
-                          <span className="rounded-lg bg-primary/10 p-2 text-primary">
-                            <span className="material-symbols-outlined text-xl">play_arrow</span>
-                          </span>
-                          <span className="p-2 text-slate-500">
-                            <span className="material-symbols-outlined">more_vert</span>
+                          <span className="rounded-[2px] bg-accent/10 p-1.5 text-accent">
+                            <span className="material-symbols-outlined text-lg">play_arrow</span>
                           </span>
                         </div>
                       </div>
-                      <div className="mt-5 flex flex-wrap items-center gap-6 border-t border-primary/5 pt-4">
+                      <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/[0.05] pt-3">
                         <div className="flex flex-col">
-                          <span className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Track Count</span>
-                          <span className="font-mono text-sm text-slate-200">{item.track_count} items</span>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Track Count</span>
+                          <span className="font-mono text-xs text-primary">{item.track_count} items</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Last Refreshed</span>
-                          <span className="font-mono text-sm text-slate-200">{formatDate(item.last_refreshed_at)}</span>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Last Refreshed</span>
+                          <span className="font-mono text-xs text-primary">{formatDate(item.last_refreshed_at)}</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Profile</span>
-                          <Chip tone="primary">{item.profile}</Chip>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Profile</span>
+                          <Chip tone="default">{item.profile}</Chip>
                         </div>
                       </div>
                     </Panel>
@@ -171,59 +195,59 @@ export function PlaylistsPage() {
           >
             {selected ? (
               <>
-                <div className="rounded-xl border border-primary/10 bg-primary/5 p-6">
-                  <div className="mb-4 flex items-center justify-between">
-                    <Chip tone="primary">Engine Analysis</Chip>
-                    <span className="font-mono text-[10px] text-slate-400">{selected.playlist_id}</span>
+                <div className="rounded-[3px] border border-white/[0.07] bg-surface-low/80 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <Chip tone="primary">Dynamic Playlist</Chip>
+                    <span className="font-mono text-[10px] text-primary-subtle">{selected.playlist_id}</span>
                   </div>
-                  <h3 className="font-display text-2xl font-bold text-slate-100">{selected.name}</h3>
-                  <p className="mt-2 text-sm text-slate-400">
+                  <h3 className="font-sans text-base font-semibold text-primary">{selected.name}</h3>
+                  <p className="mt-1 font-editorial text-xs italic text-primary-subtle">
                     Comparing saved manifest against the latest local-library refresh.
                   </p>
                 </div>
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm text-primary">queue_music</span>
-                    <h4 className="text-xs font-bold uppercase tracking-[0.24em] text-primary">
+                  <div className="mb-2.5 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm text-accent">queue_music</span>
+                    <h4 className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-accent">
                       Current Tracks ({selected.latest_tracks.length})
                     </h4>
                   </div>
                   {selected.latest_tracks.length > 0 ? (
                     <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                       {selected.latest_tracks.slice(0, 50).map((track, index) => (
-                        <div key={`${track.path}-${index}`} className="rounded-lg border border-primary/10 bg-background-dark/40 p-3">
+                        <div key={`${track.path}-${index}`} className="rounded-[3px] border border-white/[0.06] bg-surface-low/50 p-2.5">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-slate-200">{track.title || track.path.split(/[\\/]/).pop()}</p>
-                              <p className="mt-1 truncate text-xs text-slate-500">{track.artist || "Unknown artist"}</p>
+                              <p className="truncate font-sans text-xs font-medium text-primary">{track.title || track.path.split(/[\\/]/).pop()}</p>
+                              <p className="mt-0.5 truncate font-editorial text-xs italic text-primary-subtle">{track.artist || "Unknown artist"}</p>
                             </div>
-                            <Chip tone="primary">{track.score.toFixed(1)}</Chip>
+                            <Chip tone="default">{track.score.toFixed(1)}</Chip>
                           </div>
                           <div className="mt-2"><PathBlock value={track.path} /></div>
                         </div>
                       ))}
                       {selected.latest_tracks.length > 50 ? (
-                        <p className="text-center text-xs text-slate-500">Showing the first 50 tracks.</p>
+                        <p className="text-center font-mono text-xs text-primary-subtle">Showing the first 50 tracks.</p>
                       ) : null}
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-border-dark bg-background-dark/40 px-4 py-3 text-sm text-slate-500">
+                    <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-4 py-3 text-xs text-primary-subtle">
                       Refresh this playlist to generate its current track list.
                     </div>
                   )}
                 </div>
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-2.5 flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm text-emerald-400">add_circle</span>
-                    <h4 className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">
+                    <h4 className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-400">
                       Added to Collection ({((selected.latest_refresh_diff.tracks_added as string[] | undefined) ?? []).length})
                     </h4>
                   </div>
                   {(((selected.latest_refresh_diff.tracks_added as string[] | undefined) ?? []).length > 0) ? (
                     <div className="space-y-2">
                       {(((selected.latest_refresh_diff.tracks_added as string[] | undefined) ?? []).slice(0, 3)).map((path) => (
-                        <div key={path} className="rounded-lg border border-emerald-500/10 bg-emerald-500/5 p-3">
-                          <p className="text-sm font-medium text-slate-200">{path.split(/[\\/]/).pop()}</p>
+                        <div key={path} className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/[0.03] p-2.5">
+                          <p className="font-sans text-xs font-medium text-primary">{path.split(/[\\/]/).pop()}</p>
                           <div className="mt-2">
                             <PathBlock value={path} tone="success" />
                           </div>
@@ -231,21 +255,21 @@ export function PlaylistsPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-border-dark bg-background-dark/40 px-4 py-3 text-sm text-slate-500">No tracks were added on the latest refresh.</div>
+                    <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-4 py-3 text-xs text-primary-subtle">No tracks were added on the latest refresh.</div>
                   )}
                 </div>
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-2.5 flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm text-rose-400">do_not_disturb_on</span>
-                    <h4 className="text-xs font-bold uppercase tracking-[0.24em] text-rose-400">
+                    <h4 className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-400">
                       Removed from Collection ({((selected.latest_refresh_diff.tracks_removed as string[] | undefined) ?? []).length})
                     </h4>
                   </div>
                   {(((selected.latest_refresh_diff.tracks_removed as string[] | undefined) ?? []).length > 0) ? (
                     <div className="space-y-2">
                       {(((selected.latest_refresh_diff.tracks_removed as string[] | undefined) ?? []).slice(0, 3)).map((path) => (
-                        <div key={path} className="rounded-lg border border-rose-500/10 bg-rose-500/5 p-3 opacity-70">
-                          <p className="text-sm font-medium text-slate-400 line-through">{path.split(/[\\/]/).pop()}</p>
+                        <div key={path} className="rounded-[3px] border border-rose-500/20 bg-rose-500/[0.03] p-2.5 opacity-70">
+                          <p className="font-sans text-xs font-medium text-primary-muted line-through">{path.split(/[\\/]/).pop()}</p>
                           <div className="mt-2">
                             <PathBlock value={path} tone="danger" strike />
                           </div>
@@ -253,19 +277,19 @@ export function PlaylistsPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-border-dark bg-background-dark/40 px-4 py-3 text-sm text-slate-500">No tracks dropped out on the latest refresh.</div>
+                    <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-4 py-3 text-xs text-primary-subtle">No tracks dropped out on the latest refresh.</div>
                   )}
                 </div>
-                <div className="rounded-xl border border-primary/10 bg-background-dark/40 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Refresh Summary</p>
-                  <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
+                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3.5">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Refresh Summary</p>
+                  <div className="mt-2.5 grid grid-cols-2 gap-3 text-xs">
                     <div>
-                      <p className="text-slate-500">Track Count Delta</p>
-                      <p className="font-bold text-primary">{String(selected.latest_refresh_diff.track_count_delta ?? 0)}</p>
+                      <p className="text-primary-subtle">Track Count Delta</p>
+                      <p className="font-mono font-semibold text-accent">{String(selected.latest_refresh_diff.track_count_delta ?? 0)}</p>
                     </div>
                     <div>
-                      <p className="text-slate-500">Duration Delta</p>
-                      <p className="font-bold text-slate-200">{String(selected.latest_refresh_diff.estimated_duration_delta_seconds ?? 0)} sec</p>
+                      <p className="text-primary-subtle">Duration Delta</p>
+                      <p className="font-mono font-semibold text-primary">{String(selected.latest_refresh_diff.estimated_duration_delta_seconds ?? 0)} sec</p>
                     </div>
                   </div>
                 </div>
@@ -305,38 +329,38 @@ export function PlaylistsPage() {
       >
         <div className="space-y-4">
           <label className="block">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Name</span>
+            <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Name</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
               maxLength={120}
               placeholder="Night Drive"
-              className="w-full rounded-lg border border-border-dark bg-background-dark px-3 py-2 text-sm text-slate-200 outline-none focus:border-primary"
+              className="w-full rounded-[3px] border border-white/[0.08] bg-surface-low px-3 py-2 font-sans text-xs text-primary outline-none focus:border-accent"
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Query</span>
+            <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Query</span>
             <textarea
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               maxLength={500}
               rows={4}
               placeholder="dark electronic under 5 minutes no vocals"
-              className="w-full resize-none rounded-lg border border-border-dark bg-background-dark px-3 py-2 text-sm text-slate-200 outline-none focus:border-primary"
+              className="w-full resize-none rounded-[3px] border border-white/[0.08] bg-surface-low px-3 py-2 font-sans text-xs text-primary outline-none focus:border-accent"
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Maximum Tracks</span>
+            <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Maximum Tracks</span>
             <input
               type="number"
               min={1}
               max={500}
               value={maxTracks}
               onChange={(event) => setMaxTracks(event.target.value)}
-              className="w-full rounded-lg border border-border-dark bg-background-dark px-3 py-2 text-sm text-slate-200 outline-none focus:border-primary"
+              className="w-full rounded-[3px] border border-white/[0.08] bg-surface-low px-3 py-2 font-sans text-xs text-primary outline-none focus:border-accent"
             />
           </label>
-          <p className="text-xs text-slate-500">A refreshed M3U file is exported beside the saved playlist data.</p>
+          <p className="font-editorial text-xs italic text-primary-subtle">A refreshed M3U file is exported beside the saved playlist data.</p>
         </div>
       </Modal>
     </div>

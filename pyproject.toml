@@ -1,6 +1,6 @@
 [project]
 name = "nyxcore"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first music library review and cleanup toolkit"
 readme = "README.md"
 requires-python = ">=3.11"

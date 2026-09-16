@@ -18,18 +18,16 @@ from rich.table import Table
 from nyxcore.action_plan.service import (
     ActionPlanReport,
     AppliedPlanResult,
-    apply_action_plan_report,
     build_action_plan_report,
+    execute_reviewed_action_plan,
 )
 from nyxcore.action_plan.ledger import (
     OperationBatch,
     OperationLedger,
-    append_operation_batch,
     find_batch,
     load_operation_ledger,
-    save_operation_ledger,
-    undo_operation_batch,
 )
+from nyxcore.action_plan.lifecycle import inspect_recorded_batch, recover_recorded_batch, reverse_recorded_batch
 from nyxcore.audio.backends.base import AudioBackend
 from nyxcore.audio.backends.dummy_backend import DummyBackend
 from nyxcore.audio.cache import AnalysisCache
@@ -701,8 +699,9 @@ def _write_playlist_md(out_dir: Path, report: PlaylistReport, *, config_meta: di
         lines.append("| 0.0 | _None_ | _None_ |")
     else:
         for track in report.ranked_tracks:
+            escaped_path = track.path.replace('|', r'\|')
             lines.append(
-                f"| {track.score:.3f} | `{track.path.replace('|', '\\|')}` | `{', '.join(track.reasons) or 'none'}` |"
+                f"| {track.score:.3f} | `{escaped_path}` | `{', '.join(track.reasons) or 'none'}` |"
             )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -988,8 +987,9 @@ def _write_normalize_md(out_dir: Path, records: list[NormalizePreviewRecord]) ->
                 f"album={rec.proposed_album or 'UNKNOWN'}"
             )
             reasons = ", ".join(rec.reasons) if rec.reasons else "none"
+            escaped_path = rec.path.replace('|', r'\|')
             lines.append(
-                f"| `{rec.path.replace('|', '\\|')}` | `{current}` | `{proposed}` | {rec.confidence:.2f} | `{reasons}` |"
+                f"| `{escaped_path}` | `{current}` | `{proposed}` | {rec.confidence:.2f} | `{reasons}` |"
             )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -1056,8 +1056,9 @@ def _write_apply_plan(path: Path, selected: list[dict], min_confidence: float) -
         lines.append("| _None_ | _None_ | _None_ | _None_ | 0.0 |")
     else:
         for rec in selected[:100]:
+            escaped_path = str(rec['path']).replace('|', r'\|')
             lines.append(
-                f"| `{str(rec['path']).replace('|', '\\|')}` | `{rec.get('proposed_title') or 'UNKNOWN'}` | "
+                f"| `{escaped_path}` | `{rec.get('proposed_title') or 'UNKNOWN'}` | "
                 f"`{rec.get('proposed_artist') or 'UNKNOWN'}` | `{rec.get('proposed_album') or 'UNKNOWN'}` | "
                 f"{float(rec.get('confidence', 0.0)):.2f} |"
             )
@@ -1841,25 +1842,69 @@ def review_plan_cmd(
 @app.command("apply-review-plan")
 def apply_review_plan_cmd(
     plan: Path = typer.Argument(..., help="Path to review_plan.json"),
+    music: Path = typer.Option(..., "--music", help="Configured music-library root"),
     out: Path | None = typer.Option(None, "--out", help="Output folder for apply result reports"),
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
     backup_dir: Path | None = typer.Option(None, "--backup-dir", help="Optional backup directory for low-risk file writes"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    profile: str | None = typer.Option(None, "--profile", help="Built-in tuning profile"),
 ) -> None:
     if not plan.exists():
         raise typer.BadParameter(f"Plan file does not exist: {plan}")
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    music = music.resolve()
     plan_payload = json.loads(plan.read_text(encoding="utf-8"))
-    report = ActionPlanReport.from_dict(plan_payload)
-    output_dir = out or plan.parent
+    declared_source = plan_payload.get("source")
+    if declared_source is None or Path(str(declared_source)).resolve() != music:
+        raise typer.BadParameter("Plan source does not match --music; regenerate the review plan")
+    requested_report = ActionPlanReport.from_dict(plan_payload)
+    output_dir = (out or plan.parent).resolve()
     ensure_out_dir(output_dir)
-    review_state_path = review_state or _default_review_state_path(output_dir)
-    history_path = history or _default_history_path(output_dir)
+    review_state_path = (review_state or _default_review_state_path(output_dir)).resolve()
+    history_path = (history or _default_history_path(output_dir)).resolve()
+    for label, path in (("review state", review_state_path), ("history", history_path)):
+        try:
+            path.relative_to(output_dir)
+        except ValueError as exc:
+            raise typer.BadParameter(f"{label} path must stay inside --out") from exc
+    app_config = _load_app_config(config, profile)
     review_state_store = load_review_state(review_state_path)
-    results = apply_action_plan_report(report, review_state=review_state_store, backup_dir=backup_dir)
-    save_review_state(review_state_path, review_state_store)
-    ledger = load_operation_ledger(history_path)
-    batch = append_operation_batch(ledger, plan_report=report, results=results)
-    save_operation_ledger(history_path, ledger)
+    records, refresh_summary = _load_library_records(
+        music,
+        incremental=False,
+        state_path=_default_state_path(output_dir),
+    )
+    review_report = _build_review_report(
+        music,
+        records,
+        refresh_summary=refresh_summary,
+        app_config=app_config,
+        review_state_store=review_state_store,
+        max_items=None,
+        min_priority=None,
+        include_types=None,
+        exclude_types=None,
+        include_ignored=True,
+        include_snoozed=True,
+        include_resolved=True,
+        only_unresolved=False,
+    )
+    try:
+        report, results, batch = execute_reviewed_action_plan(
+            music,
+            records,
+            review_report,
+            requested_report,
+            review_state=review_state_store,
+            review_state_path=review_state_path,
+            ledger_path=history_path,
+            backup_dir=backup_dir,
+            workspace_root=output_dir,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     json_path = _write_applied_plan_json(output_dir, results)
     md_path = _write_applied_plan_md(output_dir, results)
     table = Table(title="Applied Review Plan Summary")
@@ -1902,68 +1947,131 @@ def show_history_cmd(
 def _restore_or_undo_history_batch(
     *,
     batch_id: str,
+    music: Path,
     out: Path,
     history: Path | None,
     review_state: Path | None,
     alternate_restore_dir: Path | None,
     target_path: str | None,
+    stale_lock_token: str | None,
 ) -> None:
-    history_path = history or _default_history_path(out)
-    review_state_path = review_state or _default_review_state_path(out)
-    ledger = load_operation_ledger(history_path)
-    batch = find_batch(ledger, batch_id)
-    if batch is None:
-        raise typer.BadParameter(f"History batch not found: {batch_id}")
-    review_state_store = load_review_state(review_state_path)
-    undo_operation_batch(
-        batch,
-        review_state=review_state_store,
-        alternate_restore_dir=alternate_restore_dir,
-        target_path=target_path,
-    )
-    save_review_state(review_state_path, review_state_store)
-    save_operation_ledger(history_path, ledger)
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    out = out.resolve()
+    history_path = (history or _default_history_path(out)).resolve()
+    review_state_path = (review_state or _default_review_state_path(out)).resolve()
+    for label, path in (("history", history_path), ("review state", review_state_path)):
+        try:
+            path.relative_to(out)
+        except ValueError as exc:
+            raise typer.BadParameter(f"{label} path must stay inside --out") from exc
+    try:
+        batch, _changed = reverse_recorded_batch(
+            ledger_path=history_path,
+            review_state_path=review_state_path,
+            batch_id=batch_id,
+            library_root=music.resolve(),
+            workspace_root=out,
+            alternate_restore_dir=alternate_restore_dir,
+            target_path=target_path,
+            stale_lock_token=stale_lock_token,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     console.print(_history_detail_table(batch))
 
 
 @app.command("restore-review-action")
 def restore_review_action_cmd(
     batch_id: str = typer.Argument(..., help="History batch id to restore"),
+    music: Path = typer.Option(..., "--music", help="Configured music-library root"),
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
     history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Restore only one recorded path from the batch"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
 ) -> None:
     """Restore a recorded history batch using the reversible operation ledger."""
     _restore_or_undo_history_batch(
         batch_id=batch_id,
+        music=music,
         out=out,
         history=history,
         review_state=review_state,
         alternate_restore_dir=alternate_restore_dir,
         target_path=target_path,
+        stale_lock_token=stale_lock_token,
     )
 
 
 @app.command("undo-review-action")
 def undo_review_action_cmd(
     batch_id: str = typer.Argument(..., help="History batch id to undo"),
+    music: Path = typer.Option(..., "--music", help="Configured music-library root"),
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
     history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Undo only one recorded path from the batch"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
 ) -> None:
     """Compatibility alias for the same history-batch reversal path."""
     _restore_or_undo_history_batch(
         batch_id=batch_id,
+        music=music,
         out=out,
         history=history,
         review_state=review_state,
         alternate_restore_dir=alternate_restore_dir,
         target_path=target_path,
+        stale_lock_token=stale_lock_token,
     )
+
+
+@app.command("recover-review-action")
+def recover_review_action_cmd(
+    batch_id: str = typer.Argument(..., help="History batch id to inspect or recover"),
+    music: Path = typer.Option(..., "--music", help="Configured music-library root"),
+    out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
+    history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
+    action: str = typer.Option("inspect", "--action", help="inspect, finalize, or abort"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
+) -> None:
+    if not music.exists() or not music.is_dir():
+        raise typer.BadParameter(f"Music directory does not exist: {music}")
+    out = out.resolve()
+    history_path = (history or _default_history_path(out)).resolve()
+    try:
+        history_path.relative_to(out)
+    except ValueError as exc:
+        raise typer.BadParameter("history path must stay inside --out") from exc
+    try:
+        if action == "inspect":
+            batch, assessments = inspect_recorded_batch(
+                history_path,
+                batch_id,
+                library_root=music.resolve(),
+                workspace_root=out,
+            )
+        elif action in {"finalize", "abort"}:
+            batch, assessments = recover_recorded_batch(
+                ledger_path=history_path,
+                batch_id=batch_id,
+                library_root=music.resolve(),
+                workspace_root=out,
+                action=action,
+                stale_lock_token=stale_lock_token,
+            )
+        else:
+            raise ValueError("--action must be one of: inspect, finalize, abort")
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print_json(data={
+        "batch_id": batch.batch_id,
+        "lifecycle_state": batch.lifecycle_state,
+        "assessments": [assessment.to_dict() for assessment in assessments],
+    })
 
 
 @app.command("watch")
@@ -2070,6 +2178,10 @@ def apply(
         help="Limit number of files to process (for safe staged apply).",
     ),
 ) -> None:
+    if not dry_run:
+        raise typer.BadParameter(
+            "Direct metadata apply is unavailable in this release; use review -> review-plan -> apply-review-plan"
+        )
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     if not in_.exists():
@@ -2184,6 +2296,10 @@ def rename_cmd(
     llm: bool = typer.Option(True, "--llm/--no-llm", help="Allow optional DeepSeek refinement for messy names"),
     model: str = typer.Option("deepseek-chat", "--model", help="DeepSeek model for optional LLM cleanup"),
 ) -> None:
+    if not dry_run:
+        raise typer.BadParameter(
+            "Direct rename apply is unavailable in this release; use review -> review-plan -> apply-review-plan"
+        )
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     if limit < 0:
@@ -2308,6 +2424,10 @@ def rename_undo(
     force: bool = typer.Option(False, "--force", help="Force undo when old_path already exists"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview undo actions only"),
 ) -> None:
+    if not dry_run:
+        raise typer.BadParameter(
+            "Legacy rename undo is unavailable in this release; use restore-review-action with recorded history"
+        )
     if not map_path.exists():
         raise typer.BadParameter(f"Rename map does not exist: {map_path}")
     if limit < 0:
@@ -2777,6 +2897,8 @@ def apply_ai(
     backup_dir: Path | None = typer.Option(None, "--backup-dir", help="Optional backup directory"),
     force: bool = typer.Option(False, "--force", help="Write even when NYX_* TXXX fields already exist"),
 ) -> None:
+    if not dry_run:
+        raise typer.BadParameter("AI metadata mutation is unavailable in this experimental release")
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     if not in_.exists():
@@ -2902,6 +3024,8 @@ def apply_judge(
     backup_dir: Path | None = typer.Option(None, "--backup-dir", help="Optional backup directory"),
     force: bool = typer.Option(False, "--force", help="Write even when NYX_* fields already exist"),
 ) -> None:
+    if not dry_run:
+        raise typer.BadParameter("Judge metadata mutation is unavailable in this experimental release")
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")
     if not in_.exists():
