@@ -1,73 +1,192 @@
 # NyxCore
 
-NyxCore is a local-first music library review and cleanup toolkit for people who manage folders of audio files, not streaming playlists. It scans a library, finds duplicates and metadata problems, builds a review queue, generates explicit action plans, records reversible history, and supports saved playlists from natural-language queries through a CLI, a FastAPI backend, and a local React UI.
+> NyxCore is an experimental local-first music-library review toolkit for people who manage folders of audio files rather than streaming playlists.
 
-Everything runs against local files and local state. NyxCore does not require a cloud account, a remote media server, or a hosted database.
+NyxCore scans a local audio directory, surfaces duplicate and metadata health findings, builds an interactive review queue, generates explicit, inspectable action plans, and applies selected operations with journaling, single-writer locking, quarantine-based moves, and reversible history.
 
-Current release version: `0.2.0`
+Everything runs against local files and local state. NyxCore does not require cloud accounts, remote media servers, or hosted databases.
 
-## Why This Exists
+Current release version: `0.3.0`
 
-Music folders accumulate drift:
+![NyxCore Review Inbox](screenshots/02_review_inbox_selected_1440.png)
+*NyxCore Review Inbox: inspect finding details, review generated plan operations, and selectively approve changes before execution.*
 
-- exact duplicate files across imports, downloads, and archive folders
-- likely duplicates across transcodes and rename variants
-- missing or placeholder metadata
-- weak artwork coverage
-- low-quality files mixed into otherwise clean collections
-- manual cleanup steps with poor reversibility
+---
 
-NyxCore exists to turn that mess into a review-first workflow instead of a pile of one-off scripts.
+## Core Workflow
 
-## Who It Is For
+NyxCore enforces a strict review-first lifecycle:
 
-- collectors maintaining a local archive
-- DJs and curators cleaning mixed-source folders
-- developers building local music-library tooling
-- anyone who wants a demoable local-first metadata and duplicate-review stack
+```
+scan
+  → detect duplicate / health findings
+  → review
+  → generate explicit action plan
+  → safely apply selected operations
+  → inspect history
+  → reverse when supported
+```
 
-## Main Surfaces
+1. **Scan**: Indexes audio files (`.mp3`, `.flac`, `.ogg`, `.m4a`, `.wav`, `.aif`, `.opus`), reading metadata tags and file characteristics using pure Python (`mutagen`).
+2. **Detect Findings**: Runs duplicate analysis (exact SHA-256 and likely fuzzy metadata/duration matches) and library health checks (missing tags, placeholder values, low bitrates, missing artwork).
+3. **Review**: Aggregates findings into a unified, prioritizeable review queue. Findings can be triaged without altering audio files.
+4. **Plan**: Compiles approved review items into a serialized JSON action plan with explicit source paths, destination paths, field modifications, and cryptographic content fingerprints.
+5. **Apply**: Executes selected plan operations under a library-scoped single-writer lock with durable intent journaling. Duplicate files are relocated to `.nyxcore_quarantine` rather than deleted.
+6. **Inspect History**: Every applied batch is recorded in a local history ledger with execution timestamps, per-operation statuses, and rollback fingerprints.
+7. **Reverse**: Supported operations (such as metadata updates and quarantine moves) can be undone or restored after verifying that files have not been modified externally.
 
-- CLI: scan, duplicates, health, review, plans, history, rename, analysis, tagging, and playlists
-- API: FastAPI layer in `nyxcore.webapi` that exposes the same service modules to the frontend
-- Web UI: React + Vite app in `web/` for Mission Control, Archive Search, Review Inbox, Saved Playlists, History, Duplicates, and Health
+---
 
-## Start Here
+## Approved Public Surfaces
 
-If you want the fastest safe first run, use the built-in demo fixture generator instead of pointing NyxCore at a real library immediately.
+The web interface exposes six approved public views:
 
-### 1-Minute Quickstart
+| Route | Surface | Purpose |
+|---|---|---|
+| `/` | **Overview** | Library summary metrics, finding category distributions, recent activity, and quick access. |
+| `/search` | **Archive Search** | Unicode-normalized, read-only search across filenames, tags, genres, and directory paths. |
+| `/review` | **Review Inbox** | Central triage and plan execution workbench with expandable finding cards and plan previews. |
+| `/duplicates` | **Duplicates** | Dedicated exact and likely duplicate clusters with track comparisons and review links. |
+| `/health` | **Library Health** | Detailed integrity diagnostics: missing metadata, placeholder tags, artwork gaps, low bitrates. |
+| `/history` | **History** | Chronological audit log of applied operation batches with reversal inspection and undo actions. |
+
+> **Scope Note**: A saved-playlists query backend exists in the codebase for experimental research, but its web UI route (`/playlists`) is deferred and intentionally unexposed in this release.
+
+---
+
+## Safety Architecture & Limitations
+
+NyxCore is designed around defensive, local-first safety primitives:
+
+- **Explicit User Review**: No autonomous or background mutations. Every file modification or relocation requires an explicit action plan generated from human review.
+- **Serialized Action Plans**: Plans are written to `review_plan.json` with strict operation schemas, preflight validation, and content fingerprints. Plans exceeding 50 operations are flagged for mandatory manual review.
+- **No-Clobber Quarantine**: Duplicate removals never delete files directly. Non-preferred copies are moved into `.nyxcore_quarantine/` with collision-safe naming. Normal scans ignore quarantine folders.
+- **Durable Intent Journaling**: Before modifying audio files, operations are journaled to disk. If an apply operation is interrupted, the journal records exact progress for recovery.
+- **Single-Writer Locking**: A library-scoped lock file (`.nyxcore_lock`) prevents multiple processes or tabs from executing concurrent mutations on the same music directory.
+- **Crash Recovery Inspection**: The CLI command `recover-review-action --action inspect` classifies interrupted operations into provably safe states before offering `finalize` or `abort`.
+- **Pre-Rollback Fingerprint Verification**: Reversal checks current file SHA-256 fingerprints before moving or restoring files. If external changes have occurred since the batch was applied, the rollback halts to prevent overwriting user edits.
+- **Metadata Backups**: Pre-edit metadata states are preserved in `.nyxcore_backups/` before in-place tag updates.
+
+### Important Limitations
+
+> [!WARNING]
+> **No ACID Guarantees**: NyxCore operates directly on local filesystems. It does not provide distributed transactions, two-phase commits, or atomic directory swapping.
+>
+> **No Infallible Rollback**: Rollback depends on file availability and unchanged fingerprints. If files are moved, locked by media players, or edited by other programs outside NyxCore, reversal cannot guarantee restoration.
+>
+> **Experimental Status**: Always test on a copy or use the synthetic demo library before running actions against your primary music archive.
+
+---
+
+## Screenshot Showcase
+
+### Overview
+![NyxCore Overview](screenshots/01_overview_1440.png)
+*Overview dashboard displaying library scan status, finding counts, and direct navigation.*
+
+### Duplicates Analysis
+![NyxCore Duplicates](screenshots/03_duplicates_1440.png)
+*Duplicates view showing exact SHA-256 and likely duplicate groups with comparison metrics.*
+
+### Library Health
+![NyxCore Library Health](screenshots/04_health_1440.png)
+*Health diagnostic report detailing missing tags, placeholder titles, artwork coverage, and bitrate distribution.*
+
+### Operation History & Reversal
+![NyxCore History](screenshots/05_history_1440.png)
+*Audit history displaying executed batches, affected paths, and reversible action controls.*
+
+### Plan Execution Report Modal
+![NyxCore Plan Report Modal](screenshots/06_plan_report_modal_1440.png)
+*Execution summary modal detailing succeeded, failed, or skipped operations following a plan application.*
+
+### Tablet & Responsive Support
+![NyxCore Tablet Review](screenshots/09_review_inbox_tablet_768.png)
+*Responsive layout verified across tablet and mobile viewports with accessible focus styling.*
+
+*For the complete gallery of release screenshots and responsive verification captures, see [`screenshots/README.md`](screenshots/README.md).*
+
+---
+
+## Requirements
+
+- **Python**: `3.11+`
+- **Node.js**: `18+` and `npm` (for the web frontend)
+- **Audio Metadata Support**: Pure Python via `mutagen` (`.mp3`, `.flac`, `.ogg`, `.m4a`, `.wav`, `.aif`, `.opus`). No external media binaries are required for core indexing, health reporting, duplicate matching, or action plans.
+- **Optional External Tools**:
+  - `ffmpeg`: **Only** required if you want to generate synthetic audio test files with `demo/create_demo_library.py` or run optional CLAP audio transcoding. It is not required for the core scanner or web application.
+
+---
+
+## Quickstart Guide
+
+### 1. Set Up Python Environment
 
 ```bash
-python -m venv .venv
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-# Linux/macOS
-# source .venv/bin/activate
+# Clone the repository
+git clone https://github.com/DRGYZ/nyxcore-ai-audio.git
+cd nyxcore-ai-audio
 
+# Create and activate a virtual environment
+python -m venv .venv
+
+# Linux / macOS:
+source .venv/bin/activate
+
+# Windows (PowerShell):
+# .venv\Scripts\Activate.ps1
+
+# Install core package with web API dependencies
 python -m pip install --upgrade pip
 pip install -e ".[web]"
+```
 
+### 2. Generate Demo Fixture (or Use Your Own Music Folder)
+
+To test NyxCore safely without touching real audio files, generate the included synthetic demo library (requires `ffmpeg`):
+
+```bash
 python demo/create_demo_library.py --force
+```
+
+This creates a self-contained sample library under `demo/generated/sample-library/` containing intentional duplicate pairs, missing tag cases, placeholder names, and bitrate variants.
+
+### 3. Generate Reports via CLI
+
+```bash
+# Run duplicate detection
 python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
+
+# Run health diagnostics
 python -m nyxcore.cli health demo/generated/sample-library --out data/reports
+
+# Generate unified review queue
 python -m nyxcore.cli review demo/generated/sample-library --out data/reports
 ```
 
-Then start the API and frontend:
+### 4. Launch the Web API
+
+Configure the music and report output roots via environment variables:
 
 ```bash
-# Bash / zsh
+# Linux / macOS (bash/zsh)
 export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
 export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
-uvicorn nyxcore.webapi.app:app --reload
+uvicorn nyxcore.webapi.app:app --reload --port 8000
 ```
 
 ```powershell
+# Windows PowerShell
 $env:NYXCORE_WEB_MUSIC_DIR = (Resolve-Path "demo/generated/sample-library").Path
 $env:NYXCORE_WEB_OUT_DIR = (Resolve-Path "data/reports").Path
-uvicorn nyxcore.webapi.app:app --reload
+uvicorn nyxcore.webapi.app:app --reload --port 8000
 ```
+
+The API will be available at `http://127.0.0.1:8000` (`http://127.0.0.1:8000/docs` for interactive OpenAPI docs).
+
+### 5. Launch the React Web UI
+
+In a separate terminal:
 
 ```bash
 cd web
@@ -75,424 +194,105 @@ npm install
 npm run dev
 ```
 
-Open:
+Open `http://127.0.0.1:5173` in your browser. The UI connects to `http://127.0.0.1:8000/api` by default and indicates `LIVE API` mode in the header badge.
 
-- API: `http://127.0.0.1:8000`
-- Frontend: `http://127.0.0.1:5173`
+---
 
-## Demo Library
+## CLI Reference
 
-NyxCore ships a documented fixture path instead of committing binary audio to Git.
+NyxCore provides a unified CLI under `python -m nyxcore.cli`:
 
-Generator:
-
-- `demo/create_demo_library.py`
-
-Fixture docs:
-
-- `demo/README.md`
-
-Default generated output:
-
-- `demo/generated/sample-library/`
-
-The generated library is intentionally tiny and designed to surface:
-
-- one exact duplicate group
-- one likely duplicate group
-- missing metadata
-- weak or placeholder metadata
-- missing artwork
-- low-bitrate audio
-- saved-playlist candidates for a query like `ambient focus instrumental`
-
-## Install
-
-Requirements:
-
-- Python 3.11+
-- `ffmpeg` on `PATH`
-- Node.js 18+ for the web frontend
-
-Base install:
+### Core Inspection & Review Commands
 
 ```bash
-python -m venv .venv
-python -m pip install --upgrade pip
-pip install -e .
-```
-
-Optional extras:
-
-```bash
-pip install -e ".[audio-analysis]"
-pip install -e ".[clap]"
-pip install -e ".[web]"
-pip install -e ".[dev]"
-pip install -e ".[audio-analysis,clap,web,dev]"
-```
-
-## Local Run Guide
-
-### CLI-Only Workflow
-
-```bash
+# Index library and output scan summary
 python -m nyxcore.cli scan <music-dir> --out data/reports
+
+# Detect exact and likely duplicates
 python -m nyxcore.cli duplicates <music-dir> --out data/reports
+
+# Run metadata, quality, and artwork health checks
 python -m nyxcore.cli health <music-dir> --out data/reports
+
+# Build review queue
 python -m nyxcore.cli review <music-dir> --out data/reports
-```
 
-### Web API
+# Generate action plan for a specific review item
+python -m nyxcore.cli review-plan <music-dir> --out data/reports --item-id <item-id>
 
-NyxCore's web API defaults to:
+# Apply a validated action plan
+python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music <music-dir> --out data/reports
 
-- music path: `music`
-- output path: `data/reports`
-
-For the demo library or any non-default folder, set:
-
-- `NYXCORE_WEB_MUSIC_DIR`
-- `NYXCORE_WEB_OUT_DIR`
-- `NYXCORE_WEB_CONFIG_PATH` when the API should use a custom YAML config
-
-These environment variables are the web server's filesystem boundary. Request
-parameters cannot switch to another music, output, or config root. Custom backup
-and alternate-restore destinations must remain inside the configured music or
-output roots. Use the CLI when you intentionally need one-off paths.
-
-Example:
-
-```bash
-export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
-uvicorn nyxcore.webapi.app:app --reload
-```
-
-### Frontend
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-The frontend talks to `http://127.0.0.1:8000/api` by default.
-
-### CLI + Web First-Run Path
-
-Use this sequence when you want the UI to show live data immediately instead of mock fallback:
-
-1. Generate the demo library with `python demo/create_demo_library.py --force`
-2. Run `duplicates`, `health`, and `review` against `demo/generated/sample-library`
-3. Start the API with `NYXCORE_WEB_MUSIC_DIR` pointing to the generated demo library
-4. Start the frontend with `npm run dev`
-5. Open the web UI and verify that the header shows live API mode, not mock fallback
-
-## 5-Minute Guided Demo
-
-### Step 1: Generate a safe sample library
-
-```bash
-python demo/create_demo_library.py --force
-```
-
-What you should see:
-
-- a small library under `demo/generated/sample-library`
-- a generated manifest and README inside that folder
-
-### Step 2: Build the core reports
-
-```bash
-python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
-python -m nyxcore.cli health demo/generated/sample-library --out data/reports
-python -m nyxcore.cli review demo/generated/sample-library --out data/reports
-```
-
-What you should see:
-
-- exact duplicates around `Blue Hour`
-- a likely duplicate FLAC vs MP3 pair for `Night Drift Ambient`
-- missing metadata and placeholder metadata findings from `imports/legacy`
-- artwork coverage problems and low-bitrate warnings
-
-### Step 3: Create a saved playlist example
-
-```bash
-python -m nyxcore.cli save-playlist demo/generated/sample-library --out data/reports --name "Ambient Focus" --query "ambient focus instrumental"
-python -m nyxcore.cli list-playlists --out data/reports
-```
-
-What you should see:
-
-- a saved playlist entry with a deterministic playlist id
-- tracks ranked from the demo library's ambient/focus candidates
-
-### Step 4: Launch the API and web UI
-
-```bash
-export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
-uvicorn nyxcore.webapi.app:app --reload
-```
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-What you should see:
-
-- Dashboard with live report counts
-- Review Inbox populated from the generated demo data
-- Saved Playlists showing the `Ambient Focus` result
-- Health and Duplicates pages populated from the same library
-
-### Step 5: Populate history with one safe batch
-
-Generate a plan from an exact duplicate item:
-
-```bash
-python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <exact-duplicate-item-id>
-python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music demo/generated/sample-library --out data/reports
+# View operation history
 python -m nyxcore.cli history --out data/reports
+
+# Reverse an executed batch
+python -m nyxcore.cli restore-review-action --batch-id <batch-id> --out data/reports
+
+# Inspect or recover interrupted operations
+python -m nyxcore.cli recover-review-action --action inspect --out data/reports
 ```
 
-How to get the item id:
+### Note on Legacy / Experimental Mutation Commands
 
-- open `data/reports/review.json`
-- copy the `item_id` for an `exact_duplicate_group`
+Earlier experimental CLI verbs (`apply`, `rename --apply`, `rename-undo`, `apply-ai`, `apply-judge`) are intentionally **disabled** in this release. All supported mutations must flow through the inspected `review` → `review-plan` → `apply-review-plan` pipeline to ensure locking, journaling, and verification.
 
-What you should see:
+---
 
-- one reversible history batch in `history`
-- the History page populated once the API is refreshed
+## Repository Structure
 
-## Outputs and Local State
+```
+nyxcore-ai-audio/
+├── .github/workflows/       # CI test automation
+├── demo/                    # Synthetic audio fixture generator & docs
+├── docs/assets/screenshots/ # Screenshot documentation pointer
+├── nyxcore/                 # Python backend package
+│   ├── core/                # Scanner, track model, hashing, locking
+│   ├── duplicates/          # Exact SHA-256 and fuzzy tag/duration matcher
+│   ├── health/              # Missing metadata, artwork, bitrate checkers
+│   ├── review_queue/        # Review item generation and triage state
+│   ├── action_plan/         # Action plan generator, validator, journal, executor
+│   ├── search/              # Read-only Unicode-normalized archive search
+│   └── webapi/              # FastAPI REST endpoints
+├── screenshots/             # Release screenshots and responsive verifications
+├── tests/                   # Backend pytest test suite (142 tests)
+└── web/                     # React 18 + TypeScript + Vite frontend
+    ├── src/                 # Components, pages, hooks, state
+    └── tests/               # Frontend Vitest test suite
+```
 
-When you use `--out data/reports`, NyxCore writes report outputs and persisted state under that root.
+---
 
-Common reports:
+## Testing & Validation
 
-- `scan.json`
-- `scan.md`
-- `duplicates.json`
-- `duplicates.md`
-- `health.json`
-- `health.md`
-- `review.json`
-- `review.md`
-- `review_plan.json`
-- `review_apply.json`
-- `playlist_query.json`
-- `playlist_query.md`
+Run backend tests:
 
-Persisted state:
+```bash
+pytest
+```
 
-- `review_state.json`
-- `review_history.json`
-- `library_state.json`
-- `saved_playlists/saved_playlists.json`
-- `saved_playlists/playlists/<playlist-id>/latest_result.json`
-- `saved_playlists/playlists/<playlist-id>/latest_tracks.json`
-- `saved_playlists/playlists/<playlist-id>/latest.m3u`
+Run frontend test suite:
 
-## Project Structure
+```bash
+cd web
+npm test
+```
 
-Core runtime:
+Run frontend production build:
 
-- `nyxcore/core`: scanner, track models, JSONL utilities, low-level helpers
-- `nyxcore/duplicates`: duplicate analysis
-- `nyxcore/health`: metadata, quality, naming, and duplicate-impact reporting
-- `nyxcore/review_queue`: review item generation and triage state
-- `nyxcore/action_plan`: plan generation, apply, quarantine, and ledger/history handling
-- `nyxcore/saved_playlists`: saved-playlist definitions and refresh tracking
-- `nyxcore/playlist_query`: natural-language playlist ranking
-- `nyxcore/search`: ranked, Unicode-aware, read-only library search
-- `nyxcore/webapi`: FastAPI layer
-- `web/src`: React frontend
-- `tests`: unit and smoke coverage for backend workflows
-- `demo`: demo-library generator and fixture notes
-- `docs/assets/screenshots`: screenshot location and capture checklist
+```bash
+cd web
+npm run build
+```
 
-## CLI Command Families
+---
 
-Current command families include:
+## WSL2 Setup
 
-- `scan`
-- `duplicates`
-- `health`
-- `review`
-- `review-plan`
-- `apply-review-plan`
-- `history`
-- `show-history`
-- `restore-review-action`
-- `undo-review-action`
-- `recover-review-action`
-- `playlist`
-- `save-playlist`
-- `list-playlists`
-- `show-playlist`
-- `rename-playlist`
-- `edit-playlist`
-- `delete-playlist`
-- `refresh-playlist`
-- `refresh-all-playlists`
-- `normalize`
-- `apply`
-- `rename`
-- `rename-undo`
-- `analyze`
-- `judge`
-- `apply-judge`
-- `apply-ai`
+For running NyxCore inside Windows Subsystem for Linux (WSL2), refer to the dedicated [WSL2 Setup Guide](INSTALL_WSL.md).
 
-Safety note:
+---
 
-- mutating use of `apply`, `rename --apply`, `rename-undo`, `apply-ai`, and `apply-judge` is unavailable in this experimental release
-- their preview/report modes remain available where applicable
-- supported mutations must use `review` -> `review-plan` -> `apply-review-plan`, which rebuilds and validates the plan against the current library
-- reviewed mutations journal durable intent before touching audio files and use a library-scoped single-writer lock
-- `recover-review-action --action inspect` classifies incomplete operations; only explicitly safe states offer `finalize` or `abort`
+## License
 
-Legacy note:
-
-- `python -m nyxcore.cli playlists ...` still exists for compatibility
-- it is the older bucketed M3U export workflow
-- prefer `playlist` plus saved-playlist commands for the current workflow
-
-## Web UI
-
-Primary routes:
-
-- `/` Mission Control
-- `/search` Archive Search
-- `/review` Review Inbox
-- `/playlists` Saved Playlists
-- `/history` Operation History
-- `/duplicates` Duplicates
-- `/health` Health
-
-The UI uses live FastAPI responses when available and falls back to local mock data for development. Mutation actions remain disabled in fallback mode.
-
-In live mode, the Review Inbox supports per-operation approval with paginated
-plan previews, History can filter by operation category, and Saved Playlists can
-be created, refreshed, inspected, and exported to M3U without leaving the UI.
-Mission Control can refresh its complete snapshot, Health can refresh and export
-its current report as JSON, and Duplicate Analysis has working Exact/Likely tabs
-with direct links to the matching filtered Review item. The global header search
-submits to a shareable Archive Search page and matches filenames, tags, genres,
-and folders without modifying the library. The notification control lists current
-high-priority Review items and links directly to their detail view.
-
-Review triage uses scan-aware language: **Resolve Until Refresh** hides a finding
-without editing audio files. On the next Inbox or Mission Control refresh, a
-finding that still exists returns as **Seen**. Snoozed findings remain available
-through the Review status filter.
-
-## API Surface
-
-Route groups:
-
-- status: `GET /api/status`
-- archive search: `GET /api/search?q=<query>&limit=<1-50>`
-- reports: `GET /api/duplicates`, `GET /api/health`, `GET /api/review`
-- review mutations: `POST /api/review/state`, `POST /api/review/plan`, `POST /api/review/plan/apply`
-- saved playlists: `GET /api/playlists`, `POST /api/playlists`, `POST /api/playlists/{playlist_id}/refresh`
-- history: `GET /api/history`, `POST /api/history/{batch_id}/restore`, `POST /api/history/{batch_id}/undo`
-
-The API is intentionally thin. It uses the same service modules as the CLI.
-
-## Configuration
-
-NyxCore ships a packaged default YAML config in `nyxcore/resources/default.yaml`.
-
-Built-in profiles:
-
-- `default`
-- `collector`
-- `dj`
-- `casual`
-- `archivist`
-
-Commands that depend on tuning typically accept `--config` and `--profile`, including `duplicates`, `health`, `review`, `playlist`, and `watch`.
-
-## Screenshots and Showcase Assets
-
-Store repo-local showcase assets here:
-
-- `docs/assets/screenshots/README.md`
-
-Preferred captures:
-
-- Dashboard
-- Review Inbox
-- History
-- Saved Playlists
-
-If screenshots are not in the repo yet, use the checklist in that folder before publishing the README or portfolio page.
-
-## Safety Model
-
-Duplicate cleanup moves extra copies into `.nyxcore_quarantine`, which ordinary
-library scans exclude. New duplicate plans record a content fingerprint and
-check all copies before applying: missing preferred copies or changed contents
-require a fresh plan. Older plans without fingerprints still require matching
-copies at apply time. History enables Undo for successful reversible operations
-and disables it once the batch has been restored.
-
-Review plans keep inferred `Singles` and `Remixes` album values as preview hints;
-they are never included in automatic metadata writes. Any generated plan with
-more than 50 executable operations is marked manual-review, and the same limit
-is enforced again when a plan is applied. Metadata writes are also limited to
-the exact fields that caused the review finding, so a missing album cannot grant
-permission to rewrite an existing title or artist.
-
-The API rebuilds every submitted review plan against the current scan before it
-can run. Client-selected operations must still exist in the server plan and must
-match its operation type, source path, destination path, fields, values, and
-content fingerprint. Review-only operations cannot be enabled by changing the
-browser request, and stale duplicate previews are rejected before any move.
-
-Review state, operation history, incremental scan state, saved-playlist results,
-and M3U exports use same-directory temporary files followed by an atomic replace.
-If writing or replacing the new version fails, the previous complete file stays
-in place and the temporary file is cleaned up.
-
-Text matching uses Unicode-aware normalization across duplicate, health, review,
-and playlist logic. Playlist negative terms are exclusions, and default queries
-only return tracks with matching text evidence instead of filling the result with
-unrelated zero-score tracks.
-
-These checks are preflight checks, not filesystem locks: avoid editing the same
-files concurrently while applying a plan. Review-plan metadata writes automatically
-back up the original in a sibling `.nyxcore_backups` folder unless a backup
-directory is supplied. Normal scans exclude this folder. Metadata Undo checks
-the post-edit fingerprint before replacing an existing file, so later user edits
-are preserved. Legacy CLI commands outside review plans still require an explicit
-`--backup-dir` for backups.
-
-- review-first reporting by default
-- explicit apply step for action plans
-- backups for supported mutation paths
-- no silent overwrite on restore paths
-- local persisted state for review, history, incremental refresh, and saved playlists
-
-Current compatibility note:
-
-- `restore-review-action` and `undo-review-action` currently use the same safe history-batch reversal path
-- both names remain available for compatibility
-
-## Development Notes
-
-- frontend source: `web/src`
-- backend API source: `nyxcore/webapi`
-- demo fixture generator: `demo/create_demo_library.py`
-- cleanup validation entry used during the repo polish work: `python -m unittest tests.test_web_api`
-
-## WSL
-
-For Windows + WSL2 setup, see [INSTALL_WSL.md](INSTALL_WSL.md).
+No open-source license has been declared for this repository yet. All rights reserved.
