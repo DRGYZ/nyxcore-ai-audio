@@ -15,19 +15,23 @@ from nyxcore.action_plan.ledger import (
     OperationLedger,
     inspect_batch_recovery,
     load_operation_ledger,
+    mark_journal_operation_result,
+    mark_journal_operation_started,
     prepare_operation_batch,
     save_operation_ledger,
 )
-from nyxcore.action_plan.lifecycle import recover_recorded_batch, reverse_recorded_batch
+from nyxcore.action_plan.lifecycle import inspect_recorded_batch, recover_recorded_batch, reverse_recorded_batch
 from nyxcore.action_plan.lock import LibraryMutationLock, MutationLockError
 from nyxcore.action_plan.service import (
     ActionPlan,
     ActionPlanOperation,
     ActionPlanReport,
     ActionPlanSummary,
+    AppliedOperationResult,
     build_action_plan_report,
     execute_reviewed_action_plan,
 )
+from nyxcore.core.filesystem import move_file_no_replace, regular_file_identity
 from nyxcore.core.track import TrackRecord, WarningCode
 from nyxcore.duplicates.service import (
     DuplicateAnalysisReport,
@@ -111,6 +115,14 @@ def _prepared_move(tmp_path: Path):
     ledger_path = out / "review_history.json"
     save_operation_ledger(ledger_path, ledger)
     return music, out, source, destination, ledger_path, batch
+
+
+def _start_move(ledger_path: Path, source: Path):
+    ledger = load_operation_ledger(ledger_path)
+    batch = ledger.batches[0]
+    mark_journal_operation_started(batch, batch.operations[0].operation_id, move_identity=regular_file_identity(source))
+    save_operation_ledger(ledger_path, ledger)
+    return batch
 
 
 def test_real_metadata_write_backup_journal_and_reversal(tmp_path: Path) -> None:
@@ -214,7 +226,8 @@ def test_move_recovery_classifies_never_started(tmp_path: Path) -> None:
 
 
 def test_move_recovery_finalizes_completed_unjournaled_move_and_is_repeatable(tmp_path: Path) -> None:
-    music, out, source, destination, ledger_path, batch = _prepared_move(tmp_path)
+    music, out, source, destination, ledger_path, _batch = _prepared_move(tmp_path)
+    batch = _start_move(ledger_path, source)
     destination.parent.mkdir(parents=True)
     os.link(source, destination)
     source.unlink()
@@ -242,7 +255,8 @@ def test_move_recovery_finalizes_completed_unjournaled_move_and_is_repeatable(tm
 
 
 def test_move_recovery_finalizes_link_created_source_present(tmp_path: Path) -> None:
-    music, out, source, destination, ledger_path, batch = _prepared_move(tmp_path)
+    music, out, source, destination, ledger_path, _batch = _prepared_move(tmp_path)
+    batch = _start_move(ledger_path, source)
     destination.parent.mkdir(parents=True)
     os.link(source, destination)
     assert inspect_batch_recovery(batch)[0].classification == "destination_linked_source_present"
@@ -290,8 +304,8 @@ def test_metadata_recovery_states_are_diagnosed(tmp_path: Path) -> None:
     backup_file(source, backup.parent, destination=backup)
     assert inspect_batch_recovery(batch)[0].classification == "backup_created_original_unchanged"
 
+    mark_journal_operation_started(batch, operation.operation_id)
     write_tags(source, title="Song", artist="Artist", album=None, fields=["title", "artist"])
-    batch.operations[0].journal_state = "applying"
     batch.operations[0].applied_hash = _hash(source)
     assert inspect_batch_recovery(batch)[0].classification == "completed_unfinalized"
 
@@ -307,7 +321,10 @@ def test_metadata_recovery_states_are_diagnosed(tmp_path: Path) -> None:
     assert music.exists()
 
 
-def test_partial_batch_persists_applied_failed_and_not_started_operations(tmp_path: Path) -> None:
+@pytest.mark.parametrize("failure", ["collision", "identical_collision", "external_edit"])
+def test_partial_batch_persists_applied_failed_and_not_started_operations(
+    tmp_path: Path, monkeypatch, failure: str,
+) -> None:
     music = tmp_path / "music"
     out = tmp_path / "out"
     music.mkdir()
@@ -331,8 +348,20 @@ def test_partial_batch_persists_applied_failed_and_not_started_operations(tmp_pa
     requested = build_action_plan_report(music, records, review, source_review_item_ids=[item.item_id])
     moves = [entry for entry in requested.plans[0].proposed_operations if entry.operation_type == "quarantine_move"]
     collision = Path(moves[1].destination_path)
-    collision.parent.mkdir(parents=True, exist_ok=True)
-    collision.write_bytes(b"existing-user-file")
+    rejected_source = Path(moves[1].path)
+    rejected_hash = moves[1].expected_hash
+    if failure == "external_edit":
+        import nyxcore.action_plan.service as service
+
+        def move_then_edit(source, destination, **kwargs):
+            move_file_no_replace(source, destination, **kwargs)
+            if destination == Path(moves[0].destination_path):
+                rejected_source.write_bytes(b"newer user content")
+
+        monkeypatch.setattr(service, "move_file_no_replace", move_then_edit)
+    else:
+        collision.parent.mkdir(parents=True, exist_ok=True)
+        collision.write_bytes(b"same-content" if failure == "identical_collision" else b"existing-user-file")
 
     _authorized, results, batch = execute_reviewed_action_plan(
         music,
@@ -348,8 +377,266 @@ def test_partial_batch_persists_applied_failed_and_not_started_operations(tmp_pa
     assert [entry.journal_state for entry in batch.operations] == ["applied", "failed", "prepared"]
     assert batch.lifecycle_state == "partial_failure"
     assert item.item_id not in load_review_state(out / "review_state.json").items
-    assert collision.read_bytes() == b"existing-user-file"
+    rejected = batch.operations[1]
+    assert rejected.expected_hash == rejected_hash
+    if failure == "external_edit":
+        assert not collision.exists()
+        assert rejected_source.read_bytes() == b"newer user content"
+        assert "source changed" in rejected.failure_reason
+    else:
+        before = collision.read_bytes()
+        _, assessments = recover_recorded_batch(
+            ledger_path=out / "review_history.json", batch_id=batch.batch_id,
+            library_root=music, workspace_root=out, action="finalize",
+        )
+        assert assessments[1].classification == "manual_intervention"
+        assert assessments[1].safe_actions == []
+        assert not os.path.samefile(rejected_source, collision)
+        assert collision.read_bytes() == before and rejected_source.read_bytes() == b"same-content"
     assert not (music / ".nyxcore_mutation.lock").exists()
+
+
+@pytest.mark.parametrize("phase", ["prepared", "legacy-started", "started"])
+def test_move_recovery_refuses_unproven_destination(tmp_path: Path, phase: str) -> None:
+    music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+    ledger = load_operation_ledger(ledger_path)
+    batch = ledger.batches[0]
+    if phase != "prepared":
+        mark_journal_operation_started(
+            batch, batch.operations[0].operation_id,
+            move_identity=regular_file_identity(source) if phase == "started" else None,
+        )
+    save_operation_ledger(ledger_path, ledger)
+    destination.parent.mkdir()
+    if phase == "started":
+        destination.write_bytes(source.read_bytes())
+    else:
+        os.link(source, destination)
+    for _ in range(2):
+        _, [assessment] = recover_recorded_batch(
+            ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out,
+            action="finalize",
+        )
+        assert assessment.classification == "manual_intervention"
+        assert assessment.safe_actions == []
+        assert source.read_bytes() == destination.read_bytes() == b"reviewed-content"
+
+
+@pytest.mark.parametrize("backup_state", ["missing", "corrupt", "damaged_staging_copy"])
+def test_metadata_restore_preserves_live_audio_with_invalid_backup(
+    tmp_path: Path, monkeypatch, backup_state: str,
+) -> None:
+    music, out, source, records, review, requested, _ = _metadata_context(tmp_path)
+    ledger_path = out / "review_history.json"
+    state_path = out / "review_state.json"
+    _, _, batch = execute_reviewed_action_plan(
+        music, records, review, requested, review_state=ReviewStateStore(),
+        review_state_path=state_path, ledger_path=ledger_path, workspace_root=out,
+    )
+    edited = source.read_bytes()
+    backup = Path(batch.operations[0].backup_path)
+    if backup_state == "missing":
+        backup.unlink()
+    elif backup_state == "corrupt":
+        backup.write_bytes(b"truncated")
+    else:
+        monkeypatch.setattr("nyxcore.action_plan.ledger.shutil.copyfileobj",
+                            lambda _original, output: output.write(b"truncated staging copy"))
+    _, [changed] = reverse_recorded_batch(
+        ledger_path=ledger_path, review_state_path=state_path, batch_id=batch.batch_id,
+        library_root=music, workspace_root=out,
+    )
+    assert changed.undo_status == "error"
+    assert "fingerprint" in changed.undo_message
+    assert source.read_bytes() == edited
+    assert not list(music.glob(".nyxcore-restore-*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory symlinks require optional Windows privileges")
+def test_default_backup_symlink_is_rejected_before_journaling(tmp_path: Path) -> None:
+    music, out, source, records, review, requested, _ = _metadata_context(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (music / ".nyxcore_backups").symlink_to(outside, target_is_directory=True)
+    edited = source.read_bytes()
+    ledger_path = out / "review_history.json"
+    with pytest.raises(ValueError, match="backup directory is outside"):
+        execute_reviewed_action_plan(
+            music, records, review, requested, review_state=ReviewStateStore(),
+            review_state_path=out / "review_state.json", ledger_path=ledger_path, workspace_root=out,
+        )
+    assert not ledger_path.exists()
+    assert source.read_bytes() == edited
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory symlinks require optional Windows privileges")
+def test_history_rejects_escaped_move_destination_before_inspection_or_recovery(tmp_path: Path) -> None:
+    music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+    batch = _start_move(ledger_path, source)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    os.link(source, outside / destination.name)
+    destination.parent.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="history destination path is outside"):
+        inspect_recorded_batch(ledger_path, batch.batch_id, library_root=music, workspace_root=out)
+    with pytest.raises(ValueError, match="history destination path is outside"):
+        recover_recorded_batch(
+            ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out, action="finalize",
+        )
+    assert source.read_bytes() == (outside / destination.name).read_bytes() == b"reviewed-content"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory symlinks require optional Windows privileges")
+def test_alternate_restore_checks_computed_destination(tmp_path: Path) -> None:
+    from nyxcore.action_plan.ledger import _alternate_restore_target
+
+    music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+    batch = _start_move(ledger_path, source)
+    move_file_no_replace(source, destination)
+    recover_recorded_batch(
+        ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out, action="finalize",
+    )
+    source.write_bytes(b"new music at the original path")
+    alternate = out / "restored"
+    alternate.mkdir()
+    escaped = tmp_path / "outside"
+    escaped.mkdir()
+    target = _alternate_restore_target(alternate, str(source))
+    target.parent.symlink_to(escaped, target_is_directory=True)
+    args = dict(ledger_path=ledger_path, review_state_path=out / "review_state.json", batch_id=batch.batch_id,
+                library_root=music, workspace_root=out, alternate_restore_dir=alternate)
+    with pytest.raises(ValueError, match="alternate restore destination is outside"):
+        reverse_recorded_batch(**args)
+    assert list(escaped.iterdir()) == []
+    assert destination.read_bytes() == b"reviewed-content"
+    assert source.read_bytes() == b"new music at the original path"
+    target.parent.unlink()
+    _, [changed] = reverse_recorded_batch(**args)
+    assert changed.undo_status == "ok"
+    assert target.read_bytes() == b"reviewed-content" and not destination.exists()
+    assert source.read_bytes() == b"new music at the original path"
+
+
+def test_recovery_repairs_batch_summary_after_last_result_was_journaled(tmp_path: Path) -> None:
+    music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+    _start_move(ledger_path, source)
+    ledger = load_operation_ledger(ledger_path)
+    [batch] = ledger.batches
+    move_file_no_replace(source, destination)
+    mark_journal_operation_result(batch, AppliedOperationResult(
+        "move-1", "quarantine_move", str(source), str(destination), "ok", "applied", applied_hash=_hash(destination),
+    ))
+    assert batch.lifecycle_state == "applying"
+    save_operation_ledger(ledger_path, ledger)
+    recovered, _ = recover_recorded_batch(
+        ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out, action="finalize",
+    )
+    assert recovered.lifecycle_state == "applied"
+    assert recovered.plan_result_statuses == {"plan-1": "ok"}
+    assert recovered.completed_at is not None
+    saved = ledger_path.read_bytes()
+    recover_recorded_batch(
+        ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out, action="finalize",
+    )
+    assert ledger_path.read_bytes() == saved
+
+
+@pytest.mark.parametrize("operation_type", ["move", "metadata"])
+def test_reversal_reconciles_after_files_changed_but_journal_save_failed(
+    tmp_path: Path, monkeypatch, operation_type: str,
+) -> None:
+    import nyxcore.action_plan.lifecycle as lifecycle
+
+    if operation_type == "move":
+        music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+        original = source.read_bytes()
+        batch = _start_move(ledger_path, source)
+        move_file_no_replace(source, destination)
+        recover_recorded_batch(
+            ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out, action="finalize",
+        )
+    else:
+        music, out, source, records, review, requested, _ = _metadata_context(tmp_path)
+        original = source.read_bytes()
+        ledger_path = out / "review_history.json"
+        _, _, batch = execute_reviewed_action_plan(
+            music, records, review, requested, review_state=ReviewStateStore(),
+            review_state_path=out / "review_state.json", ledger_path=ledger_path, workspace_root=out,
+        )
+
+    def fail_after_restore(path, ledger):
+        operation = ledger.batches[0].operations[0]
+        if operation.undo_status == "ok":
+            on_disk = load_operation_ledger(path).batches[0].operations[0]
+            assert on_disk.reversal_intent is not None and source.read_bytes() == original
+            raise OSError("injected failure saving reversal result")
+        save_operation_ledger(path, ledger)
+
+    reverse_args = dict(ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out,
+                        review_state_path=out / "review_state.json")
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(lifecycle, "save_operation_ledger", fail_after_restore)
+        with pytest.raises(OSError, match="injected failure"):
+            reverse_recorded_batch(**reverse_args)
+    _, [assessment] = inspect_recorded_batch(
+        ledger_path, batch.batch_id, library_root=music, workspace_root=out,
+    )
+    assert assessment.classification == "reversal_completed_unfinalized"
+    assert assessment.safe_actions == ["finalize"]
+    restored_identity = regular_file_identity(source)
+    if operation_type == "move":
+        recovered, _ = recover_recorded_batch(
+            ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out,
+            action="finalize",
+        )
+        assert not destination.exists()
+    else:
+        recovered, _ = reverse_recorded_batch(**reverse_args)
+    assert recovered.lifecycle_state == "reversed"
+    _, [operation] = reverse_recorded_batch(**reverse_args)
+    assert operation.undo_status == "ok" and operation.reversal_intent is None
+    assert regular_file_identity(source) == restored_identity
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("replace_link", [False, True])
+def test_reversal_recovery_finishes_only_its_own_interrupted_link(tmp_path: Path, monkeypatch, replace_link: bool) -> None:
+    music, out, source, destination, ledger_path, _ = _prepared_move(tmp_path)
+    batch = _start_move(ledger_path, source)
+    move_file_no_replace(source, destination)
+    recovery_args = dict(ledger_path=ledger_path, batch_id=batch.batch_id, library_root=music, workspace_root=out)
+    recover_recorded_batch(**recovery_args, action="finalize")
+
+    def interrupt_after_link(current, target, **_kwargs):
+        recorded = load_operation_ledger(ledger_path).batches[0].operations[0]
+        assert recorded.reversal_intent is not None and Path(recorded.reversal_intent.destination_path) == target
+        os.link(current, target)
+        raise KeyboardInterrupt()
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr("nyxcore.action_plan.ledger.move_file_no_replace", interrupt_after_link)
+        with pytest.raises(KeyboardInterrupt):
+            reverse_recorded_batch(**recovery_args, review_state_path=out / "review_state.json")
+    assert os.path.samefile(source, destination)
+    if replace_link:
+        source.unlink()
+        source.write_bytes(destination.read_bytes())
+        assert not os.path.samefile(source, destination)
+    _, [assessment] = inspect_recorded_batch(
+        ledger_path, batch.batch_id, library_root=music, workspace_root=out,
+    )
+    expected = "manual_intervention" if replace_link else "reversal_destination_linked_source_present"
+    assert assessment.classification == expected
+    for _ in range(2):
+        recovered, [assessment] = recover_recorded_batch(**recovery_args, action="finalize")
+        assert source.read_bytes() == b"reviewed-content"
+        if replace_link:
+            assert assessment.safe_actions == []
+            assert destination.read_bytes() == b"reviewed-content"
+        else:
+            assert recovered.lifecycle_state == "reversed"
+            assert not destination.exists()
 
 
 def test_library_lock_rejects_second_mutation_and_releases_after_error(tmp_path: Path) -> None:

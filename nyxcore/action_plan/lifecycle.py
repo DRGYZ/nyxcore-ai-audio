@@ -15,6 +15,7 @@ from nyxcore.action_plan.ledger import (
     validate_history_mutation_paths,
 )
 from nyxcore.action_plan.lock import LibraryMutationLock
+from nyxcore.core.filesystem import bounded_path
 from nyxcore.review_queue.state import load_review_state, save_review_state
 
 
@@ -25,6 +26,7 @@ def inspect_recorded_batch(
     library_root: Path,
     workspace_root: Path,
 ) -> tuple[OperationBatch, list[RecoveryAssessment]]:
+    bounded_path(ledger_path, (workspace_root,), label="history path")
     ledger = load_operation_ledger(ledger_path)
     batch = find_batch(ledger, batch_id)
     if batch is None:
@@ -45,12 +47,12 @@ def recover_recorded_batch(
     lock = LibraryMutationLock(library_root)
     lock.acquire(stale_owner_token=stale_lock_token)
     try:
+        bounded_path(ledger_path, (workspace_root,), label="history path")
         ledger = load_operation_ledger(ledger_path)
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise ValueError(f"History batch not found: {batch_id}")
-        validate_history_mutation_paths(batch, allowed_roots=(library_root, workspace_root))
-        assessments = apply_batch_recovery(batch, action=action)
+        assessments = apply_batch_recovery(batch, action=action, allowed_roots=(library_root, workspace_root))
         save_operation_ledger(ledger_path, ledger)
         return batch, assessments
     finally:
@@ -71,6 +73,8 @@ def reverse_recorded_batch(
     lock = LibraryMutationLock(library_root)
     lock.acquire(stale_owner_token=stale_lock_token)
     try:
+        bounded_path(ledger_path, (workspace_root,), label="history path")
+        bounded_path(review_state_path, (workspace_root,), label="review state path")
         ledger = load_operation_ledger(ledger_path)
         batch = find_batch(ledger, batch_id)
         if batch is None:
@@ -82,6 +86,7 @@ def reverse_recorded_batch(
             allowed_roots=(library_root, workspace_root),
             alternate_restore_dir=alternate_restore_dir,
             target_path=target_path,
+            persist=lambda: save_operation_ledger(ledger_path, ledger),
         )
         save_operation_ledger(ledger_path, ledger)
         save_review_state(review_state_path, review_state)

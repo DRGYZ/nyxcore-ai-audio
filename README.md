@@ -61,10 +61,10 @@ NyxCore is designed around defensive, local-first safety primitives:
 - **Explicit User Review**: No autonomous or background mutations. Every file modification or relocation requires an explicit action plan generated from human review.
 - **Serialized Action Plans**: Plans are written to `review_plan.json` with strict operation schemas, preflight validation, and content fingerprints. Plans exceeding 50 operations are flagged for mandatory manual review.
 - **No-Clobber Quarantine**: Duplicate removals never delete files directly. Non-preferred copies are moved into `.nyxcore_quarantine/` with collision-safe naming. Normal scans ignore quarantine folders.
-- **Durable Intent Journaling**: Before modifying audio files, operations are journaled to disk. If an apply operation is interrupted, the journal records exact progress for recovery.
-- **Single-Writer Locking**: A library-scoped lock file (`.nyxcore_lock`) prevents multiple processes or tabs from executing concurrent mutations on the same music directory.
-- **Crash Recovery Inspection**: The CLI command `recover-review-action --action inspect` classifies interrupted operations into provably safe states before offering `finalize` or `abort`.
-- **Pre-Rollback Fingerprint Verification**: Reversal checks current file SHA-256 fingerprints before moving or restoring files. If external changes have occurred since the batch was applied, the rollback halts to prevent overwriting user edits.
+- **Intent Journaling** for apply and reversal records each intent before changing an audio file. Interrupted operations can be reconciled when the paths, fingerprints, and recorded file identity support the same conclusion.
+- **Single-Writer Locking** coordinates NyxCore writers through the library's `.nyxcore_mutation.lock`. An abandoned lock requires operator review.
+- **Recovery Inspection** with `recover-review-action --action inspect` reports ambiguous states for manual review. Older interrupted moves without recorded file identity need manual review when a destination exists.
+- **Reversal Verification** checks the live file's SHA-256 fingerprint. Metadata restoration also verifies the backup and a staged copy before atomically replacing the live file.
 - **Metadata Backups**: Pre-edit metadata states are preserved in `.nyxcore_backups/` before in-place tag updates.
 
 ### Important Limitations
@@ -72,9 +72,11 @@ NyxCore is designed around defensive, local-first safety primitives:
 > [!WARNING]
 > **No ACID Guarantees**: NyxCore operates directly on local filesystems. It does not provide distributed transactions, two-phase commits, or atomic directory swapping.
 >
-> **No Infallible Rollback**: Rollback depends on file availability and unchanged fingerprints. If files are moved, locked by media players, or edited by other programs outside NyxCore, reversal cannot guarantee restoration.
+> **Concurrent filesystem changes** can occur after a path or fingerprint check and before the next filesystem call. The library lock coordinates NyxCore writers. It cannot coordinate other programs that edit files or replace paths. Keep other writers away from disposable mutation fixtures.
 >
-> **Experimental Status**: Always test on a copy or use the synthetic demo library before running actions against your primary music archive.
+> **Disposable-library validation** covered CLI, API, browser apply and reversal, and interrupted recovery on Ubuntu 24.04 under WSL2 on ext4. A limited native Windows NTFS check on Python 3.12 covered lock exclusion and release, quarantine and restore, collision refusal, and metadata backup restoration. Native interruption recovery, sudden host power loss, and filesystem crash durability remain unverified. An interruption during metadata staging can leave a temporary file for manual inspection. Older builds should not resume batches written with pending reversal intent.
+>
+> **Experimental use** on real music libraries is limited to read-only review and plan preview. Use synthetic or disposable libraries for mutation testing.
 
 ---
 
