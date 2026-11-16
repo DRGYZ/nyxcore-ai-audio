@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   buildSelectedActionPlanReport,
   setActionOperationSelected,
@@ -21,7 +21,6 @@ import {
   Chip,
   EmptyState,
   Icon,
-  Modal,
   PageHeader,
   Panel,
   ProgressBar,
@@ -50,11 +49,24 @@ export function ReviewPage() {
   const [status, setStatus] = useState<string>("all");
   const [itemType, setItemType] = useState<string>(() => requestedItemType ?? "all");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
-  const [planReport, setPlanReport] = useState<ActionPlanReport | null>(null);
+  const [plan, setPlan] = useState<{ report: ActionPlanReport; root?: string } | null>(null);
   const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
   const [confirmApply, setConfirmApply] = useState(false);
-  const [applyResult, setApplyResult] = useState<ReviewPlanApplyResponse | null>(null);
-  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<{ result: ReviewPlanApplyResponse; selection: ActionPlanReport; root?: string } | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(
+    () => searchParams.has("item") && window.innerWidth < 1280,
+  );
+
+  const planReport = plan?.report ?? null;
+  const selection = useMemo(
+    () => planReport ? buildSelectedActionPlanReport(planReport, selectedOperationIds) : null,
+    [planReport, selectedOperationIds],
+  );
+  useEffect(() => {
+    if (applyResult) resultsRef.current?.focus();
+  }, [applyResult]);
 
   useEffect(() => {
     if (requestedItemType) setItemType(requestedItemType);
@@ -80,6 +92,7 @@ export function ReviewPage() {
     fallbackItems: filtered,
     param: "item",
     idKey: "item_id",
+    syncUrl: reviewQuery.isSuccess && !reviewQuery.isFetching,
   });
 
   function handleSelectFinding(itemId: string) {
@@ -98,7 +111,7 @@ export function ReviewPage() {
   }
 
   useEffect(() => {
-    if (!mobileInspectorOpen) return;
+    if (!mobileInspectorOpen || planReport) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         handleCloseMobileInspector();
@@ -106,7 +119,13 @@ export function ReviewPage() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mobileInspectorOpen, selected]);
+  }, [mobileInspectorOpen, planReport, selected]);
+
+  const outcome = applyResult ? (
+    <div ref={resultsRef} tabIndex={-1} aria-label="Apply results">
+      <ApplyResultPanel {...applyResult} />
+    </div>
+  ) : null;
 
   if (reviewQuery.isError) {
     return (
@@ -116,6 +135,7 @@ export function ReviewPage() {
           title="Review Inbox"
           description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
         />
+        {outcome}
         <ApiUnavailableState contextLabel="Review Inbox" />
       </div>
     );
@@ -129,6 +149,7 @@ export function ReviewPage() {
           title="Review Inbox"
           description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
         />
+        {outcome}
         <Panel className="p-8 text-center text-sm text-slate-400">
           Loading review findings from local API…
         </Panel>
@@ -167,35 +188,33 @@ export function ReviewPage() {
     try {
       const response = await planMutation.mutateAsync({ item_ids: [selected.item_id] });
       setApplyResult(null);
-      setPlanReport(response.data);
+      setBanner(null);
+      setPlan({ report: response.data, root: response.meta?.music_path ?? reviewQuery.data?.meta?.music_path });
       setSelectedOperationIds(new Set());
-      setBanner({ tone: "success", message: `Generated ${response.data.summary.generated_plan_count} plan(s) for ${selected.item_id}.` });
+      setApplyError(null);
     } catch (error) {
       setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to generate review plan." });
     }
   }
 
   async function handleApplyPlan() {
-    if (!planReport) return;
+    if (!confirmApply || !selection?.plans.length || applyPlanMutation.isPending) return;
+    setApplyError(null);
     try {
       const response = await applyPlanMutation.mutateAsync({
-        plan_report: buildSelectedActionPlanReport(planReport, selectedOperationIds),
+        plan_report: selection,
       });
       setConfirmApply(false);
-      setPlanReport(null);
+      setPlan(null);
       setSelectedOperationIds(new Set());
-      setApplyResult(response);
-      setBanner({
-        tone: "success",
-        message: `Applied ${response.result_count} plan result(s)${response.batch_id ? ` in history batch ${response.batch_id}` : ""}.`,
-      });
+      setMobileInspectorOpen(false);
+      setBanner(null);
+      setApplyResult({ result: response, selection, root: plan?.root });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to apply plan." });
+      setApplyError(error instanceof Error ? error.message : "Unable to confirm the outcome. Check History before trying again.");
     }
   }
 
-  const applyCapable = selectedOperationIds.size > 0;
-  const selectedOperations = selectedOperationIds.size;
   const busy = reviewMutation.isPending || planMutation.isPending || applyPlanMutation.isPending || checking;
 
   const highCount = items.filter((item) => item.priority_band === "high").length;
@@ -220,20 +239,7 @@ export function ReviewPage() {
         }
       />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
-      {applyResult ? (
-        <ActionBanner
-          tone="success"
-          message={`Apply completed. ${applyResult.result_count} plan result(s) processed.`}
-          action={
-            applyResult.batch_id ? (
-              <Link to={`/history?batch=${encodeURIComponent(applyResult.batch_id)}`}>
-                <Button tone="secondary">Inspect History Batch</Button>
-              </Link>
-            ) : undefined
-          }
-        />
-      ) : null}
-      {applyResult ? <ApplyResultPanel result={applyResult} /> : null}
+      {outcome}
 
       <SplitScreen
         main={
@@ -468,9 +474,11 @@ export function ReviewPage() {
 
       <PlanReportModal
         report={planReport}
-        sourceItemId={selected?.item_id}
+        selection={selection}
+        root={plan?.root}
+        confirming={confirmApply}
         applyPending={applyPlanMutation.isPending}
-        usingMock={usingMock}
+        applyError={applyError}
         selectedOperationIds={selectedOperationIds}
         onToggleOperation={(planId, operationId, checked) => {
           if (!planReport) return;
@@ -479,34 +487,16 @@ export function ReviewPage() {
           );
         }}
         onClose={() => {
-          setPlanReport(null);
+          setPlan(null);
           setSelectedOperationIds(new Set());
-          setConfirmApply(false);
         }}
-        onApply={() => setConfirmApply(true)}
+        onContinue={() => {
+          setApplyError(null);
+          setConfirmApply(true);
+        }}
+        onCancel={() => setConfirmApply(false)}
+        onApply={() => void handleApplyPlan()}
       />
-
-      <Modal
-        open={confirmApply}
-        title="Confirm Plan Apply"
-        subtitle={`${selectedOperations} selected operation${selectedOperations === 1 ? "" : "s"}`}
-        onClose={() => setConfirmApply(false)}
-        footer={
-          <>
-            <Button tone="ghost" onClick={() => setConfirmApply(false)} disabled={applyPlanMutation.isPending}>
-              Cancel
-            </Button>
-            <Button tone="primary" onClick={() => void handleApplyPlan()} disabled={applyPlanMutation.isPending || !applyCapable}>
-              {applyPlanMutation.isPending ? "Applying..." : "Apply Plan"}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4 text-sm text-slate-300">
-          <p>The checked operations may rename files, update deterministic metadata, or move duplicate candidates into quarantine.</p>
-          <p>Partial selections remain in the Review Inbox until every proposed mutation has been completed.</p>
-        </div>
-      </Modal>
     </div>
   );
 }

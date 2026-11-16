@@ -74,7 +74,7 @@ NyxCore is designed around defensive, local-first safety primitives:
 >
 > **Concurrent filesystem changes** can occur after a path or fingerprint check and before the next filesystem call. The library lock coordinates NyxCore writers. It cannot coordinate other programs that edit files or replace paths. Keep other writers away from disposable mutation fixtures.
 >
-> **Disposable-library validation** covered CLI, API, browser apply and reversal, and interrupted recovery on Ubuntu 24.04 under WSL2 on ext4. A limited native Windows NTFS check on Python 3.12 covered lock exclusion and release, quarantine and restore, collision refusal, and metadata backup restoration. Native interruption recovery, sudden host power loss, and filesystem crash durability remain unverified. An interruption during metadata staging can leave a temporary file for manual inspection. Older builds should not resume batches written with pending reversal intent.
+> **Disposable-library validation** covered CLI, API, browser apply and reversal, and interrupted recovery on Ubuntu 24.04 under WSL2 on ext4. Native Windows 11 on NTFS with Python 3.12 also passed quarantine, metadata restore, lock exclusion, and controlled interruptions after journal intent, hard-link creation, and reversal before result persistence. Abrupt native process termination, power loss, and filesystem crash durability remain unverified. An interruption during metadata staging can leave a temporary file for manual inspection. Older builds should not resume batches written with pending reversal intent.
 >
 > **Experimental use** on real music libraries is limited to read-only review and plan preview. Use synthetic or disposable libraries for mutation testing.
 
@@ -173,9 +173,11 @@ npm ci --engine-strict
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-1. Open [Overview](http://127.0.0.1:5173/) and confirm the header shows **Connected** and the library has seven files. If port `5173` is occupied, use the [verified WSL alternate port](INSTALL_WSL.md#vite-cannot-bind-port-5173).
+1. Open [Overview](http://127.0.0.1:5173/) and check that **Active library** points at the synthetic fixture and **Library Files** shows seven files. If the backend is still starting, use **Check Connection** when it is ready. If port `5173` is occupied, use the [verified WSL alternate port](INSTALL_WSL.md#vite-cannot-bind-port-5173).
 2. In **Archive Search**, search for `Blue Hour` to find both copies of the demo track.
-3. In **Review Inbox**, open the exact duplicate finding for **Blue Hour**. Click **Generate Plan**, inspect the preferred copy and proposed quarantine path, then **Close** the preview.
+3. Open **Review Inbox** from Overview and select the exact duplicate finding for **Blue Hour**. Click **Generate Plan**. The preview identifies the copy to keep and the source and destination of each proposed move. Use **Full path** to inspect the original absolute path, then **Close** the preview.
+
+To inspect another library, stop the backend, change `NYXCORE_WEB_MUSIC_DIR` and `NYXCORE_WEB_OUT_DIR` to its library and reports folders, and restart the backend. Refresh Overview to verify the active library before reviewing findings.
 
 Browsing, searching, opening a finding, and generating or closing a plan preview do not change audio files. Triage controls can save local review state. Stop at the preview for this demo. Applying plans, restoring or reversing batches, taking over locks, and recovery writes are outside this demo.
 

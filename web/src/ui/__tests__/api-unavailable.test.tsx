@@ -6,30 +6,26 @@ import { renderWithProviders } from "../../test/test-utils";
 import * as hooks from "../../lib/hooks";
 
 describe("ApiUnavailableState", () => {
-  it("renders truthful offline setup instructions and commands without fake library content", () => {
+  it("guides users through a synthetic backend, connection check, and first finding", async () => {
+    const user = userEvent.setup();
     renderWithProviders(<ApiUnavailableState contextLabel="Overview" />);
 
     // Verify header and context
     expect(screen.getByRole("heading", { name: /local api is not connected • overview/i })).toBeInTheDocument();
 
-    // Verify truthful uvicorn startup command is present
-    expect(
-      screen.getAllByText((content) =>
-        content.includes("uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000")
-      ).length
-    ).toBeGreaterThanOrEqual(1);
-
-    // Verify demo library setup command is present
-    expect(
-      screen.getByText((content) =>
-        content.includes("demo/create_demo_library.py")
-      )
-    ).toBeInTheDocument();
-
-    // Verify truthful local message
-    expect(
-      screen.getByText(/nyxcore operates locally\. no cloud services or external network requests are made\./i)
-    ).toBeInTheDocument();
+    expect(screen.getByText("Start the backend with the synthetic library.")).toBeInTheDocument();
+    expect(screen.getByText("Confirm the connection.")).toBeInTheDocument();
+    expect(screen.getByText("Open Overview and inspect a finding.")).toBeInTheDocument();
+    await user.click(screen.getByText("WSL / Bash commands"));
+    const bash = screen.getByText(/export NYXCORE_WEB_MUSIC_DIR/, { selector: "code" });
+    expect(bash).toBeVisible();
+    expect(bash).toHaveTextContent('export NYXCORE_WEB_MUSIC_DIR="$PWD/demo/generated/sample-library"');
+    await user.click(screen.getByText("Native PowerShell commands"));
+    const powershell = screen.getByText(/\$env:NYXCORE_WEB_MUSIC_DIR/, { selector: "code" });
+    expect(powershell).toBeVisible();
+    expect(powershell).toHaveTextContent("python demo/create_demo_library.py");
+    expect(powershell).toHaveTextContent("python -m uvicorn nyxcore.webapi.app:app --host 127.0.0.1 --port 8000");
+    expect(powershell).not.toHaveTextContent("export");
 
     // Verify fake library content is NOT displayed
     expect(screen.queryByText(/42,804 files scanned/i)).not.toBeInTheDocument();

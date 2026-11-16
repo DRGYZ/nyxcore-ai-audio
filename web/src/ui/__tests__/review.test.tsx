@@ -5,37 +5,67 @@ import { ReviewPage } from "../pages/ReviewPage";
 import { renderWithProviders } from "../../test/test-utils";
 import * as hooks from "../../lib/hooks";
 import { mockReviewReport } from "../../lib/mock-data";
+import type { ActionPlan, ActionPlanOperation, ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
+
+const musicRoot = "C:\\Synthetic Library";
+const keeper = musicRoot + "\\Archive\\Original Café.flac";
+const duplicate = musicRoot + "\\Imports\\重複 copy.flac";
+const secondDuplicate = musicRoot + "\\Imports\\Other copy.flac";
+const destination = musicRoot + "\\.nyxcore_quarantine\\Imports\\重複 copy.flac";
+const outside = "D:\\Other Library\\持出.flac";
+
+function operation(id: string, type: string, fields: Partial<ActionPlanOperation> = {}): ActionPlanOperation {
+  return { operation_id: id, operation_type: type, apply_supported: true, notes: [], fields: [], values: {}, ...fields };
+}
+
+const duplicateOperations = [
+  operation("keep", "keep_preferred", { path: keeper, apply_supported: false }),
+  operation("move-1", "quarantine_move", { path: duplicate, destination_path: destination, expected_hash: "approved-fingerprint" }),
+  operation("move-2", "quarantine_move", { path: secondDuplicate, destination_path: musicRoot + "\\.nyxcore_quarantine\\Imports\\Other copy.flac" }),
+];
+
+const makePlan = (id: string, action: string, operations: ActionPlanOperation[]): ActionPlan => ({
+  plan_id: id, action_type: action, proposed_operations: operations, source_review_item_ids: ["item-1"],
+  confidence: 1, safety_level: "low-risk", affected_files: [], reasons: [], notes: [],
+  apply_supported: true, resolves_review_items: true,
+});
+
+const report: ActionPlanReport = {
+  created_at: "", source_review_item_ids: ["item-1"],
+  plans: [
+    makePlan("duplicates", "exact_duplicate_keep_plan", duplicateOperations),
+    makePlan("tags", "metadata_fix_plan", [
+      operation("tag-1", "write_metadata", { path: musicRoot + "\\Tracks\\Café.mp3", fields: ["title", "artist"], values: { title: "Été", artist: "Mira Vale", album: "Unselected value" } }),
+    ]),
+    makePlan("rename", "rename_plan", [
+      operation("rename-1", "rename_file", { path: musicRoot + "\\Tracks\\Old name.mp3", destination_path: musicRoot + "\\Tracks\\New name.mp3" }),
+      operation("review-1", "inspect_file", { path: outside, apply_supported: false }),
+    ]),
+  ],
+  unsupported_items: [{ source_review_item_id: "item-1", item_type: "manual", reason: "Identify this file manually." }],
+  summary: { requested_item_count: 1, generated_plan_count: 3, unsupported_item_count: 1, apply_supported_plan_count: 3, max_automatic_operations: 2 },
+};
+
+function result(statuses: Array<"ok" | "error">): ReviewPlanApplyResponse {
+  return {
+    result_count: 1, batch_id: "batch-fixture", resolved_review_item_ids: [],
+    results: [{
+      plan_id: "duplicates", source_review_item_ids: ["item-1"], resolved_review_item_ids: [],
+      action_type: "exact_duplicate_keep_plan", status: statuses.includes("error") ? "partial_failure" : "ok",
+      operation_results: [
+        { ...duplicateOperations[0], status: "skipped", message: "operation is review-only" },
+        ...statuses.map((status, index) => ({
+          ...duplicateOperations[index + 1], status, message: status === "error" ? "destination already exists" : "applied",
+        })),
+      ],
+    }],
+  };
+}
 
 describe("Review Inbox", () => {
   const mockReviewMutation = { mutateAsync: vi.fn(), isPending: false };
   const mockPlanMutation = {
-    mutateAsync: vi.fn().mockResolvedValue({
-      data: {
-        summary: { generated_plan_count: 1, max_automatic_operations: 10 },
-        plans: [
-          {
-            plan_id: "plan-1",
-            action_type: "quarantine_move",
-            safety_level: "safe",
-            confidence: 1.0,
-            affected_files: ["/path/to/file.mp3"],
-            proposed_operations: [
-              {
-                operation_id: "op-1",
-                operation_type: "quarantine_move",
-                path: "/path/to/file.mp3",
-                fields: [],
-                values: {},
-                notes: [],
-              },
-            ],
-            reasons: ["Exact duplicate"],
-            notes: [],
-          },
-        ],
-        unsupported_items: [],
-      },
-    }),
+    mutateAsync: vi.fn().mockResolvedValue({ data: report, meta: { music_path: musicRoot } }),
     isPending: false,
   };
   const mockApplyMutation = { mutateAsync: vi.fn(), isPending: false };
@@ -149,6 +179,83 @@ describe("Review Inbox", () => {
 
     // Modal closes
     expect(screen.queryByRole("dialog", { name: /generated action plan/i })).not.toBeInTheDocument();
+    expect(generateBtn).toHaveFocus();
+  });
+
+  it("explains operation-specific consequences and offers the original full paths", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewPage />);
+    await user.click(screen.getAllByRole("button", { name: "Generate Plan" })[0]);
+    const modal = within(await screen.findByRole("dialog", { name: "Generated Action Plan" }));
+    expect(modal.getByText("Imports\\重複 copy.flac")).toBeVisible();
+    expect(modal.getByText(".nyxcore_quarantine\\Imports\\重複 copy.flac")).toBeVisible();
+    expect(modal.getAllByText("Archive\\Original Café.flac")[0]).toBeVisible();
+    expect(modal.getByText(duplicate)).not.toBeVisible();
+    await user.click(modal.getByText(duplicate).closest("details")!.querySelector("summary")!);
+    expect(modal.getByText(duplicate)).toBeVisible();
+    expect(modal.getByText(outside)).toBeVisible();
+    expect(modal.getByText("Été")).toBeVisible();
+    expect(modal.getByText("Mira Vale")).toBeVisible();
+    expect(modal.queryByText("Unselected value")).not.toBeInTheDocument();
+    expect(modal.getByText("Old name.mp3")).toBeVisible();
+    expect(modal.getByText("New name.mp3")).toBeVisible();
+    expect(modal.getByText("This operation cannot be applied.")).toBeVisible();
+    expect(modal.getAllByRole("checkbox")).toHaveLength(4);
+  });
+
+  it("keeps only selected changes in confirmation and sends the same approved paths and fingerprint", async () => {
+    const user = userEvent.setup();
+    mockApplyMutation.mutateAsync.mockResolvedValue(result(["ok"]));
+    renderWithProviders(<ReviewPage />);
+    await user.click(screen.getAllByRole("button", { name: "Generate Plan" })[0]);
+    const preview = within(await screen.findByRole("dialog", { name: "Generated Action Plan" }));
+    const first = preview.getByRole("checkbox", { name: /quarantine duplicate.*重複/ });
+    const second = preview.getByRole("checkbox", { name: /quarantine duplicate.*Other copy/ });
+    await user.click(first);
+    await user.click(second);
+    expect(preview.getByRole("checkbox", { name: /write metadata/ })).toBeDisabled();
+    await user.click(second);
+    await user.click(preview.getByRole("button", { name: "Review Selected Changes" }));
+    const confirm = within(screen.getByRole("dialog", { name: "Confirm Plan Apply" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(confirm.getByText("1 selected change")).toBeInTheDocument();
+    expect(confirm.getByText("Duplicate moves · 1")).toBeInTheDocument();
+    expect(confirm.getByText("Keep")).toBeInTheDocument();
+    expect(confirm.getByText("Move from")).toBeInTheDocument();
+    expect(confirm.getByText("Move to")).toBeInTheDocument();
+    expect(confirm.queryByText(/Other copy|Metadata edits|Renames/)).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(mockApplyMutation.mutateAsync).not.toHaveBeenCalled();
+    expect(preview.getByRole("checkbox", { name: /quarantine duplicate.*重複/ })).toBeChecked();
+    await user.click(preview.getByRole("button", { name: "Review Selected Changes" }));
+    await user.click(confirm.getByRole("button", { name: "Apply Plan" }));
+
+    expect(mockApplyMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    const sent = mockApplyMutation.mutateAsync.mock.calls[0][0].plan_report;
+    expect(sent.plans).toHaveLength(1);
+    expect(sent.plans[0].proposed_operations).toEqual(duplicateOperations.slice(0, 2));
+    expect(await screen.findByText("All selected changes applied. 1 applied · 0 failed · 0 not applied.")).toBeInTheDocument();
+  });
+
+  it.each([
+    { statuses: ["ok", "error"] as const, summary: "Partially applied. 1 applied · 1 failed · 0 not applied." },
+    { statuses: ["error", "error"] as const, summary: "No changes applied. 0 applied · 2 failed · 0 not applied." },
+  ])("reports $summary and keeps the details and History link", async ({ statuses, summary }) => {
+    const user = userEvent.setup();
+    mockApplyMutation.mutateAsync.mockResolvedValue(result([...statuses]));
+    renderWithProviders(<ReviewPage />);
+    await user.click(screen.getAllByRole("button", { name: "Generate Plan" })[0]);
+    const preview = within(await screen.findByRole("dialog", { name: "Generated Action Plan" }));
+    for (const move of preview.getAllByRole("checkbox", { name: /quarantine duplicate/ })) await user.click(move);
+    await user.click(preview.getByRole("button", { name: "Review Selected Changes" }));
+    const confirm = within(screen.getByRole("dialog", { name: "Confirm Plan Apply" }));
+    await user.click(confirm.getByRole("button", { name: "Cancel" }));
+    expect(mockApplyMutation.mutateAsync).not.toHaveBeenCalled();
+    await user.click(preview.getByRole("button", { name: "Review Selected Changes" }));
+    await user.click(confirm.getByRole("button", { name: "Apply Plan" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(summary);
+    expect(screen.getAllByText(/destination already exists/)[0]).toBeVisible();
+    expect(screen.getByRole("link", { name: "Inspect History Batch" })).toHaveAttribute("href", "/history?batch=batch-fixture");
   });
 
   it("preserves selection and restores focus when closing responsive inspector", async () => {

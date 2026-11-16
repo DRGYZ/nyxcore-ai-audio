@@ -3,6 +3,25 @@ import type { PropsWithChildren, ReactNode } from "react";
 import { useCheckConnection } from "../lib/hooks";
 import { Button, Icon, Panel } from "./primitives";
 
+const DEMO_COMMANDS = [
+  {
+    shell: "WSL / Bash",
+    command: [
+      "python demo/create_demo_library.py",
+      'export NYXCORE_WEB_MUSIC_DIR="$PWD/demo/generated/sample-library"',
+      'export NYXCORE_WEB_OUT_DIR="$PWD/data/demo-reports"',
+    ],
+  },
+  {
+    shell: "Native PowerShell",
+    command: [
+      "python demo/create_demo_library.py",
+      '$env:NYXCORE_WEB_MUSIC_DIR = Join-Path $PWD "demo/generated/sample-library"',
+      '$env:NYXCORE_WEB_OUT_DIR = Join-Path $PWD "data/demo-reports"',
+    ],
+  },
+];
+
 export function ApiUnavailableState({
   contextLabel,
   onRetry,
@@ -17,8 +36,8 @@ export function ApiUnavailableState({
   const isChecking = checking !== undefined ? checking : defaultChecking;
 
   return (
-    <Panel className="p-8">
-      <div className="flex max-w-3xl flex-col gap-6">
+    <Panel className="min-w-0 p-5 sm:p-8">
+      <div className="flex max-w-3xl flex-col gap-5">
         <div className="flex items-center gap-3">
           <div className="flex size-9 items-center justify-center rounded-[3px] border border-amber-500/30 bg-amber-500/10 text-amber-400">
             <Icon name="cloud_off" className="text-xl" />
@@ -32,50 +51,33 @@ export function ApiUnavailableState({
         </div>
 
         <p className="font-sans text-sm leading-relaxed text-primary-muted">
-          NyxCore is an experimental local-first toolkit. It connects to a local FastAPI backend running on your machine
-          at <code className="rounded-[2px] border border-white/[0.08] bg-surface-low px-1.5 py-0.5 font-mono text-xs text-accent">http://127.0.0.1:8000</code>.
-          The local server is not currently reachable.
+          NyxCore needs its local FastAPI backend running with a library folder and a reports folder.
         </p>
 
-        <div className="min-w-0 max-w-full space-y-4 rounded-[3px] border border-white/[0.07] bg-surface-low/60 p-5">
-          <p className="font-sans text-xs font-semibold text-primary">Setup Instructions</p>
-
-          <div className="min-w-0 max-w-full space-y-2">
-            <p className="font-sans text-xs text-primary-muted">
-              1. Start the local API pointed at your music library & reports directory:
-            </p>
-            <pre className="min-w-0 max-w-full overflow-x-auto rounded-[3px] border border-white/[0.06] bg-surface p-3 font-mono text-xs text-primary/90 select-all">
-{`export NYXCORE_WEB_MUSIC_DIR="/path/to/your/music"
-export NYXCORE_WEB_OUT_DIR="data/reports"
-uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
-            </pre>
-          </div>
-
-          <div className="min-w-0 max-w-full space-y-2">
-            <p className="font-sans text-xs text-primary-muted">
-              2. Or run the synthetic demo from the repository root with the Python environment active. Skip the first command if the fixture already exists:
-            </p>
-            <pre className="min-w-0 max-w-full overflow-x-auto rounded-[3px] border border-white/[0.06] bg-surface p-3 font-mono text-xs text-primary/90 select-all">
-{`python demo/create_demo_library.py
-export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/demo-reports"
-uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
-            </pre>
-          </div>
-
-          <p className="font-sans text-xs text-primary-subtle">
-            For step-by-step setup guides (including Windows WSL2 setup and dependencies), refer to <span className="text-accent">INSTALL_WSL.md</span> in the project root.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-4">
-          <Button tone="primary" onClick={handleCheck} disabled={isChecking}>
-            <Icon name="refresh" className={`text-base ${isChecking ? "animate-spin" : ""}`} />
-            {isChecking ? "Checking Connection…" : "Check Connection"}
-          </Button>
-          <span className="font-sans text-xs text-primary-subtle">
-            NyxCore operates locally. No cloud services or external network requests are made.
-          </span>
+        <div className="space-y-4 text-sm text-primary-muted">
+          <h3 className="font-sans font-semibold text-primary">Setup Instructions</h3>
+          <ol className="list-decimal space-y-4 pl-5">
+            <li>
+              <p><strong className="text-primary">Start the backend with the synthetic library.</strong> Run the commands from the repository root with your NyxCore Python environment active. The generator needs FFmpeg and can be skipped if the demo already exists.</p>
+              {DEMO_COMMANDS.map(({ shell, command }) => (
+                <details key={shell} className="mt-2 min-w-0 rounded-[3px] border border-white/[0.08] bg-surface-low/60 p-3">
+                  <summary className="cursor-pointer font-medium text-accent focus-visible:outline-accent">{shell} commands</summary>
+                  <pre className="mt-2 select-all whitespace-pre-wrap rounded-[3px] bg-surface p-2.5 font-mono text-xs text-primary [overflow-wrap:anywhere]"><code>{[
+                    ...command, "python -m uvicorn nyxcore.webapi.app:app --host 127.0.0.1 --port 8000",
+                  ].join("\n")}</code></pre>
+                </details>
+              ))}
+              <p className="mt-2 text-xs text-primary-subtle">For installation on Windows via WSL2, see <code>INSTALL_WSL.md</code> in the project root. PowerShell commands assume the dependencies are already installed.</p>
+            </li>
+            <li>
+              <p><strong className="text-primary">Confirm the connection.</strong> Leave the backend running and check the connection here.</p>
+              <Button className="mt-2" tone="primary" onClick={handleCheck} disabled={isChecking}>
+                <Icon name="refresh" className={`text-base ${isChecking ? "animate-spin" : ""}`} />
+                {isChecking ? "Checking Connection…" : "Check Connection"}
+              </Button>
+            </li>
+            <li><strong className="text-primary">Open Overview and inspect a finding.</strong> Browsing and plan previews leave audio files unchanged.</li>
+          </ol>
         </div>
       </div>
     </Panel>
@@ -183,12 +185,25 @@ export function Modal({
   children,
   footer,
   onClose,
-}: PropsWithChildren<{ open: boolean; title: string; subtitle?: string; footer?: ReactNode; onClose: () => void }>) {
+  dismissible = true,
+}: PropsWithChildren<{ open: boolean; title: string; subtitle?: string; footer?: ReactNode; onClose: () => void; dismissible?: boolean }>) {
   const titleId = useId();
   const subtitleId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = dismissible ? onClose : () => {};
+  }, [dismissible, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    const timer = requestAnimationFrame(() => closeRef.current?.focus());
+    return () => cancelAnimationFrame(timer);
+  }, [open, title]);
 
   useEffect(() => {
     if (!open) return;
@@ -199,17 +214,10 @@ export function Modal({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // Focus close button or first interactive element inside dialog
-    const timer = requestAnimationFrame(() => {
-      if (closeRef.current) {
-        closeRef.current.focus();
-      }
-    });
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -223,6 +231,7 @@ export function Modal({
           'input:not([disabled])',
           'select:not([disabled])',
           'textarea:not([disabled])',
+          'summary',
           '[tabindex]:not([tabindex="-1"])',
         ].join(', ');
 
@@ -254,7 +263,6 @@ export function Modal({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      cancelAnimationFrame(timer);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
       // Defensive focus restoration to trigger element if it still exists
@@ -266,26 +274,26 @@ export function Modal({
         }
       }
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 py-8 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 py-4 backdrop-blur-sm sm:py-8"
       role="presentation"
-      onMouseDown={onClose}
+      onMouseDown={dismissible ? onClose : undefined}
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-4xl rounded-[4px] border border-white/[0.1] bg-surface shadow-2xl"
+        className="flex max-h-full w-full min-w-0 max-w-4xl flex-col rounded-[4px] border border-white/[0.1] bg-surface shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={subtitle ? subtitleId : undefined}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-white/[0.07] bg-surface-low/80 px-6 py-4">
+        <div className="flex shrink-0 items-start justify-between border-b border-white/[0.07] bg-surface-low/80 px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <h3 id={titleId} className="font-display text-lg font-bold text-primary">
               {title}
@@ -300,15 +308,16 @@ export function Modal({
             ref={closeRef}
             type="button"
             aria-label="Close dialog"
-            onClick={onClose}
+            onClick={dismissible ? onClose : undefined}
+            aria-disabled={!dismissible}
             className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <Icon name="close" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-6">{children}</div>
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
         {footer ? (
-          <div className="flex flex-wrap justify-end gap-2.5 border-t border-white/[0.07] bg-surface-low/80 px-6 py-3.5">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2.5 border-t border-white/[0.07] bg-surface-low/80 px-4 py-3.5 sm:px-6">
             {footer}
           </div>
         ) : null}

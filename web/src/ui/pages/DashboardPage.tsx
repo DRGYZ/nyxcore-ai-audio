@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   useCheckConnection,
@@ -19,6 +18,7 @@ import {
   MetricCard,
   PageHeader,
   Panel,
+  PathBlock,
   ProgressBar,
   formatDate,
   formatNumber,
@@ -32,21 +32,7 @@ export function DashboardPage() {
   const duplicatesQuery = useDuplicatesQuery();
   const historyQuery = useHistoryQuery();
   const { checkConnection, checking } = useCheckConnection();
-  const [refreshNotice, setRefreshNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
-
-  const isUnavailable =
-    healthQuery.isError ||
-    reviewQuery.isError ||
-    duplicatesQuery.isError ||
-    historyQuery.isError ||
-    statusQuery.isError;
-
-  const isLoading =
-    !isUnavailable &&
-    (healthQuery.isLoading ||
-      reviewQuery.isLoading ||
-      duplicatesQuery.isLoading ||
-      historyQuery.isLoading);
+  const status = statusQuery.data;
 
   const refreshing =
     healthQuery.isFetching ||
@@ -55,17 +41,7 @@ export function DashboardPage() {
     historyQuery.isFetching ||
     checking;
 
-  async function handleRefresh() {
-    setRefreshNotice(null);
-    try {
-      await checkConnection();
-      setRefreshNotice({ tone: "success", message: "Library overview refreshed from local API." });
-    } catch {
-      setRefreshNotice({ tone: "error", message: "Refresh failed. Local API may be offline." });
-    }
-  }
-
-  if (isUnavailable) {
+  if (statusQuery.isError) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -78,22 +54,62 @@ export function DashboardPage() {
     );
   }
 
-  if (isLoading || !healthQuery.data || !reviewQuery.data || !duplicatesQuery.data || !historyQuery.data) {
+  const firstFinding = reviewQuery.isError ? undefined : reviewQuery.data?.data.items.find(
+    (item) => item.review_status === "new" || item.review_status === "seen",
+  );
+  const viewHeader = (
+    <>
+      <PageHeader
+        eyebrow="Library Overview"
+        title="Overview"
+        description="Inspect your local library, review findings, and preview proposed changes."
+        actions={status ? (
+          <Button tone="secondary" onClick={() => void checkConnection()} disabled={refreshing}>
+            <Icon name="refresh" className={`text-base ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing…" : "Refresh Overview"}
+          </Button>
+        ) : undefined}
+      />
+      {status ? (
+        <Panel className="min-w-0 space-y-3 p-4 sm:p-5">
+          <h2 className="font-display text-base font-semibold text-primary">Active library</h2>
+          <PathBlock value={status.music_path} />
+          <p className="text-xs leading-relaxed text-primary-muted">
+            Overview reads the library configured in your local backend. Browsing, reviewing findings, and generating plan previews leave audio files unchanged. Applying a selected plan can change files. Use a disposable library to test Apply.
+          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+            {firstFinding ? (
+              <Link className="font-semibold text-accent underline-offset-4 hover:underline focus-visible:outline-accent" to={`/review?item=${encodeURIComponent(firstFinding.item_id)}`}>Inspect the first finding</Link>
+            ) : null}
+            <Link className="text-primary underline-offset-4 hover:underline focus-visible:outline-accent" to="/review">Open Review Inbox</Link>
+          </div>
+          <details className="border-t border-white/[0.07] pt-2 text-xs text-primary-muted">
+            <summary className="cursor-pointer text-primary focus-visible:outline-accent">Inspect a different library</summary>
+            <p className="mt-2">Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
+          </details>
+        </Panel>
+      ) : null}
+    </>
+  );
+  const failedSections = [
+    healthQuery.isError && "library health",
+    reviewQuery.isError && "review findings",
+    duplicatesQuery.isError && "duplicates",
+    historyQuery.isError && "recent operations",
+  ].filter(Boolean);
+  if (!status || failedSections.length || !healthQuery.data || !reviewQuery.data || !duplicatesQuery.data || !historyQuery.data) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          eyebrow="Library Overview"
-          title="Overview"
-          description="Local music library review priorities, duplicate findings, and recent operations."
-        />
-        <Panel className="p-8 text-center text-sm text-slate-400">
-          Loading library data from local API…
-        </Panel>
+        {viewHeader}
+        {status && failedSections.length ? (
+          <ActionBanner tone="error" message={`The local API is connected. Overview could not load ${failedSections.join(", ")}. Use Refresh Overview to try again.`} />
+        ) : (
+          <Panel className="p-8 text-center text-sm text-slate-400">Loading library data from local API…</Panel>
+        )}
       </div>
     );
   }
 
-  const status = statusQuery.data;
   const health = healthQuery.data.data;
   const review = reviewQuery.data.data;
   const duplicates = duplicatesQuery.data.data;
@@ -114,19 +130,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        eyebrow="Library Overview"
-        title="Overview"
-        description="Local music library overview, review priorities, duplicate findings, and recent operations."
-        actions={
-          <Button tone="secondary" onClick={() => void handleRefresh()} disabled={refreshing}>
-            <Icon name="refresh" className={`text-base ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Refreshing…" : "Refresh Overview"}
-          </Button>
-        }
-      />
-
-      {refreshNotice ? <ActionBanner tone={refreshNotice.tone} message={refreshNotice.message} /> : null}
+      {viewHeader}
 
       {/* 4 Focused Metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -136,7 +140,7 @@ export function DashboardPage() {
           icon="audio_file"
           meta={
             <p className="truncate font-mono text-[11px] text-primary-subtle">
-              {status?.music_path ? status.music_path : `${formatNumber(health.overview.total_folders_touched)} folders scanned`}
+              {formatNumber(health.overview.total_folders_touched)} folders scanned
             </p>
           }
         />
@@ -197,7 +201,7 @@ export function DashboardPage() {
                   title={review.items.length === 0 ? "No review findings" : "No active review findings"}
                   description={
                     review.items.length === 0
-                      ? "Run a scan with `python -m nyxcore.cli review <music-dir> --out data/reports` to populate findings."
+                      ? "No findings were returned for the active library. Check the folder above and refresh after adding files."
                       : "All current findings are snoozed or resolved until the next library scan."
                   }
                 />
