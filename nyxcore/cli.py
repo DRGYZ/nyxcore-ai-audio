@@ -1990,7 +1990,7 @@ def restore_review_action_cmd(
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Restore only one recorded path from the batch"),
-    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Automatic stale-lock takeover is disabled. Omit this option."),
 ) -> None:
     """Restore a recorded history batch using the reversible operation ledger."""
     _restore_or_undo_history_batch(
@@ -2014,7 +2014,7 @@ def undo_review_action_cmd(
     review_state: Path | None = typer.Option(None, "--review-state", help="Path to review triage state file"),
     alternate_restore_dir: Path | None = typer.Option(None, "--alternate-restore-dir", help="Optional alternate restore directory when original path is occupied"),
     target_path: str | None = typer.Option(None, "--target-path", help="Undo only one recorded path from the batch"),
-    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Automatic stale-lock takeover is disabled. Omit this option."),
 ) -> None:
     """Compatibility alias for the same history-batch reversal path."""
     _restore_or_undo_history_batch(
@@ -2036,7 +2036,7 @@ def recover_review_action_cmd(
     out: Path = typer.Option(Path("data/reports"), "--out", help="Output folder containing review history"),
     history: Path | None = typer.Option(None, "--history", help="Path to applied review history ledger"),
     action: str = typer.Option("inspect", "--action", help="inspect, finalize, or abort"),
-    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Exact token required to take over a proven-dead local lock"),
+    stale_lock_token: str | None = typer.Option(None, "--stale-lock-token", help="Automatic stale-lock takeover is disabled. Omit this option."),
 ) -> None:
     if not music.exists() or not music.is_dir():
         raise typer.BadParameter(f"Music directory does not exist: {music}")

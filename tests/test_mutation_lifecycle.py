@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from mutagen import File as MutagenFile
@@ -385,36 +387,96 @@ def test_library_lock_rejects_second_mutation_and_releases_after_error(tmp_path:
     assert not (music / ".nyxcore_mutation.lock").exists()
 
 
-def test_stale_lock_takeover_requires_exact_token_and_dead_local_owner(tmp_path: Path) -> None:
+@pytest.fixture
+def forbid_pid_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_signal(_pid: int, _signal: int) -> None:
+        pytest.fail("lock acquisition must not signal a process")
+
+    monkeypatch.setattr(os, "kill", unexpected_signal)
+
+
+@pytest.mark.usefixtures("forbid_pid_signal")
+@pytest.mark.parametrize(
+    ("token", "malformed"),
+    [
+        pytest.param("stale-token", False, id="matching-dead-owner"),
+        pytest.param("wrong-token", False, id="wrong-token"),
+        pytest.param("stale-token", True, id="malformed-owner"),
+    ],
+)
+def test_recovery_refuses_stale_lock_takeover(tmp_path: Path, token: str, malformed: bool) -> None:
     music, out, _source, _destination, ledger_path, batch = _prepared_move(tmp_path)
     lock_path = music / ".nyxcore_mutation.lock"
-    lock_path.write_text(json.dumps({
+    contents = b"{" if malformed else json.dumps({
         "token": "stale-token",
         "pid": 99_999_999,
         "hostname": socket.gethostname(),
         "library_root": str(music.resolve()),
         "acquired_at": "2020-01-01T00:00:00+00:00",
-    }), encoding="utf-8")
+    }).encode("utf-8")
+    lock_path.write_bytes(contents)
+    owner = LibraryMutationLock.read_owner(lock_path)
+    ledger_contents = ledger_path.read_bytes()
 
-    with pytest.raises(MutationLockError, match="does not match"):
+    with pytest.raises(MutationLockError, match="Automatic stale-lock takeover is disabled"):
         recover_recorded_batch(
             ledger_path=ledger_path,
             batch_id=batch.batch_id,
             library_root=music,
             workspace_root=out,
             action="abort",
-            stale_lock_token="wrong-token",
+            stale_lock_token=token,
         )
-    assert lock_path.exists()
+    assert lock_path.read_bytes() == contents
+    assert LibraryMutationLock.read_owner(lock_path) == owner
+    assert ledger_path.read_bytes() == ledger_contents
 
-    recovered, assessments = recover_recorded_batch(
-        ledger_path=ledger_path,
-        batch_id=batch.batch_id,
-        library_root=music,
-        workspace_root=out,
-        action="abort",
-        stale_lock_token="stale-token",
-    )
-    assert recovered.lifecycle_state == "failed"
-    assert assessments[0].journal_state == "failed"
-    assert not lock_path.exists()
+
+@pytest.mark.usefixtures("forbid_pid_signal")
+@pytest.mark.parametrize("token", ["stale-token", ""])
+def test_stale_lock_token_is_refused_without_an_existing_lock(tmp_path: Path, token: str) -> None:
+    lock = LibraryMutationLock(tmp_path)
+    with pytest.raises(MutationLockError, match="Retry without a takeover token"):
+        lock.acquire(stale_owner_token=token)
+    assert not lock.path.exists()
+    with lock:
+        assert LibraryMutationLock.read_owner(lock.path) == lock.record
+    assert not lock.path.exists()
+
+
+@pytest.mark.usefixtures("forbid_pid_signal")
+def test_concurrent_takeover_attempts_preserve_the_owner(tmp_path: Path) -> None:
+    start = Barrier(2, timeout=5)
+    with LibraryMutationLock(tmp_path) as owner:
+        contents = owner.path.read_bytes()
+
+        def attempt_takeover() -> None:
+            contender = LibraryMutationLock(tmp_path)
+            start.wait()
+            with pytest.raises(MutationLockError, match="Automatic stale-lock takeover is disabled"):
+                contender.acquire(stale_owner_token=owner.record.token)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            attempts = [pool.submit(attempt_takeover) for _ in range(2)]
+            for attempt in attempts:
+                attempt.result()
+
+        assert owner.path.read_bytes() == contents
+        assert LibraryMutationLock.read_owner(owner.path) == owner.record
+    assert not owner.path.exists()
+
+
+def test_library_lock_release_refuses_a_changed_owner_token(tmp_path: Path) -> None:
+    lock = LibraryMutationLock(tmp_path).acquire()
+    original = lock.path.read_bytes()
+    changed = json.loads(original)
+    changed["token"] = "different-owner"
+    changed_contents = json.dumps(changed).encode("utf-8")
+    lock.path.write_bytes(changed_contents)
+
+    with pytest.raises(MutationLockError, match="ownership changed"):
+        lock.release()
+    assert lock.path.read_bytes() == changed_contents
+    lock.path.write_bytes(original)
+    lock.release()
+    assert not lock.path.exists()
