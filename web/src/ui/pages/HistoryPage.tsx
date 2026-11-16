@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { isSuccessfulUndoStatus } from "../../lib/contracts";
+import { canReverseHistoryBatch, historyBatchState, isSuccessfulUndoStatus } from "../../lib/contracts";
 import type { HistoryMutationResponse } from "../../lib/types";
-import { useHistoryQuery, useReverseHistoryMutation } from "../../lib/hooks";
+import { useHistoryQuery, useReverseHistoryMutation, useStatusQuery } from "../../lib/hooks";
 import { useUrlBackedSelection } from "../../lib/url-selection";
 import { ActionBanner, Button, Chip, EmptyState, Icon, Modal, PageHeader, Panel, formatDate } from "../components";
 import { ApiUnavailableState } from "../feedback";
@@ -19,6 +19,7 @@ const HISTORY_FILTERS: Array<{ value: HistoryFilter; label: string }> = [
 
 export function HistoryPage() {
   const historyQuery = useHistoryQuery();
+  const statusQuery = useStatusQuery();
   const reverseMutation = useReverseHistoryMutation();
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [confirmBatchId, setConfirmBatchId] = useState<string | null>(null);
@@ -44,32 +45,45 @@ export function HistoryPage() {
     items: filteredHistory,
     param: "batch",
     idKey: "batch_id",
+    syncUrl: historyQuery.isSuccess && !historyQuery.isFetching,
   });
 
-  if (historyQuery.isError) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          eyebrow="Ledger Operations"
-          title="Operation History"
-          description="Inspect applied batches, track ledger mutations, and safely reverse changes back to original file locations."
-        />
-        <ApiUnavailableState contextLabel="History" />
-      </div>
-    );
+  function refreshHistory() {
+    void historyQuery.refetch();
+    void statusQuery.refetch();
   }
 
-  if (historyQuery.isLoading || !response) {
+  const header = (
+    <PageHeader
+      eyebrow="Ledger Operations"
+      title="Operation History"
+      description="Inspect recorded batches, recovery states, and reversal outcomes."
+      actions={response && !historyQuery.isError ? (
+        <Button tone="secondary" disabled={historyQuery.isFetching} onClick={refreshHistory}>Refresh History</Button>
+      ) : undefined}
+    />
+  );
+
+  if (historyQuery.isError || !response) {
+    const showError = historyQuery.isError && !statusQuery.isPending && !statusQuery.isFetching;
     return (
       <div className="space-y-6">
-        <PageHeader
-          eyebrow="Ledger Operations"
-          title="Operation History"
-          description="Inspect applied batches, track ledger mutations, and safely reverse changes back to original file locations."
-        />
-        <Panel className="p-8 text-center text-sm text-primary-muted">
-          Loading operation history from local API…
-        </Panel>
+        {header}
+        {showError ? (
+          statusQuery.isError ? (
+            <ApiUnavailableState contextLabel="History" />
+          ) : (
+            <ActionBanner
+              tone="error"
+              message="History could not be loaded. The local API is connected. Retry to reload the operation ledger."
+              action={<Button tone="secondary" onClick={refreshHistory}>Retry History</Button>}
+            />
+          )
+        ) : (
+          <Panel className="p-8 text-center text-sm text-primary-muted">
+            Loading operation history from local API…
+          </Panel>
+        )}
       </div>
     );
   }
@@ -91,18 +105,17 @@ export function HistoryPage() {
       setConfirmBatchId(null);
     } catch (error) {
       setBanner({ tone: "error", message: error instanceof Error ? error.message : "Unable to reverse history batch." });
+      setConfirmBatchId(null);
+      refreshHistory();
     }
   }
 
-  const busy = reverseMutation.isPending;
+  const busy = reverseMutation.isPending || historyQuery.isFetching;
+  const confirmBatch = items.find((item) => item.batch_id === confirmBatchId);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Ledger Operations"
-        title="Operation History"
-        description="Inspect applied batches, track ledger mutations, and safely reverse changes back to original file locations."
-      />
+      {header}
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
 
       <SplitScreen
@@ -136,18 +149,19 @@ export function HistoryPage() {
             ) : (
               <Panel className="overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[680px] text-left">
+                  <table className="w-full text-left sm:min-w-[680px]">
                     <thead className="border-b border-white/[0.07] bg-surface-low/80">
                       <tr className="font-sans text-[11px] font-medium text-primary-subtle">
-                        <th className="px-5 py-3">Timestamp & ID</th>
-                        <th className="px-5 py-3">Operation Details</th>
-                        <th className="px-5 py-3">Reversibility</th>
-                        <th className="px-5 py-3 text-right">Actions</th>
+                        <th className="px-2.5 py-3 sm:px-5">Timestamp & ID</th>
+                        <th className="hidden px-5 py-3 sm:table-cell">Operation Details</th>
+                        <th className="px-2.5 py-3 sm:px-5">State</th>
+                        <th className="px-2.5 py-3 text-right sm:px-5">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.05]">
                       {filteredHistory.map((item) => {
                         const active = item.batch_id === selected?.batch_id;
+                        const state = historyBatchState(item);
                         return (
                           <tr
                             key={item.batch_id}
@@ -157,40 +171,40 @@ export function HistoryPage() {
                                 : "hover:bg-surface-raised/50"
                             }`}
                           >
-                            <td className="px-5 py-3.5">
+                            <td className="px-2.5 py-3.5 sm:px-5">
                               <button
                                 type="button"
                                 id={`history-batch-trigger-${item.batch_id}`}
                                 onClick={() => selectById(item.batch_id)}
-                                aria-label={`Inspect batch ${item.batch_id}, applied ${formatDate(item.applied_at)}`}
+                                aria-label={`Inspect batch ${item.batch_id}, recorded ${formatDate(item.applied_at)}`}
                                 className="flex flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-[2px] group"
                               >
                                 <span className="font-sans text-xs font-medium text-primary group-hover:text-accent transition-colors">{formatDate(item.applied_at)}</span>
-                                <span className="font-mono text-[10px] text-primary-subtle">{item.batch_id}</span>
+                                <span className="[overflow-wrap:anywhere] font-mono text-[10px] text-primary-subtle">{item.batch_id}</span>
                               </button>
                             </td>
-                            <td className="px-5 py-3.5">
+                            <td className="hidden px-5 py-3.5 sm:table-cell">
                               <div className="flex items-center gap-2.5">
                                 <div className="flex size-7 shrink-0 items-center justify-center rounded-[2px] border border-white/[0.08] bg-surface text-accent">
                                   <Icon name="database" className="text-sm" />
                                 </div>
                                 <div className="min-w-0">
                                   <span className="block truncate font-sans text-xs font-medium text-primary">{item.action_types.join(", ")}</span>
-                                  <p className="mt-0.5 font-sans text-[11px] text-primary-subtle">{item.affected_count} affected files</p>
+                                  <p className="mt-0.5 font-sans text-[11px] text-primary-subtle">
+                                    {item.affected_count} {item.affected_count === 1 ? "operation" : "operations"}
+                                  </p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-5 py-3.5">
-                              <Chip tone={item.reversible ? "success" : "warning"}>
-                                {item.reversible ? "Reversible" : "Mixed"}
-                              </Chip>
+                            <td className="px-2.5 py-3.5 sm:px-5">
+                              <Chip tone={state.tone}>{state.label}</Chip>
                             </td>
-                            <td className="px-5 py-3.5 text-right">
+                            <td className="px-2.5 py-3.5 text-right sm:px-5">
                               <Button
                                 tone="secondary"
                                 id={`reverse-button-${item.batch_id}`}
-                                className="px-3 py-1 text-xs"
-                                disabled={!item.reversible || busy}
+                                className="px-2 py-1 text-xs sm:px-3"
+                                disabled={!canReverseHistoryBatch(item) || busy}
                                 onClick={() => {
                                   setConfirmBatchId(item.batch_id);
                                 }}
@@ -212,9 +226,10 @@ export function HistoryPage() {
           <div className="space-y-6">
             <HistoryDetailPanel
               batch={selected}
+              meta={response.meta}
               mutationResult={mutationResult && mutationResult.batch_id === selected?.batch_id ? mutationResult : null}
               busy={busy}
-              onReverse={() => selected && setConfirmBatchId(selected.batch_id)}
+              onReverse={() => selected && canReverseHistoryBatch(selected) && setConfirmBatchId(selected.batch_id)}
             />
             <Panel className="p-5">
               <h3 className="mb-4 flex items-center gap-2 border-b border-white/[0.07] pb-3 font-display text-sm font-semibold tracking-wide text-primary">
@@ -231,7 +246,7 @@ export function HistoryPage() {
                 <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
                   <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reversible</span>
                   <p className="mt-1 font-display text-xl font-bold tracking-tight text-accent">
-                    {response.items.filter((item) => item.reversible).length}
+                    {response.items.filter(canReverseHistoryBatch).length}
                   </p>
                 </div>
                 <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
@@ -253,7 +268,7 @@ export function HistoryPage() {
       />
 
       <Modal
-        open={!!confirmBatchId}
+        open={!!confirmBatch}
         title="Confirm Reversal"
         subtitle={confirmBatchId ?? undefined}
         onClose={() => setConfirmBatchId(null)}
@@ -264,14 +279,14 @@ export function HistoryPage() {
             </Button>
             <Button
               tone="primary"
-              disabled={busy || !confirmBatchId}
+              disabled={busy || !confirmBatch || !canReverseHistoryBatch(confirmBatch)}
               onClick={() => {
-                if (confirmBatchId) {
-                  void handleReverse(confirmBatchId);
+                if (!busy && confirmBatch && canReverseHistoryBatch(confirmBatch)) {
+                  void handleReverse(confirmBatch.batch_id);
                 }
               }}
             >
-              {busy ? "Reversing..." : "Reverse Batch"}
+              {reverseMutation.isPending ? "Reversing..." : "Reverse Batch"}
             </Button>
           </>
         }

@@ -289,7 +289,90 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(history_response.status_code, 200)
         history_batch = next(item for item in history_response.json()["items"] if item["batch_id"] == batch_id)
+        self.assertEqual(history_batch["lifecycle_state"], "reversed")
+        self.assertFalse(history_batch["recovery_required"])
+        self.assertFalse(history_batch["reversible"])
         self.assertTrue(any(item["undo_status"] == "ok" for item in history_batch["operations"]))
+
+    def test_history_reports_mixed_journal_states_without_writing_files(self) -> None:
+        music_file = self._write_file("track.mp3", b"disposable track")
+        file_stat = music_file.stat()
+
+        def operation(status: str = "ok", **fields) -> dict:
+            return {
+                "operation_id": "op-1",
+                "plan_id": "plan-1",
+                "action_type": "metadata_fix_plan",
+                "operation_type": "write_metadata",
+                "original_path": str(music_file),
+                "current_path": str(music_file),
+                "reversible": True,
+                "status": status,
+                **fields,
+            }
+
+        cases = [
+            ("completed", "applied", [operation(journal_state="applied")], False, True),
+            ("prepared", "prepared", [operation("prepared", journal_state="prepared")], True, False),
+            ("applying", "applying", [operation("applying", journal_state="applying")], True, False),
+            ("manual", "recovery_required", [operation("applying", journal_state="applying")], True, False),
+            ("partial", "partial_failure", [
+                operation(journal_state="applied"),
+                operation("error", operation_id="op-2", journal_state="failed", failure_reason="destination already exists"),
+            ], False, True),
+            ("unfinished-partial", "partial_failure", [
+                operation(journal_state="applied"),
+                operation("prepared", operation_id="op-2", journal_state="prepared"),
+            ], True, False),
+            ("reversal-pending", "applied", [operation(journal_state="applied", reversal_intent={
+                "destination_path": str(music_file),
+                "source_identity": [file_stat.st_dev, file_stat.st_ino],
+            })], True, False),
+            ("reversed", "reversed", [operation(journal_state="reversed", undo_status="ok")], False, False),
+            ("aborted", "failed", [operation("error", journal_state="failed")], False, False),
+            ("legacy", "legacy", [operation()], False, True),
+        ]
+        batches = [
+            {
+                "batch_id": batch_id,
+                "applied_at": f"2026-01-{index:02d}T00:00:00+00:00",
+                "operations": operations,
+                **({"lifecycle_state": state} if state != "legacy" else {}),
+            }
+            for index, (batch_id, state, operations, _, _) in enumerate(cases, 1)
+        ]
+        ledger_path = self.out / "review_history.json"
+        ledger_path.write_text(json.dumps({"batches": batches}), encoding="utf-8")
+
+        def snapshot() -> dict:
+            return {path: (path.stat().st_ino, path.read_bytes()) for path in self.root.rglob("*") if path.is_file()}
+
+        before = snapshot()
+        response = self.client.get("/api/history")
+        self.assertEqual(response.status_code, 200)
+        items = {batch["batch_id"]: batch for batch in response.json()["items"]}
+        self.assertEqual(set(items), {row[0] for row in cases})
+        for batch_id, state, operations, recovery_required, reversible in cases:
+            with self.subTest(batch_id=batch_id):
+                batch = items[batch_id]
+                self.assertEqual(batch["lifecycle_state"], state)
+                self.assertIs(batch["recovery_required"], recovery_required)
+                self.assertIs(batch["reversible"], reversible)
+                self.assertEqual(len(batch["operations"]), len(operations))
+                for recorded, actual in zip(operations, batch["operations"], strict=True):
+                    self.assertEqual(actual["status"], recorded["status"])
+                    self.assertEqual(actual["journal_state"], recorded.get("journal_state", "legacy"))
+                    self.assertEqual(actual["undo_status"], recorded.get("undo_status", "pending"))
+                    self.assertEqual(actual["failure_reason"], recorded.get("failure_reason"))
+                    self.assertIs(actual["reversal_pending"], "reversal_intent" in recorded)
+                    self.assertNotIn("reversal_intent", actual)
+        self.assertEqual(snapshot(), before)
+
+        for batch_id, endpoint in (("unfinished-partial", "restore"), ("reversal-pending", "undo")):
+            response = self.client.post(f"/api/history/{batch_id}/{endpoint}", json={})
+            self.assertEqual(response.status_code, 409)
+            self.assertIn("recover-review-action --action inspect", response.json()["detail"])
+        self.assertEqual(snapshot(), before)
 
     def test_history_restore_rejects_paths_outside_configured_roots(self) -> None:
         left = self._write_file("dup-a.mp3", b"dup" * 400)

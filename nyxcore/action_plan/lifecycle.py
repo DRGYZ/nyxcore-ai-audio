@@ -7,6 +7,7 @@ from nyxcore.action_plan.ledger import (
     OperationBatch,
     RecoveryAssessment,
     apply_batch_recovery,
+    batch_requires_recovery,
     find_batch,
     inspect_batch_recovery,
     load_operation_ledger,
@@ -17,6 +18,10 @@ from nyxcore.action_plan.ledger import (
 from nyxcore.action_plan.lock import LibraryMutationLock
 from nyxcore.core.filesystem import bounded_path
 from nyxcore.review_queue.state import load_review_state, save_review_state
+
+
+class HistoryRecoveryRequiredError(ValueError):
+    pass
 
 
 def inspect_recorded_batch(
@@ -69,6 +74,7 @@ def reverse_recorded_batch(
     alternate_restore_dir: Path | None = None,
     target_path: str | None = None,
     stale_lock_token: str | None = None,
+    require_settled: bool = False,
 ) -> tuple[OperationBatch, list[LedgerOperation]]:
     lock = LibraryMutationLock(library_root)
     lock.acquire(stale_owner_token=stale_lock_token)
@@ -79,6 +85,8 @@ def reverse_recorded_batch(
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise ValueError(f"History batch not found: {batch_id}")
+        if require_settled and batch_requires_recovery(batch):
+            raise HistoryRecoveryRequiredError("Inspect this batch with recover-review-action --action inspect before reversing.")
         review_state = load_review_state(review_state_path)
         changed = reverse_operation_batch(
             batch,

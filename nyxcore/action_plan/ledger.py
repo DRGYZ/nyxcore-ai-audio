@@ -407,6 +407,18 @@ def find_batch(ledger: OperationLedger, batch_id: str) -> OperationBatch | None:
     return None
 
 
+def batch_requires_recovery(batch: OperationBatch) -> bool:
+    unfinished = {"prepared", "applying"}
+    return (
+        batch.lifecycle_state in unfinished | {"recovery_required"}
+        or any(
+            operation.journal_state in unfinished or operation.status in unfinished
+            or operation.reversal_intent is not None
+            for operation in batch.operations
+        )
+    )
+
+
 def _history_file(value: str, roots: tuple[Path, ...], *, label: str) -> Path:
     path = Path(value)
     bounded_path(path, roots, label=label)

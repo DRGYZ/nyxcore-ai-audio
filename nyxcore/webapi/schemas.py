@@ -10,6 +10,9 @@ ReviewStateAction = Literal["seen", "snoozed", "ignored", "resolved"]
 OperationExecutionStatus = Literal["ok", "error", "skipped"]
 PlanExecutionStatus = Literal["ok", "partial_failure", "skipped"]
 UndoExecutionStatus = Literal["pending", "ok", "error", "not_supported"]
+HistoryOperationStatus = Literal[OperationExecutionStatus, "prepared", "applying"]
+HistoryJournalState = Literal["legacy", "prepared", "applying", "applied", "failed", "reversed"]
+HistoryLifecycleState = Literal[HistoryJournalState, "partial_failure", "recovery_required"]
 
 
 class ApiStatusResponse(BaseModel):
@@ -101,18 +104,23 @@ class PlaylistMutationResponse(BaseModel):
 class HistoryOperationResponse(BaseModel):
     operation_id: str
     operation_type: str
-    status: OperationExecutionStatus
+    status: HistoryOperationStatus
+    journal_state: HistoryJournalState
+    reversal_pending: bool
     reversible: bool
     original_path: str | None = None
     current_path: str | None = None
     undo_status: UndoExecutionStatus = "pending"
     undone_at: str | None = None
     undo_message: str | None = None
+    failure_reason: str | None = None
 
 
 class HistoryBatchSummaryResponse(BaseModel):
     batch_id: str
     applied_at: str
+    lifecycle_state: HistoryLifecycleState
+    recovery_required: bool
     action_types: list[str] = Field(default_factory=list)
     reversible: bool
     affected_count: int

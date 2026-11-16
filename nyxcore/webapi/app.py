@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nyxcore import __version__
 from nyxcore.action_plan.ledger import (
+    OperationBatch,
+    batch_requires_recovery,
     find_batch,
     load_operation_ledger,
 )
@@ -16,7 +18,7 @@ from nyxcore.action_plan.service import (
     build_action_plan_report,
     execute_reviewed_action_plan,
 )
-from nyxcore.action_plan.lifecycle import reverse_recorded_batch
+from nyxcore.action_plan.lifecycle import HistoryRecoveryRequiredError, reverse_recorded_batch
 from nyxcore.action_plan.lock import MutationLockError
 from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
@@ -523,32 +525,7 @@ def create_app() -> FastAPI:
         app_config = _resolve_config(config_path, profile)
         ledger = load_operation_ledger(resolved_out / "review_history.json")
         items = [
-            HistoryBatchSummaryResponse(
-                batch_id=batch.batch_id,
-                applied_at=batch.applied_at,
-                action_types=list(batch.action_types),
-                reversible=any(
-                    operation.status == "ok" and operation.reversible and operation.undo_status != "ok"
-                    for operation in batch.operations
-                ),
-                affected_count=len(batch.operations),
-                source_plan_ids=list(batch.source_plan_ids),
-                source_review_item_ids=list(batch.source_review_item_ids),
-                operations=[
-                    HistoryOperationResponse(
-                        operation_id=operation.operation_id,
-                        operation_type=operation.operation_type,
-                        status=operation.status,
-                        reversible=operation.reversible,
-                        original_path=operation.original_path,
-                        current_path=operation.current_path,
-                        undo_status=operation.undo_status,
-                        undone_at=operation.undone_at,
-                        undo_message=operation.undo_message,
-                    )
-                    for operation in batch.operations
-                ],
-            )
+            _history_batch_summary(batch)
             for batch in sorted(ledger.batches, key=lambda item: item.applied_at, reverse=True)
         ]
         return HistoryResponse(meta=_meta(resolved_music, resolved_out, app_config), items=items)
@@ -593,8 +570,9 @@ def create_app() -> FastAPI:
                 alternate_restore_dir=alternate_restore_dir,
                 target_path=target_path,
                 stale_lock_token=request.stale_lock_token,
+                require_settled=True,
             )
-        except MutationLockError as exc:
+        except (MutationLockError, HistoryRecoveryRequiredError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -613,6 +591,48 @@ def create_app() -> FastAPI:
         return restore_history_batch(batch_id, request)
 
     return app
+
+
+def _history_batch_summary(batch: OperationBatch) -> HistoryBatchSummaryResponse:
+    recovery_required = batch_requires_recovery(batch)
+    return HistoryBatchSummaryResponse(
+        batch_id=batch.batch_id,
+        applied_at=batch.applied_at,
+        lifecycle_state=batch.lifecycle_state,
+        recovery_required=recovery_required,
+        action_types=batch.action_types,
+        reversible=(
+            not recovery_required
+            and batch.lifecycle_state in {"applied", "partial_failure", "legacy"}
+            and any(
+                operation.status == "ok"
+                and operation.journal_state in {"applied", "legacy"}
+                and operation.reversible
+                and operation.undo_status in {"pending", "error"}
+                for operation in batch.operations
+            )
+        ),
+        affected_count=len(batch.operations),
+        source_plan_ids=batch.source_plan_ids,
+        source_review_item_ids=batch.source_review_item_ids,
+        operations=[
+            HistoryOperationResponse(
+                operation_id=operation.operation_id,
+                operation_type=operation.operation_type,
+                status=operation.status,
+                journal_state=operation.journal_state,
+                reversal_pending=operation.reversal_intent is not None,
+                reversible=operation.reversible,
+                original_path=operation.original_path,
+                current_path=operation.current_path,
+                undo_status=operation.undo_status,
+                undone_at=operation.undone_at,
+                undo_message=operation.undo_message,
+                failure_reason=operation.failure_reason,
+            )
+            for operation in batch.operations
+        ],
+    )
 
 
 app = create_app()

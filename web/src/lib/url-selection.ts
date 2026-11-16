@@ -6,11 +6,13 @@ export function useUrlBackedSelection<TKey extends string, T extends Record<TKey
   fallbackItems,
   param,
   idKey,
+  syncUrl = true,
 }: {
   items: readonly T[];
   fallbackItems?: readonly T[];
   param: string;
   idKey: TKey;
+  syncUrl?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get(param);
@@ -27,6 +29,7 @@ export function useUrlBackedSelection<TKey extends string, T extends Record<TKey
   }, [idKey, items, preferredItems, selectedId]);
 
   useEffect(() => {
+    if (!syncUrl) return;
     if (!items.length) {
       if (!selectedId) {
         return;
@@ -45,7 +48,7 @@ export function useUrlBackedSelection<TKey extends string, T extends Record<TKey
     const next = new URLSearchParams(searchParams);
     next.set(param, nextId);
     setSearchParams(next, { replace: true });
-  }, [idKey, items.length, param, searchParams, selected, selectedId, setSearchParams]);
+  }, [idKey, items.length, param, searchParams, selected, selectedId, setSearchParams, syncUrl]);
 
   const selectById = useCallback(
     (nextId: string) => {

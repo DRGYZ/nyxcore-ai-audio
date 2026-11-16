@@ -1,11 +1,41 @@
 import type {
   HealthBitrateBucketKey,
+  HistoryBatch,
+  HistoryLifecycleState,
+  HistoryOperationStatus,
   OperationExecutionStatus,
   PlanExecutionStatus,
   UndoExecutionStatus,
 } from "./types";
 
 export type StatusTone = "neutral" | "success" | "warning" | "danger";
+
+const HISTORY_BATCH_STATES: Record<HistoryLifecycleState, { label: string; tone: StatusTone }> = {
+  legacy: { label: "Legacy", tone: "neutral" },
+  prepared: { label: "Prepared", tone: "warning" },
+  applying: { label: "Applying", tone: "warning" },
+  applied: { label: "Completed", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
+  partial_failure: { label: "Partial Failure", tone: "warning" },
+  recovery_required: { label: "Recovery Required", tone: "warning" },
+  reversed: { label: "Reversed", tone: "neutral" },
+};
+
+export const HISTORY_OPERATION_LABELS: Record<HistoryOperationStatus, string> = {
+  prepared: "Prepared",
+  applying: "Applying",
+  ok: "Applied",
+  error: "Failed",
+  skipped: "Skipped",
+};
+
+export function historyBatchState(batch: HistoryBatch) {
+  return HISTORY_BATCH_STATES[batch.recovery_required ? "recovery_required" : batch.lifecycle_state ?? "legacy"];
+}
+
+export function canReverseHistoryBatch(batch: HistoryBatch) {
+  return batch.reversible && !batch.recovery_required;
+}
 
 export const HEALTH_BITRATE_BUCKET_ORDER: HealthBitrateBucketKey[] = [
   "unknown",
@@ -37,9 +67,10 @@ export function formatOperationExecutionStatus(status: OperationExecutionStatus)
   return status;
 }
 
-export function operationExecutionTone(status: OperationExecutionStatus): StatusTone {
+export function operationExecutionTone(status: HistoryOperationStatus): StatusTone {
   if (status === "ok") return "success";
   if (status === "error") return "danger";
+  if (status === "prepared" || status === "applying") return "warning";
   return "neutral";
 }
 

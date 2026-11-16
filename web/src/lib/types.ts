@@ -5,6 +5,9 @@ export type ReportMode = "live" | "mock";
 export type OperationExecutionStatus = "ok" | "error" | "skipped";
 export type PlanExecutionStatus = "ok" | "partial_failure" | "skipped";
 export type UndoExecutionStatus = "pending" | "ok" | "error" | "not_supported";
+export type HistoryOperationStatus = OperationExecutionStatus | "prepared" | "applying";
+export type HistoryJournalState = "legacy" | "prepared" | "applying" | "applied" | "failed" | "reversed";
+export type HistoryLifecycleState = HistoryJournalState | "partial_failure" | "recovery_required";
 export type HealthBitrateBucketKey = "unknown" | "<128k" | "128k-191k" | "192k-255k" | ">=256k";
 
 export interface ApiMeta {
@@ -205,6 +208,8 @@ export interface PlaylistsResponse {
 export interface HistoryBatch {
   batch_id: string;
   applied_at: string;
+  lifecycle_state: HistoryLifecycleState;
+  recovery_required: boolean;
   action_types: string[];
   reversible: boolean;
   affected_count: number;
@@ -213,13 +218,16 @@ export interface HistoryBatch {
   operations: Array<{
     operation_id: string;
     operation_type: string;
-    status: OperationExecutionStatus;
+    status: HistoryOperationStatus;
+    journal_state: HistoryJournalState;
+    reversal_pending: boolean;
     reversible: boolean;
     original_path?: string | null;
     current_path?: string | null;
     undo_status: UndoExecutionStatus;
     undone_at?: string | null;
     undo_message?: string | null;
+    failure_reason?: string | null;
   }>;
 }
 
