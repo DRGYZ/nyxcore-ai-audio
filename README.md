@@ -110,91 +110,74 @@ NyxCore is designed around defensive, local-first safety primitives:
 
 ## Requirements
 
-- **Python**: `3.11+`
-- **Node.js**: `18+` and `npm` (for the web frontend)
+- **Python**: `3.11` or `3.12` are tested. The package minimum is `3.11`.
+- **Node.js**: Use Node.js `22.13+` on the 22.x line and npm. Node 18 and 20 do not meet the locked frontend test dependencies' requirements.
 - **Audio Metadata Support**: Pure Python via `mutagen` (`.mp3`, `.flac`, `.ogg`, `.m4a`, `.wav`, `.aif`, `.opus`). No external media binaries are required for core indexing, health reporting, duplicate matching, or action plans.
 - **Optional External Tools**:
   - `ffmpeg`: **Only** required if you want to generate synthetic audio test files with `demo/create_demo_library.py` or run optional CLAP audio transcoding. It is not required for the core scanner or web application.
 
 ---
 
-## Quickstart Guide
+## Quickstart: Review a Synthetic Library
 
-### 1. Set Up Python Environment
+The demo was verified on Windows 11 using Ubuntu 24.04 under WSL2, with the checkout and fixture on the Linux filesystem, Python 3.12, Node.js 22, and a Windows browser. Backend tests also passed on Python 3.11. Native Windows, macOS, other Linux distributions, and operations that modify music files are outside this verification. NyxCore is still experimental.
+
+On Windows, follow the [WSL2 Setup Guide](INSTALL_WSL.md) for system prerequisites. Run the commands below in Bash inside the Linux environment.
+
+### 1. Set Up Python
 
 ```bash
-# Clone the repository
 git clone https://github.com/DRGYZ/nyxcore-ai-audio.git
 cd nyxcore-ai-audio
 
-# Create and activate a virtual environment
-python -m venv .venv
-
-# Linux / macOS:
+python3 -m venv .venv
 source .venv/bin/activate
-
-# Windows (PowerShell):
-# .venv\Scripts\Activate.ps1
-
-# Install core package with web API dependencies
-python -m pip install --upgrade pip
-pip install -e ".[web]"
+python -m pip install -e ".[web,dev]"
 ```
 
-### 2. Generate Demo Fixture (or Use Your Own Music Folder)
+### 2. Generate the Demo and Reports
 
-To test NyxCore safely without touching real audio files, generate the included synthetic demo library (requires `ffmpeg`):
+With `ffmpeg` on PATH, generate the synthetic fixture. If you already generated it at this path, skip the first command.
 
 ```bash
-python demo/create_demo_library.py --force
+python demo/create_demo_library.py
+python -m nyxcore.cli scan demo/generated/sample-library --out data/demo-reports
+python -m nyxcore.cli duplicates demo/generated/sample-library --out data/demo-reports
+python -m nyxcore.cli health demo/generated/sample-library --out data/demo-reports
+python -m nyxcore.cli review demo/generated/sample-library --out data/demo-reports
 ```
 
-This creates a self-contained sample library under `demo/generated/sample-library/` containing intentional duplicate pairs, missing tag cases, placeholder names, and bitrate variants.
+The fixture has seven tracks, one exact duplicate group, and one likely duplicate group. The CLI writes reports and local state under `data/demo-reports/` without changing audio files. The API computes findings from the configured library and reads local review state; it does not load the CLI reports as snapshots.
 
-### 3. Generate Reports via CLI
+### 3. Launch the Web API
 
-```bash
-# Run duplicate detection
-python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
-
-# Run health diagnostics
-python -m nyxcore.cli health demo/generated/sample-library --out data/reports
-
-# Generate unified review queue
-python -m nyxcore.cli review demo/generated/sample-library --out data/reports
-```
-
-### 4. Launch the Web API
-
-Configure the music and report output roots via environment variables:
+From the repository root with the virtual environment active:
 
 ```bash
-# Linux / macOS (bash/zsh)
 export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
-uvicorn nyxcore.webapi.app:app --reload --port 8000
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/demo-reports"
+uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-```powershell
-# Windows PowerShell
-$env:NYXCORE_WEB_MUSIC_DIR = (Resolve-Path "demo/generated/sample-library").Path
-$env:NYXCORE_WEB_OUT_DIR = (Resolve-Path "data/reports").Path
-uvicorn nyxcore.webapi.app:app --reload --port 8000
-```
+Open [API status](http://127.0.0.1:8000/api/status) and check that `music_path` ends in `demo/generated/sample-library`.
 
-The API will be available at `http://127.0.0.1:8000` (`http://127.0.0.1:8000/docs` for interactive OpenAPI docs).
+### 4. Launch the React Web UI and Inspect a Plan
 
-### 5. Launch the React Web UI
-
-In a separate terminal:
+In a second terminal in the same environment, from the repository root:
 
 ```bash
 cd web
-npm install
-npm run dev
+npm ci --engine-strict
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open `http://127.0.0.1:5173` in your browser. The UI connects to `http://127.0.0.1:8000/api` by default and indicates `LIVE API` mode in the header badge.
+1. Open [Overview](http://127.0.0.1:5173/) and confirm the header shows **Connected** and the library has seven files. If port `5173` is occupied, use the [verified WSL alternate port](INSTALL_WSL.md#vite-cannot-bind-port-5173).
+2. In **Archive Search**, search for `Blue Hour` to find both copies of the demo track.
+3. In **Review Inbox**, open the exact duplicate finding for **Blue Hour**. Click **Generate Plan**, inspect the preferred copy and proposed quarantine path, then **Close** the preview.
+
+Browsing, searching, opening a finding, and generating or closing a plan preview do not change audio files. Triage controls can save local review state. Stop at the preview for this demo. Applying plans, restoring or reversing batches, taking over locks, and recovery writes are outside this demo.
+
+If the UI shows **Local API is not connected**, check [API status](http://127.0.0.1:8000/api/status), start the backend if needed, then click **Check Connection**. For localhost or port conflicts, see the [WSL2 troubleshooting steps](INSTALL_WSL.md#8-troubleshooting).
 
 ---
 
@@ -220,18 +203,16 @@ python -m nyxcore.cli review <music-dir> --out data/reports
 # Generate action plan for a specific review item
 python -m nyxcore.cli review-plan <music-dir> --out data/reports --item-id <item-id>
 
-# Apply a validated action plan
-python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music <music-dir> --out data/reports
-
 # View operation history
 python -m nyxcore.cli history --out data/reports
 
-# Reverse an executed batch
-python -m nyxcore.cli restore-review-action --batch-id <batch-id> --out data/reports
-
-# Inspect or recover interrupted operations
-python -m nyxcore.cli recover-review-action --action inspect --out data/reports
+# Inspect an interrupted batch
+python -m nyxcore.cli recover-review-action <batch-id> --action inspect --music <music-dir> --out data/reports
 ```
+
+### Mutation Commands (Outside the Demo)
+
+`apply-review-plan` and `restore-review-action` (also called `undo-review-action`) can move audio files or write tags. Use the CLI's `--help` for their options.
 
 ### Note on Legacy / Experimental Mutation Commands
 

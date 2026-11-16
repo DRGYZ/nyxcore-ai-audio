@@ -53,12 +53,12 @@ uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
 
           <div className="min-w-0 max-w-full space-y-2">
             <p className="font-sans text-xs text-primary-muted">
-              2. Or generate and inspect the built-in demo library:
+              2. Or run the synthetic demo from the repository root with the Python environment active. Skip the first command if the fixture already exists:
             </p>
             <pre className="min-w-0 max-w-full overflow-x-auto rounded-[3px] border border-white/[0.06] bg-surface p-3 font-mono text-xs text-primary/90 select-all">
-{`python demo/create_demo_library.py demo/demo-library
-export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/demo-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+{`python demo/create_demo_library.py
+export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/demo-reports"
 uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000`}
             </pre>
           </div>

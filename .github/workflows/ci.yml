@@ -11,17 +11,20 @@ on:
 
 jobs:
   backend:
-    name: Backend Tests (Python 3.11)
+    name: Backend Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Install dependencies
@@ -34,24 +37,24 @@ jobs:
           pytest
 
   frontend:
-    name: Frontend Tests & Build (Node 20)
+    name: Frontend Tests & Build (Node 22)
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
         run: |
           cd web
-          npm ci
+          npm ci --engine-strict
 
       - name: Run frontend tests
         run: |

@@ -1,165 +1,116 @@
 # NyxCore on Windows via WSL2 (Ubuntu)
 
-This guide walks through setting up the NyxCore CLI, FastAPI backend, demo library, and local web UI on Windows using WSL2 (Ubuntu).
-
----
+The synthetic review demo was verified on Windows 11 with Ubuntu 24.04 LTS under WSL2, using Python 3.12, Node.js 22.22.2, npm 10.9.7, and FFmpeg 6.1.1. Python 3.11 also passed the backend suite. Native Windows, other distributions, and library mutations were outside this verification.
 
 ## 1. Prerequisites
 
-### Windows Subsystem for Linux (WSL2)
-Open PowerShell as Administrator:
+If Ubuntu is not installed yet, open PowerShell as Administrator:
 
 ```powershell
-wsl --install -d Ubuntu
+wsl --install -d Ubuntu-24.04
 ```
 
-Reboot if prompted, then verify WSL2 is active:
-
-```powershell
-wsl -l -v
-```
-
-Ensure the Ubuntu distribution shows version `2`.
-
----
+Reboot if prompted. Run `wsl -l -v` and confirm the Ubuntu distribution shows version `2`.
 
 ## 2. System Packages in Ubuntu
 
-Open your Ubuntu terminal and install the core build and runtime packages:
+In Ubuntu, install the packages for the demo:
 
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3 python3-venv python3-pip git curl
+sudo apt update
+sudo apt install -y python3 python3-venv git curl ffmpeg
 ```
 
-### Optional Media & Audio Tools
-- **`ffmpeg`**: Optional for core library review. `mutagen` reads and writes audio metadata in pure Python. FFmpeg is only required if you plan to synthesize test audio using `demo/create_demo_library.py`, or if using experimental CLAP audio transcoding:
-  ```bash
-  sudo apt install -y ffmpeg
-  ```
-- **Node.js (18+)**: Required if running the frontend inside WSL:
-  ```bash
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt install -y nodejs
-  ```
+FFmpeg generates the synthetic audio. It is optional for core library review.
 
----
-
-## 3. Clone or Navigate to the Repository
-
-Navigate to your workspace directory:
+Install **Node.js 22** inside Ubuntu (22.13 or later within 22.x). The verified setup used the [NodeSource Node.js 22 package](https://github.com/nodesource/distributions/blob/master/DEV_README.md#using-ubuntu-nodejs-22). If you already have compatible Linux Node and npm installations, keep them.
 
 ```bash
-# If cloned inside WSL:
-cd ~/nyxcore-ai-audio
-
-# Or if accessing from a Windows drive mount:
-cd /mnt/c/path/to/nyxcore-ai-audio
+node --version
+npm --version
 ```
 
----
+## 3. Clone the Repository
+
+Keep the checkout, virtual environment, and demo files on the WSL Linux filesystem. A checkout under `/mnt/c` and reuse of Windows dependencies were not verified.
+
+```bash
+cd ~
+git clone https://github.com/DRGYZ/nyxcore-ai-audio.git
+cd nyxcore-ai-audio
+```
+
+If you already have a checkout inside WSL, use that directory instead.
 
 ## 4. Virtual Environment & Python Installation
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e ".[web,dev]"
-```
-
-Verify the environment:
-
-```bash
-which python
+python -m pip install -e ".[web,dev]"
 python -V
 ```
 
-The output should point to `.venv/bin/python` with Python 3.11 or newer.
+Ubuntu 24.04 uses Python 3.12. Run `which python` to check that it points to `.venv/bin/python`.
 
----
+## 5. Demo Fixture and Reports
 
-## 5. Demo Fixture Setup
+Follow the [demo and report commands](README.md#2-generate-the-demo-and-reports) from the repository root. This creates the synthetic fixture under `demo/generated/sample-library/` and writes reports and local state to `data/demo-reports/`.
 
-For a clean, risk-free first run, generate the synthetic demo fixture:
+## 6. Run the Local FastAPI Backend
 
-```bash
-python demo/create_demo_library.py demo/generated/sample-library --force
-```
-
-> **Note**: Generating synthetic audio requires `ffmpeg` on `PATH`. If you already have an audio folder, you can skip this step and point directly to your music directory.
-
-Run the core detection and review pipeline against the sample library:
+From the repository root with the virtual environment active:
 
 ```bash
-python -m nyxcore.cli duplicates demo/generated/sample-library --out data/reports
-python -m nyxcore.cli health demo/generated/sample-library --out data/reports
-python -m nyxcore.cli review demo/generated/sample-library --out data/reports
-```
-
-To test the safe mutation and history pipeline:
-
-```bash
-# Generate a review plan for an exact duplicate item (check data/reports/review.json for item_id)
-python -m nyxcore.cli review-plan demo/generated/sample-library --out data/reports --item-id <exact-duplicate-item-id>
-
-# Apply the action plan (moves non-preferred copy to .nyxcore_quarantine)
-python -m nyxcore.cli apply-review-plan data/reports/review_plan.json --music demo/generated/sample-library --out data/reports
-
-# Inspect the recorded history ledger
-python -m nyxcore.cli history --out data/reports
-
-# Reverse the batch back to original file locations when supported
-python -m nyxcore.cli undo-review-action <batch-id> --music demo/generated/sample-library --out data/reports
-```
-
----
-
-## 6. Running the Local FastAPI Backend
-
-Launch the local API server pointed at your target music folder and reports directory:
-
-```bash
-source .venv/bin/activate
 export NYXCORE_WEB_MUSIC_DIR="$(pwd)/demo/generated/sample-library"
-export NYXCORE_WEB_OUT_DIR="$(pwd)/data/reports"
+export NYXCORE_WEB_OUT_DIR="$(pwd)/data/demo-reports"
 uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Verify the API is running:
-- **API Status**: [http://127.0.0.1:8000/api/status](http://127.0.0.1:8000/api/status)
-- **Interactive OpenAPI Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+Open [API status](http://127.0.0.1:8000/api/status) and check that `music_path` points at the synthetic fixture.
 
----
+## 7. Run the React Web UI
 
-## 7. Running the React Web UI
-
-In a separate terminal window:
+In a second Ubuntu terminal, from the repository root:
 
 ```bash
 cd web
-npm install
-npm run dev -- --host 127.0.0.1 --port 5173
+npm ci --engine-strict
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open your browser:
-- **Web UI**: [http://127.0.0.1:5173](http://127.0.0.1:5173)
-
----
+Open the [web UI](http://127.0.0.1:5173/) in a Windows browser and follow the [plan preview walkthrough](README.md#4-launch-the-react-web-ui-and-inspect-a-plan). Browsing, searching, and generating a plan do not change audio files. Applying plans, restoring or reversing batches, stale-lock takeover, and recovery writes are outside this demo.
 
 ## 8. Troubleshooting
 
-### Frontend shows "Local API Disconnected"
-1. Verify the backend process is running on `127.0.0.1:8000`.
-2. Confirm `NYXCORE_WEB_MUSIC_DIR` and `NYXCORE_WEB_OUT_DIR` are exported in the terminal running `uvicorn`.
-3. Check that WSL port forwarding is working or connect directly via `127.0.0.1:5173`.
+### Frontend shows "Local API is not connected"
 
-### "ffmpeg is required to generate the NyxCore demo library"
-The `demo/create_demo_library.py` script requires `ffmpeg` to synthesize sine-wave audio tones. Install FFmpeg in Ubuntu (`sudo apt install -y ffmpeg`) or test with an existing audio directory.
+1. Open [API status](http://127.0.0.1:8000/api/status) in the Windows browser. If it fails, check the backend terminal and try the same URL with `curl` inside Ubuntu. If it works only inside Ubuntu, check Windows-to-WSL localhost access.
+2. Confirm the backend points at the demo paths, then click **Check Connection** in the UI.
 
-### Interrupted or Lock-Stalled Mutations
-NyxCore employs a library-scoped lock during plan execution. If a process was terminated mid-operation:
+### Vite cannot bind port 5173
+
+If Windows or WSL already uses `5173`, you can leave that service running. Start FastAPI as shown above. Then, from `web/` after the locked install, use Vite's built-in proxy on the alternate port:
+
 ```bash
-python -m nyxcore.cli recover-review-action --action inspect --music <music-dir> --out data/reports
+VITE_API_BASE_URL=/api node --input-type=module <<'JS'
+import { createServer } from "vite";
+
+const server = await createServer({
+  server: {
+    host: "127.0.0.1",
+    port: 55174,
+    strictPort: true,
+    proxy: { "/api": { target: "http://127.0.0.1:8000", timeout: 3000 } },
+  },
+});
+await server.listen();
+server.printUrls();
+JS
 ```
-Incomplete operations will be safely classified; only provably safe states offer `finalize` or `abort`.
+
+Open [Overview on port 55174](http://127.0.0.1:55174/) and follow the same plan preview walkthrough. The Windows browser was verified with this setup on WSL2. Both services bind to loopback, and the browser sends API requests through Vite on the same origin. The stock API allows browser requests from port `5173`, so changing only the Vite port would fail. Press Ctrl+C in the frontend terminal when finished.
+
+### FFmpeg is missing
+
+Install FFmpeg inside Ubuntu (`sudo apt install -y ffmpeg`) and rerun the generator.
