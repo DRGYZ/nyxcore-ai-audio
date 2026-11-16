@@ -4,15 +4,17 @@ import {
   buildSelectedActionPlanReport,
   setActionOperationSelected,
 } from "../../lib/action-plan";
+import { duplicateKind, findDuplicateGroup, planMatchesDuplicateEvidence, sameDuplicateLibrary, type DuplicateEvidence, type DuplicateKind } from "../../lib/duplicate-evidence";
 import {
   useApplyReviewPlanMutation,
   useCheckConnection,
+  useDuplicatesQuery,
   useGenerateReviewPlanMutation,
   useReviewQuery,
   useReviewStateMutation,
 } from "../../lib/hooks";
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
-import type { ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
+import type { ActionPlanReport, ApiMeta, ReviewItem, ReviewPlanApplyResponse } from "../../lib/types";
 import { useUrlBackedSelection } from "../../lib/url-selection";
 import {
   ActionBanner,
@@ -37,6 +39,12 @@ const REVIEW_STATUS_FILTERS = [
   { value: "resolved", label: "resolved until refresh" },
 ];
 
+type PlanPreview = {
+  report: ActionPlanReport;
+  root?: string;
+  duplicate?: { kind: DuplicateKind; itemId: string; meta?: ApiMeta };
+};
+
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
   const requestedItemType = searchParams.get("type");
@@ -49,7 +57,7 @@ export function ReviewPage() {
   const [status, setStatus] = useState<string>("all");
   const [itemType, setItemType] = useState<string>(() => requestedItemType ?? "all");
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
-  const [plan, setPlan] = useState<{ report: ActionPlanReport; root?: string } | null>(null);
+  const [plan, setPlan] = useState<PlanPreview | null>(null);
   const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
   const [confirmApply, setConfirmApply] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
@@ -94,6 +102,35 @@ export function ReviewPage() {
     idKey: "item_id",
     syncUrl: reviewQuery.isSuccess && !reviewQuery.isFetching,
   });
+
+  const reviewMeta = reviewQuery.data?.meta;
+  const selectedKind = duplicateKind(selected?.item_type);
+  const duplicateQuery = useDuplicatesQuery(!reviewQuery.isError && Boolean(selectedKind || plan?.duplicate));
+
+  function evidenceFor(item: ReviewItem | undefined, kind: DuplicateKind): DuplicateEvidence {
+    if (!duplicateQuery.isError && (duplicateQuery.isPending || duplicateQuery.isFetching || reviewQuery.isFetching)) {
+      return { kind, status: "loading" };
+    }
+    const duplicates = duplicateQuery.data;
+    if (item && !duplicateQuery.isError && duplicates && sameDuplicateLibrary(reviewMeta, duplicates.meta)) {
+      const group = findDuplicateGroup(kind, item, duplicates.data);
+      if (group) return { kind, status: "matched", group, root: duplicates.meta.music_path };
+    }
+    return { kind, status: "unavailable" };
+  }
+
+  const inspectorEvidence = selectedKind ? evidenceFor(selected, selectedKind) : undefined;
+  const planOrigin = plan?.duplicate;
+  let previewEvidence: DuplicateEvidence | undefined;
+  if (plan && planOrigin) {
+    const { kind, itemId, meta } = planOrigin;
+    const originItem = items.find((item) => item.item_id === itemId);
+    previewEvidence = sameDuplicateLibrary(reviewMeta, meta)
+      ? evidenceFor(originItem, kind) : { kind, status: "unavailable" };
+    if (previewEvidence.status === "matched" && !planMatchesDuplicateEvidence(plan.report, itemId, previewEvidence.group, kind)) {
+      previewEvidence = { kind, status: "unavailable" };
+    }
+  }
 
   function handleSelectFinding(itemId: string) {
     selectById(itemId);
@@ -189,7 +226,11 @@ export function ReviewPage() {
       const response = await planMutation.mutateAsync({ item_ids: [selected.item_id] });
       setApplyResult(null);
       setBanner(null);
-      setPlan({ report: response.data, root: response.meta?.music_path ?? reviewQuery.data?.meta?.music_path });
+      setPlan({
+        report: response.data,
+        root: response.meta?.music_path ?? reviewMeta?.music_path,
+        duplicate: selectedKind ? { kind: selectedKind, itemId: selected.item_id, meta: response.meta } : undefined,
+      });
       setSelectedOperationIds(new Set());
       setApplyError(null);
     } catch (error) {
@@ -341,6 +382,9 @@ export function ReviewPage() {
                     <tbody className="divide-y divide-white/[0.04]">
                       {filtered.map((item) => {
                         const active = selected?.item_id === item.item_id;
+                        const kind = duplicateKind(item.item_type);
+                        const reason = kind === "exact" ? "SHA-256 byte match"
+                          : kind === "likely" ? "Heuristic match · Manual review" : item.reason_summary;
                         return (
                           <tr
                             key={item.item_id}
@@ -369,9 +413,9 @@ export function ReviewPage() {
                                     {item.item_type}
                                   </span>
                                 </div>
-                                {item.reason_summary ? (
+                                {reason ? (
                                   <p className="mt-0.5 truncate font-editorial text-[11px] italic text-primary-subtle">
-                                    {item.reason_summary}
+                                    {reason}
                                   </p>
                                 ) : null}
                               </button>
@@ -417,6 +461,7 @@ export function ReviewPage() {
             <div className="hidden xl:block">
               <ReviewDetailPanel
                 item={selected}
+                duplicateEvidence={inspectorEvidence}
                 usingMock={usingMock}
                 busy={busy}
                 onGeneratePlan={() => void handleGeneratePlan()}
@@ -458,6 +503,7 @@ export function ReviewPage() {
             <div className="flex-1 overflow-y-auto p-4">
               <ReviewDetailPanel
                 item={selected}
+                duplicateEvidence={inspectorEvidence}
                 usingMock={usingMock}
                 busy={busy}
                 onGeneratePlan={() => void handleGeneratePlan()}
@@ -474,6 +520,7 @@ export function ReviewPage() {
 
       <PlanReportModal
         report={planReport}
+        duplicateEvidence={previewEvidence}
         selection={selection}
         root={plan?.root}
         confirming={confirmApply}

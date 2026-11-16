@@ -1,4 +1,5 @@
 import { useId } from "react";
+import type { DuplicateKind } from "../../lib/duplicate-evidence";
 import { libraryRelativePath, pathFilename } from "../../lib/library-path";
 import type { DuplicateFileInfo, DuplicateGroup } from "../../lib/types";
 import { Button, Chip, Panel, PathBlock, formatBytes } from "../components";
@@ -6,6 +7,10 @@ import { Button, Chip, Panel, PathBlock, formatBytes } from "../components";
 const UNKNOWN = "Unavailable";
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const score = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
+
+export function formatDuplicateScore(value: number) {
+  return score.format(value) + " / 1";
+}
 
 const matchReasons: Record<string, string> = {
   title_match_strong: "Very similar titles",
@@ -116,7 +121,54 @@ function pairRows(left: DuplicateFileInfo, right: DuplicateFileInfo) {
   ];
 }
 
-function PairEvidence({ group, files, id }: { group: DuplicateGroup; files: DuplicateFileInfo[]; id: string }) {
+function orderedFiles(group: DuplicateGroup) {
+  const preferred = group.files.find((file) => file.path === group.preferred.path);
+  return preferred ? [preferred, ...group.files.filter((file) => file !== preferred)] : group.files;
+}
+
+export function DuplicateFiles({ group, root, compact = false }: { group: DuplicateGroup; root?: string; compact?: boolean }) {
+  return (
+    <ul aria-label="Files in this group" className={"grid min-w-0 gap-3 " + (compact ? "" : "sm:grid-cols-2 xl:grid-cols-3")}>
+      {orderedFiles(group).map((file, index) => (
+        <FileCard key={file.path} file={file} index={index + 1} preferred={file.path === group.preferred.path} root={root} />
+      ))}
+    </ul>
+  );
+}
+
+export function DuplicatePreference({ group, kind, root, showPath = false }: {
+  group: DuplicateGroup;
+  kind: DuplicateKind;
+  root?: string;
+  showPath?: boolean;
+}) {
+  const preferred = group.files.find((file) => file.path === group.preferred.path);
+  const relative = preferred && libraryRelativePath(preferred.path, root);
+  const Heading = showPath ? "h4" : "h3";
+  return (
+    <div className={showPath ? "border-l border-emerald-500/40 pl-2.5" : "rounded-[3px] border border-emerald-500/20 bg-emerald-500/[0.03] p-3"}>
+      <Heading className="font-display text-sm font-semibold text-primary">Why NyxCore prefers this copy</Heading>
+      {preferred && showPath ? (
+        <p className="mt-1 select-all font-mono text-xs text-primary-muted [overflow-wrap:anywhere]">{relative ?? preferred.path}</p>
+      ) : null}
+      {preferred && group.preferred.reasons.length ? (
+        <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed text-primary-muted">
+          {group.preferred.reasons.map((reason) => <li key={reason}>{preferenceReason(reason, preferred)}</li>)}
+        </ul>
+      ) : <p className="mt-1 text-xs text-primary-muted">Recommendation details are unavailable.</p>}
+      {!showPath || kind === "likely" ? (
+        <p className="mt-2 text-xs leading-relaxed text-primary-muted">
+          {kind === "exact"
+            ? "The preference identifies the copy to keep in place if you choose to move the others."
+            : "Format, bitrate and file size alone cannot establish recording fidelity."}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function PairEvidence({ group, id }: { group: DuplicateGroup; id?: string }) {
+  const files = orderedFiles(group);
   const byPath = new Map(files.map((file, index) => [file.path, { file, number: index + 1 }]));
   const pairs = (group.relationships ?? []).flatMap((relationship) => {
     if (relationship.paths.length !== 2) return [];
@@ -138,7 +190,7 @@ function PairEvidence({ group, files, id }: { group: DuplicateGroup; files: Dupl
           <details key={title} open={index === 0} className="min-w-0 rounded-[3px] border border-white/[0.08] bg-surface-low/50">
             <summary className="cursor-pointer p-3 text-sm text-primary focus-visible:outline-accent">
               <span className="font-semibold">{title}</span>
-              <span className="ml-2 inline-block text-xs text-primary-muted">Similarity score {score.format(relationship.confidence)} / 1</span>
+              <span className="ml-2 inline-block text-xs text-primary-muted">Similarity score {formatDuplicateScore(relationship.confidence)}</span>
             </summary>
             <div className="space-y-3 border-t border-white/[0.07] p-3">
               {relationship.reasons.length ? (
@@ -181,7 +233,7 @@ function PairEvidence({ group, files, id }: { group: DuplicateGroup; files: Dupl
 
 export function DuplicateComparison({ group, kind, root, onReview, matchedFinding }: {
   group: DuplicateGroup;
-  kind: "exact" | "likely";
+  kind: DuplicateKind;
   root?: string;
   onReview: () => void;
   matchedFinding: boolean;
@@ -189,8 +241,7 @@ export function DuplicateComparison({ group, kind, root, onReview, matchedFindin
   const id = useId();
   const pairEvidenceId = id + "-pair-evidence";
   const exact = kind === "exact";
-  const preferred = group.files.find((file) => file.path === group.preferred.path);
-  const files = preferred ? [preferred, ...group.files.filter((file) => file !== preferred)] : group.files;
+  const files = orderedFiles(group);
 
   return (
     <Panel className={"overflow-hidden " + (exact ? "" : "border-l-2 border-l-amber-400/60")}>
@@ -225,25 +276,11 @@ export function DuplicateComparison({ group, kind, root, onReview, matchedFindin
           {!exact && group.relationships?.length ? (
             <a href={"#" + pairEvidenceId} className="inline-block text-xs text-accent underline-offset-4 hover:underline focus-visible:outline-accent">Jump to reported pair evidence</a>
           ) : null}
-          <ul aria-label="Files in this group" className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {files.map((file, index) => <FileCard key={file.path} file={file} index={index + 1} preferred={file === preferred} root={root} />)}
-          </ul>
-          <div className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/[0.03] p-3">
-            <h3 className="font-display text-sm font-semibold text-primary">Why NyxCore prefers this copy</h3>
-            {preferred && group.preferred.reasons.length ? (
-              <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed text-primary-muted">
-                {group.preferred.reasons.map((reason) => <li key={reason}>{preferenceReason(reason, preferred)}</li>)}
-              </ul>
-            ) : <p className="mt-1 text-xs text-primary-muted">Recommendation details are unavailable.</p>}
-            <p className="mt-2 text-xs leading-relaxed text-primary-muted">
-              {exact
-                ? "The preference identifies the copy to keep in place if you choose to move the others."
-                : "Format, bitrate and file size alone cannot establish recording fidelity."}
-            </p>
-          </div>
+          <DuplicateFiles group={group} root={root} />
+          <DuplicatePreference group={group} kind={kind} />
           {exact ? (
             <p className="text-xs leading-relaxed text-primary-muted">Select each move in Review Inbox. Quarantine preserves the selected files and they still occupy disk space.</p>
-          ) : <PairEvidence group={group} files={files} id={pairEvidenceId} />}
+          ) : <PairEvidence group={group} id={pairEvidenceId} />}
         </div>
       </article>
     </Panel>

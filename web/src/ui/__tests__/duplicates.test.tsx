@@ -7,6 +7,7 @@ import { renderWithProviders } from "../../test/test-utils";
 import { DuplicatesPage } from "../pages/DuplicatesPage";
 
 const root = "C:\\Music Library";
+const meta = { music_path: root, out_path: "C:\\Reports", active_profile: "default", mode: "live" };
 const directory = "録音 Archives " + "Long folder ".repeat(6).trim();
 const exact = {
   path: root + "\\Artists\\Blue Hour.flac", extension: ".flac", file_size_bytes: 1024,
@@ -69,8 +70,8 @@ describe("Duplicate comparison", () => {
     reviewItems = [wrongFinding, ...matchingFindings];
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const path = new URL(url, "http://localhost").pathname;
-      if (path === "/api/duplicates") return Response.json({ meta: { music_path: root }, data: report });
-      if (path === "/api/review") return Response.json({ data: { items: reviewItems } });
+      if (path === "/api/duplicates") return Response.json({ meta, data: report });
+      if (path === "/api/review") return Response.json({ meta, data: { items: reviewItems } });
       throw new Error("Unexpected request to " + path);
     }));
   });

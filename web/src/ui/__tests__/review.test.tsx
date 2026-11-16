@@ -81,6 +81,7 @@ describe("Review Inbox", () => {
     } as any);
 
     vi.spyOn(hooks, "useReviewStateMutation").mockReturnValue(mockReviewMutation as any);
+    vi.spyOn(hooks, "useDuplicatesQuery").mockReturnValue({ isError: true } as ReturnType<typeof hooks.useDuplicatesQuery>);
     vi.spyOn(hooks, "useGenerateReviewPlanMutation").mockReturnValue(mockPlanMutation as any);
     vi.spyOn(hooks, "useApplyReviewPlanMutation").mockReturnValue(mockApplyMutation as any);
     vi.spyOn(hooks, "useCheckConnection").mockReturnValue({
@@ -111,7 +112,7 @@ describe("Review Inbox", () => {
     expect(within(table).queryByText(/Night Drive/i)).not.toBeInTheDocument();
   });
 
-  it("updates inspector when selecting a finding and shows honest confidence (not fabricated)", async () => {
+  it("keeps priority separate from exact identity and heuristic pair scores", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ReviewPage />);
 
@@ -125,10 +126,8 @@ describe("Review Inbox", () => {
     expect(screen.getByText(/ID: exact_duplicate_group-7abb604ec008/i)).toBeInTheDocument();
     expect(screen.getByText(/98 \/ 100/i)).toBeInTheDocument();
 
-    // Confidence should NOT be fabricated when absent; it must display 'n/a'
-    const confidenceLabel = screen.getByText(/confidence/i, { selector: "p" });
-    const confidenceContainer = confidenceLabel.closest("div")!;
-    expect(within(confidenceContainer).getByText("n/a")).toBeInTheDocument();
+    expect(screen.getByText("Byte identity")).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
 
     // Finding 2 (Night Drive) has confidence 0.82 (82%)
     const secondFindingTrigger = screen.getByRole("button", {
@@ -137,8 +136,10 @@ describe("Review Inbox", () => {
     await user.click(secondFindingTrigger);
 
     expect(screen.getByText(/ID: likely_duplicate_group-21f984264b20/i)).toBeInTheDocument();
-    const secondConfidenceContainer = screen.getByText(/confidence/i, { selector: "p" }).closest("div")!;
-    expect(within(secondConfidenceContainer).getByText("82%")).toBeInTheDocument();
+    const pairScore = screen.getByText("Lowest reported pair score").closest("div")!;
+    expect(within(pairScore).getByText("0.82 / 1")).toBeInTheDocument();
+    expect(within(pairScore).getByText("Heuristic similarity")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
   });
 
   it("exposes all triage actions in the inspector panel", async () => {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import type { DuplicateEvidence } from "../../lib/duplicate-evidence";
 import {
   actionOperationSelectionKey,
   FALLBACK_MAX_SELECTED_OPERATIONS,
@@ -10,6 +11,7 @@ import { formatPlanExecutionStatus, planExecutionTone } from "../../lib/contract
 import { libraryRelativePath, pathFilename } from "../../lib/library-path";
 import type { ActionPlan, ActionPlanOperation, ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
 import { ActionBanner, Button, Chip, Modal, Panel, PathBlock } from "../components";
+import { DuplicateDecisionEvidence } from "./DuplicateDecisionEvidence";
 
 const OPERATION_PAGE_SIZE = 20;
 
@@ -195,10 +197,11 @@ function PlanCard({
 }
 
 export function PlanReportModal({
-  report, selection, root, confirming, applyPending, applyError, selectedOperationIds,
+  report, duplicateEvidence, selection, root, confirming, applyPending, applyError, selectedOperationIds,
   onToggleOperation, onClose, onContinue, onCancel, onApply,
 }: {
   report: ActionPlanReport | null;
+  duplicateEvidence?: DuplicateEvidence;
   selection: ActionPlanReport | null;
   root?: string;
   confirming: boolean;
@@ -259,6 +262,7 @@ export function PlanReportModal({
         </div>
       ) : report ? (
         <div className="min-w-0 space-y-3">
+          {duplicateEvidence ? <DuplicateDecisionEvidence evidence={duplicateEvidence} preview /> : null}
           <p className="text-xs text-primary-muted">{selectedTotal} / {maximum} selected. Choose the changes you want to review.</p>
           {report.unsupported_items.map((item) => (
             <ActionBanner key={item.source_review_item_id} message={"Review only. " + item.reason} />

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { matchesDuplicateFinding, sameDuplicateLibrary } from "../../lib/duplicate-evidence";
 import { useDuplicatesQuery, useReviewQuery } from "../../lib/hooks";
 import { Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, formatBytes, formatNumber } from "../components";
 import { DuplicateComparison } from "../duplicates/DuplicateComparison";
@@ -30,7 +31,9 @@ export function DuplicatesPage() {
 
   const report = duplicatesQuery.data.data;
   const root = duplicatesQuery.data.meta.music_path;
-  const reviewItems = reviewQuery.isError ? [] : reviewQuery.data?.data.items ?? [];
+  const review = reviewQuery.data;
+  const reviewItems = !reviewQuery.isError && review && sameDuplicateLibrary(duplicatesQuery.data.meta, review.meta)
+    ? review.data.items : [];
   const additionalBytes = report.exact_duplicates.reduce((sum, group) => {
     if (!group.files.some((file) => file.path === group.preferred.path)) return sum;
     return sum + group.files.reduce((bytes, file) => bytes + (file.path === group.preferred.path ? 0 : file.file_size_bytes), 0);
@@ -64,13 +67,8 @@ export function DuplicatesPage() {
       </div>
       <div className="space-y-4">
         {groups.length ? groups.map((group) => {
-          const paths = new Set(group.files.map((file) => file.path));
-          // Group labels are reassigned on each scan. Link directly only when the file sets agree.
-          const item = reviewItems.find((candidate) => {
-            if (candidate.item_type !== itemType || !candidate.affected_paths) return false;
-            const affected = new Set(candidate.affected_paths);
-            return affected.size === paths.size && [...affected].every((path) => paths.has(path));
-          });
+          const matches = reviewItems.filter((candidate) => matchesDuplicateFinding(group, candidate, activeTab));
+          const item = matches.length === 1 ? matches[0] : undefined;
           return <DuplicateComparison key={activeTab + group.group_id} group={group} kind={activeTab} root={root}
             matchedFinding={!!item} onReview={() => {
               const params = new URLSearchParams({ type: itemType });

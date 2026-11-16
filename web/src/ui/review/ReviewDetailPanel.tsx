@@ -1,11 +1,15 @@
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
+import { duplicateKind, type DuplicateEvidence } from "../../lib/duplicate-evidence";
 import type { ReviewItem } from "../../lib/types";
 import { Button, Chip, Drawer, Icon, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
+import { formatDuplicateScore } from "../duplicates/DuplicateComparison";
+import { DuplicateDecisionEvidence } from "./DuplicateDecisionEvidence";
 
 const AFFECTED_PATH_PREVIEW_LIMIT = 20;
 
 export function ReviewDetailPanel({
   item,
+  duplicateEvidence,
   usingMock,
   busy,
   onGeneratePlan,
@@ -16,6 +20,7 @@ export function ReviewDetailPanel({
   onClose,
 }: {
   item?: ReviewItem;
+  duplicateEvidence?: DuplicateEvidence;
   usingMock: boolean;
   busy: boolean;
   onGeneratePlan: () => void;
@@ -28,6 +33,8 @@ export function ReviewDetailPanel({
   const affectedPaths = item?.affected_paths ?? item?.sample_paths ?? [];
   const displayedAffectedPaths = affectedPaths.slice(0, AFFECTED_PATH_PREVIEW_LIMIT);
   const remainingAffectedPathCount = affectedPaths.length - displayedAffectedPaths.length;
+  const kind = duplicateKind(item?.item_type);
+  const detailedEvidence = duplicateEvidence?.status === "matched";
 
   return (
     <Drawer
@@ -76,7 +83,7 @@ export function ReviewDetailPanel({
               <span className="font-mono text-[10px] text-primary-subtle truncate max-w-[140px]">{item.item_type}</span>
             </div>
             <h3 className="font-display text-base font-bold text-primary leading-snug">{item.summary}</h3>
-            {item.reason_summary ? (
+            {!kind && item.reason_summary ? (
               <p className="font-editorial text-xs italic text-primary-muted leading-relaxed">{item.reason_summary}</p>
             ) : null}
           </div>
@@ -91,16 +98,27 @@ export function ReviewDetailPanel({
 
           <div className="grid grid-cols-2 gap-2.5">
             <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reclaimable</p>
-              <p className="mt-1 font-display text-lg font-bold tracking-tight text-emerald-400">{formatBytes(item.reclaimable_bytes ?? 0)}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">{kind === "exact" ? "Size of other copies" : "Reclaimable"}</p>
+              <p className="mt-1 font-display text-base font-bold text-primary">
+                {kind === "likely" || item.reclaimable_bytes == null ? "Unavailable" : formatBytes(item.reclaimable_bytes)}
+              </p>
+              {kind === "exact" && item.reclaimable_bytes != null ? (
+                <p className="mt-1 text-xs text-primary-muted">Quarantine keeps files on disk.</p>
+              ) : null}
             </div>
             <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Confidence</p>
-              <p className="mt-1 font-display text-lg font-bold tracking-tight text-accent">
-                {item.confidence !== undefined && item.confidence !== null ? `${Math.round(item.confidence * 100)}%` : "n/a"}
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">
+                {kind === "exact" ? "Match type" : kind === "likely" ? "Lowest reported pair score" : "Confidence"}
               </p>
+              <p className="mt-1 font-display text-lg font-bold tracking-tight text-accent">
+                {kind === "exact" ? "Byte identity" : item.confidence == null ? "Unavailable"
+                  : kind === "likely" ? formatDuplicateScore(item.confidence) : Math.round(item.confidence * 100) + "%"}
+              </p>
+              {kind === "likely" ? <p className="mt-1 text-xs text-primary-muted">Heuristic similarity</p> : null}
             </div>
           </div>
+
+          {duplicateEvidence ? <DuplicateDecisionEvidence key={item.item_id} evidence={duplicateEvidence} /> : null}
 
           <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-3.5 py-2.5 font-sans text-xs text-primary-muted leading-relaxed" role="note">
             <p className="font-medium text-accent/90 mb-0.5">Resolution Behavior</p>
@@ -127,14 +145,14 @@ export function ReviewDetailPanel({
             </div>
           </div>
 
-          {item.preferred_path ? (
+          {item.preferred_path && !detailedEvidence ? (
             <LabeledValue
               label="Preferred Copy"
               value={<PathBlock value={item.preferred_path} tone="primary" />}
             />
           ) : null}
 
-          <LabeledValue
+          {!detailedEvidence ? <LabeledValue
             label={`Affected Files (${affectedPaths.length})`}
             value={
               affectedPaths.length > 0 ? (
@@ -152,7 +170,7 @@ export function ReviewDetailPanel({
                 <div className="rounded-[3px] border border-white/[0.06] bg-surface-low px-3 py-2 font-sans text-xs text-primary-subtle">No affected paths attached.</div>
               )
             }
-          />
+          /> : null}
 
           <p className="pt-2 text-center font-editorial text-xs italic text-primary-subtle/80">
             NyxCore records mutation intent in the local ledger before execution.

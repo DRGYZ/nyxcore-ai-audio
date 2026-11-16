@@ -52,8 +52,8 @@ export function useReviewQuery() {
   return useQuery({ queryKey: ["review"], queryFn: fetchReview, retry: 1 });
 }
 
-export function useDuplicatesQuery() {
-  return useQuery({ queryKey: ["duplicates"], queryFn: fetchDuplicates });
+export function useDuplicatesQuery(enabled = true) {
+  return useQuery({ queryKey: ["duplicates"], queryFn: fetchDuplicates, enabled });
 }
 
 export function useArchiveSearchQuery(query: string) {
