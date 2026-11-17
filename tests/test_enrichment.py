@@ -21,7 +21,7 @@ from PIL import Image
 
 from nyxcore import enrichment
 from nyxcore.action_plan.lock import LibraryMutationLock
-from nyxcore.enrichment import CAA, MB, MAX_ART_BYTES, ProviderError, PublicResolver, Transport, approved_url
+from nyxcore.enrichment import CAA, MB, MAX_ART_BYTES, ProviderError, PublicResolver, Transport, approved_url, recording_candidates
 from nyxcore.tagging.writer import front_covers
 from nyxcore.webapi.app import create_app
 
@@ -51,8 +51,14 @@ class Replay:
             raise self.failure
         parsed = urlsplit(url)
         if parsed.hostname == MB:
-            query = parse_qs(parsed.query)["query"][0]
-            payload = {"recordings": []} if "No match" in query else FIXTURE["recordings"]
+            params = parse_qs(parsed.query)
+            if parsed.path.endswith("/release"):
+                offset = int(params["offset"][0])
+                payload = {"release-count": 26, "releases": [OTHER if offset else RELEASE]}
+            else:
+                query = params["query"][0]
+                empty = "No match" in query or "status:official" in query and "Fallback tune" in query
+                payload = {"recordings": []} if empty else FIXTURE["recordings"]
             return json.dumps(payload, ensure_ascii=False).encode()
         assert parsed.hostname == CAA
         if parsed.path.endswith("/"):
@@ -171,11 +177,81 @@ def test_recording_ranking_multiple_releases_and_privacy(library):
     url = library[2].calls[0]
     assert set(parse_qs(urlsplit(url).query)) == {"query", "fmt", "limit"}
     assert "192000" not in url and "Lumi" not in url
-    for title in ("C:\\Users\\private\\audio.mp3", "/home/user/audio.flac", "a" * 64):
+    for title in ("C:\\Users\\private\\audio.mp3", "/home/user/audio.flac", "a" * 64,
+                  "Title /home/user/", "Title https://example.com", "Title ./private", "Title ~/private",
+                  "Title C:/Music", "album/song.mp3", "Title /秘密.flac/", "Title /dir/秘密/"):
         assert search(client, title=title).status_code == 422
+    assert search(client, artist="Artist /秘密/").status_code == 422
     assert len(library[2].calls) == 1
     assert search(client).status_code == 200 and len(library[2].calls) == 1
     assert search(client, title="No match").json() == {"candidates": [], "status": "no_match"}
+
+
+def test_bilingual_query_and_fallback_keep_local_evidence_private(library):
+    client = app_for(library)
+    result = search(client, title="Latin /عنوان أغنية/", artist="AC/DC", version_hint="remix", version_detail="Named DJ Remix")
+    assert result.status_code == 200
+    requests = [parse_qs(urlsplit(url).query)["query"][0] for url in library[2].calls]
+    assert len(requests) == 2
+    assert all('recording:"Latin"' in query and 'recording:"عنوان أغنية"' in query for query in requests)
+    assert all('artist:"AC/DC"' in query and "Lumi" not in query and "192000" not in query
+               and "Remix" not in query for query in requests)
+    assert search(client, title="Latin /عنوان أغنية/", artist="AC/DC", version_hint="remix").status_code == 200
+    assert len(library[2].calls) == 2
+    library[2].calls.clear()
+    assert search(client, title="Fallback tune").json()["candidates"]
+    assert len(library[2].calls) == 2 and "status%3Aofficial" in library[2].calls[0]
+    assert "Fallback%22+AND+%22tune" in library[2].calls[1]
+
+
+def test_duration_and_version_rank_separately_from_text_and_release_clues():
+    variants = [
+        {**FIRST, "id": f"0000000{index}-0000-0000-0000-000000000000",
+         "length": duration, "disambiguation": label}
+        for index, duration, label in [
+            (1, None, ""), (2, 192000, "live, Osaka"), (3, 192000, ""),
+            (4, 250000, "remix"), (5, 192020, ""),
+        ]
+    ]
+    rows = recording_candidates({"recordings": variants}, FIRST["title"], "Écho Ensemble", "", 192000)
+    assert [candidate["id"][7] for candidate in rows] == ["3", "5", "2", "1", "4"]
+    assert {candidate["text_score"] for candidate in rows} == {100}
+    assert rows[2]["version"] == "live" and rows[2]["identity"] == "uncertain"
+    assert rows[3]["duration_delta_ms"] is None and rows[3]["evidence"]["duration"] == "unavailable"
+    assert rows[4]["evidence"]["duration"] == "differs" and rows[4]["identity"] == "conflicting"
+    live = recording_candidates({"recordings": variants}, FIRST["title"], "Écho Ensemble", "", 192000, version_hint="live")
+    assert live[0]["id"] == rows[2]["id"] and live[0]["identity"] == "supported"
+    variants += [{**variants[1], "id": "00000006-0000-0000-0000-000000000000",
+                  "length": 195800, "disambiguation": "live, Nürburgring, Germany"}]
+    location = recording_candidates({"recordings": variants}, FIRST["title"], "Écho Ensemble", "", 192000,
+                                    version_hint="live", version_detail="Live in Germany")
+    assert location[0]["id"][7] == "6" and location[0]["version_context_agrees"]
+    assert location[1]["id"][7] == "2" and location[1]["identity"] == "uncertain"
+
+
+def test_relationships_beyond_initial_options_and_signed_release_browse(library):
+    client = app_for(library)
+    compilation = {**RELEASE, "title": "Papercuts"}
+    items = [{**OTHER, "id": f"{index:08x}-1111-1111-1111-111111111111"} for index in range(25)] + [compilation]
+    row = recording_candidates({"recordings": [{**FIRST, "releases": items}]}, FIRST["title"],
+                               "Écho Ensemble", "Papercuts (Singles Collection 2000–2023)", 192000)[0]
+    assert row["releases"][0]["id"] == RELEASE["id"]
+    candidate = search(client).json()["candidates"][0]
+    source = candidate["source"]
+    browse = "/api/metadata/releases"
+    initial_calls = len(library[2].calls)
+    assert client.post(browse, json={"source": {**source, "recording_id": FIXTURE["recordings"]["recordings"][0]["id"]}}).status_code == 409
+    assert client.post(browse, json={"source": source, "page": 5}).status_code == 422
+    assert client.post(browse, json={"source": candidate["releases"][0]["source"]}).status_code == 422
+    assert len(library[2].calls) == initial_calls
+    first = client.post(browse, json={"source": source}).json()
+    second = client.post(browse, json={"source": source, "page": first["next_page"]}).json()
+    assert second["next_page"] is None and second["releases"][0]["id"] == OTHER["id"]
+    assert parse_qs(urlsplit(library[2].calls[-1]).query) == {
+        "recording": [source["recording_id"]], "inc": ["release-groups"], "fmt": ["json"], "limit": ["25"], "offset": ["25"],
+    }
+    assert client.post("/api/metadata/covers", json=second["releases"][0]["source"]).status_code == 200
+    assert client.post(browse, json={"source": source, "page": 2}).json() == second
 
 
 def test_missing_cover_and_release_choice_receipt(library):

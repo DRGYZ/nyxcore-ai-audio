@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { MusicSource } from "../../lib/enrichment";
+import { musicSearchDefaults } from "../../lib/enrichment";
 import type { MetadataTrack } from "../../lib/metadata";
 import { renderWithProviders } from "../../test/test-utils";
 import { MusicInfo } from "../metadata/MusicInfo";
@@ -26,14 +27,15 @@ it("looks up on explicit submit, distinguishes releases, and forwards only a sel
   const useTags = vi.fn();
   const useCover = vi.fn();
   const accidentalSubmit = vi.fn((event) => event.preventDefault());
-  const requests = vi.fn(async (value: string) => {
+  const requests = vi.fn(async (value: string, options?: RequestInit) => {
     const path = new URL(value).pathname;
     if (path.endsWith("/lookup")) return Response.json({
       status: "ambiguous",
       candidates: [{
         id: "recording-one", title: "Méridian", artist: "Écho", artists: [], duration_ms: 192000,
         evidence: { title: "agrees", artist: "agrees", duration: "agrees", album: "unavailable", filename: "similar" },
-        source: recording, score: 98,
+        source: recording, text_score: 98, duration_delta_ms: 0, version: "live", identity: "supported",
+        disambiguation: "live, Osaka",
         releases: [
           { ...release.release, date: "2024", country: "JP", source: release },
           { kind: "release", id: "fr-two", title: "Reissued", date: "2025", country: "FR",
@@ -41,6 +43,10 @@ it("looks up on explicit submit, distinguishes releases, and forwards only a sel
         ],
       }],
     });
+    if (path.endsWith("/releases")) {
+      expect(JSON.parse(String(options?.body))).toEqual({ source: recording, page: 1 });
+      return Response.json({ releases: [{ ...release.release, date: "2024", country: "JP", source: release }], next_page: null });
+    }
     if (path.endsWith("/covers")) return Response.json({ covers: [{
       id: "1", release_id: "jp-one", extension: ".jpg", token: "cover", label: "Original front", thumbnail: null,
     }] });
@@ -63,6 +69,12 @@ it("looks up on explicit submit, distinguishes releases, and forwards only a sel
   expect(useTags).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Select recording" }));
   expect(screen.getByRole("combobox", { name: "Release or release group" })).toHaveValue("");
+  expect(screen.getByText("live, Osaka")).toBeVisible();
+  expect(screen.getByText("Text match 98%")).toBeVisible();
+  expect(requests).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Load more linked releases" }));
+  expect(await screen.findByText("2 release choices loaded.")).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "Release or release group" })).toHaveValue("");
   await user.selectOptions(screen.getByRole("combobox", { name: "Release or release group" }), "release:jp-one");
   await user.click(screen.getByRole("button", { name: "Use suggested tags" }));
   expect(useTags).toHaveBeenCalledWith(release);
@@ -73,6 +85,25 @@ it("looks up on explicit submit, distinguishes releases, and forwards only a sel
   await waitFor(() => expect(useCover).toHaveBeenCalledWith(release, expect.objectContaining({
     selection: expect.objectContaining({ release_id: "jp-one", replace_existing: false }),
   })));
+});
+
+it.each([
+  ["Sia - Unstoppable (Lyrics Video).m4a", "Sia - Unstoppable", "Little Music", "Unstoppable", "Sia", "", ""],
+  ["Figure.09 - Linkin Park (Meteora).mp3", "Figure.09 - Linkin Park", "Linkin Park", "Figure.09", "Linkin Park", "Meteora", ""],
+  ["Crawling.mp3", "Crawling", "Linkin Park - Topic", "Crawling", "Linkin Park", "", ""],
+  ["Track.mp3", "Track", "Écho — Écho", "Track", "Écho", "", ""],
+  ["Amr Diab - Tamally Maak (D33pSoul Remix) _تملى معاك_.m4a", "Amr Diab - Tamally Maak /تملى معاك/",
+    "Uploader", "Tamally Maak /تملى معاك/", "Amr Diab", "", "remix"],
+  ["07.mp3", "Part II - Nightfall", "Écho", "Part II - Nightfall", "Écho", "", ""],
+  ["Part II - Nightfall.mp3", "Part II - Nightfall", "Écho", "Part II - Nightfall", "Écho", "", ""],
+  ["Lumière /夜/.flac", "Lumière /夜/", "Écho", "Lumière /夜/", "Écho", "", ""],
+])("derives editable defaults for %s", (filename, title, artist, searchTitle, searchArtist, album, version) => {
+  const prepared = musicSearchDefaults({
+    ...track, path: "/synthetic/" + filename, tags: { title: [title], artist: [artist], album: [] },
+    suggestions: { title: unavailable, artist: unavailable, album: unavailable },
+  });
+  expect(prepared).toMatchObject({ title: searchTitle, artist: searchArtist, album, version, originalTitle: title, originalArtist: artist });
+  if (version === "remix") expect(prepared.versionDetail).toBe("D33pSoul Remix");
 });
 
 it("shows provider failure with no automatic metadata selection", async () => {

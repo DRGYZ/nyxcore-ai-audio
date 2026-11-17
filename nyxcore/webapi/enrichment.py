@@ -12,9 +12,9 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from PIL import Image, ImageOps
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from nyxcore.enrichment import IMAGE_ID, MAX_ART_BYTES, MBID, ProviderError, Providers
+from nyxcore.enrichment import BILINGUAL_TITLE, IMAGE_ID, MAX_ART_BYTES, MBID, RELEASE_PAGES, ProviderError, Providers
 from nyxcore.tagging.writer import ArtworkEdit
 
 HEX = r"^[0-9a-f]{64}$"
@@ -34,13 +34,23 @@ class Lookup(RequestModel):
     duration_ms: int | None = Field(None, gt=0, le=24 * 3600 * 1000)
     filename_title: str = Field("", max_length=160)
     filename_artist: str = Field("", max_length=160)
+    version_hint: Literal["", "live", "demo", "instrumental", "remix", "edit", "acoustic", "karaoke",
+                          "studio", "video", "orchestral", "single version"] = ""
+    version_detail: str = Field("", max_length=100)
 
     @field_validator("title", "artist")
     @classmethod
-    def validate_query(cls, value: str) -> str:
+    def validate_query(cls, value: str, info: ValidationInfo) -> str:
+        path_check = value
+        alternate = BILINGUAL_TITLE.search(value) if info.field_name == "title" else None
+        if alternate:
+            # Allow a trailing alternate-language title delimited by slashes.
+            if any(char.isalpha() and not char.isascii() for char in alternate[1]) and "." not in alternate[1]:
+                path_check = value[:alternate.start()]
         if (
             "\\" in value
-            or re.search(r"(?:^|\s)/(?!\s)|(?:^|\s)[A-Za-z]:[/\\]|://", value)
+            or re.search(r"(?:^|\s)(?:/(?!\s)|(?:~|\.{1,2})/|[A-Za-z]:/)|://", path_check)
+            or re.search(r"/[^/\s]+\.(?:mp3|m4a|flac|wav|aac|ogg|opus)(?:\s|$)", value, re.I)
             or re.fullmatch(r"(?i)(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})", value.strip())
             or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
         ):
@@ -63,6 +73,11 @@ class Source(RequestModel):
 
     def tag_values(self) -> dict[str, str | None]:
         return {"title": self.title, "artist": self.artist, "album": self.release.title if self.release else None}
+
+
+class ReleaseBrowse(RequestModel):
+    source: Source
+    page: int = Field(1, ge=1, le=RELEASE_PAGES)
 
 
 class CoverChoice(RequestModel):
@@ -144,6 +159,9 @@ class Enrichment:
                  "release": {key: release[key] for key in ("id", "kind", "title")} if release else None}
         return {**value, "token": self.proof("source", value)}
 
+    def _release_sources(self, row: dict, releases: list[dict]) -> list[dict]:
+        return [{**release, "source": self._source(row, release)} for release in releases]
+
     def _artwork_proof(self, source: Source, fields: dict) -> str:
         return self.proof("artwork", source.token, fields)
 
@@ -167,18 +185,31 @@ class Enrichment:
             try:
                 rows = await self.providers.search(
                     query.title, query.artist, query.album, query.duration_ms, query.filename_title, query.filename_artist,
+                    query.version_hint, query.version_detail,
                 )
             except ProviderError as exc:
                 raise HTTPException(exc.status, str(exc)) from exc
             for row in rows:
                 row["source"] = self._source(row)
-                for release in row["releases"]:
-                    release["source"] = self._source(row, release)
+                row["releases"] = self._release_sources(row, row["releases"])
             uncertain = bool(rows and (
-                rows[0]["score"] < 80 or not query.title or not query.artist
-                or (len(rows) > 1 and rows[0]["score"] - rows[1]["score"] <= 10)
+                rows[0]["text_score"] < 88 or rows[0]["identity"] != "supported" or not query.title or not query.artist
+                or (len(rows) > 1 and rows[0]["score"] - rows[1]["score"] <= 8)
             ))
             return {"candidates": rows, "status": "ambiguous" if uncertain else "matches" if rows else "no_match"}
+
+        @app.post("/api/metadata/releases")
+        async def linked_releases(request: ReleaseBrowse) -> dict:
+            source = request.source
+            self.check_source(source)
+            if source.release:
+                raise HTTPException(422, "Select a recording before browsing its releases.")
+            try:
+                choices, more = await self.providers.linked_releases(source.recording_id, request.page)
+            except ProviderError as exc:
+                raise HTTPException(exc.status, str(exc)) from exc
+            row = {"id": source.recording_id, "title": source.title, "artist": source.artist}
+            return {"releases": self._release_sources(row, choices), "next_page": request.page + 1 if more else None}
 
         @app.post("/api/metadata/covers")
         async def covers(source: Source) -> dict:

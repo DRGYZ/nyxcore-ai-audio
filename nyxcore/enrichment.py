@@ -32,8 +32,14 @@ MAX_ART_BYTES = 6 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
 CACHE_BYTES = 64 * 1024 * 1024
 CACHE_FILES = 160
+RECORDING_LIMIT = 25
+RELEASE_PAGE_SIZE = 25
+RELEASE_PAGES = 4
 USER_AGENT = "NyxCore/0.3.0 (https://github.com/DRGYZ/nyxcore-ai-audio/issues)"
 CACHE_LOCK = Lock()
+VERSION_PATTERN = re.compile(r"\b(live|demo|instrumental|remix|edit|acoustic|karaoke|studio|video|mix|orchestral|single version)\b", re.I)
+TITLE_QUALIFIER = re.compile(r"(?:\s+[-–—]\s+([^()\[\]]+)|\s*[\[(]([^()\[\]]+)[)\]])\s*$")
+BILINGUAL_TITLE = re.compile(r"\s+/([^/\\]+?)/\s*$")
 
 
 class ProviderError(ValueError):
@@ -247,9 +253,9 @@ def objects(value: object, maximum: int = 50) -> list[dict]:
     return [item for item in value[:maximum] if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def releases(recording: dict) -> list[dict]:
+def release_choices(items: list[dict]) -> list[dict]:
     result: dict[tuple[str, str], dict] = {}
-    for release in objects(recording.get("releases"), 16):
+    for release in items:
         identifier, title = mbid(release.get("id")), text(release.get("title"))
         group = release.get("release-group")
         group = group if isinstance(group, dict) else {}
@@ -259,25 +265,95 @@ def releases(recording: dict) -> list[dict]:
                 "id": identifier, "kind": "release", "title": title, "date": text(release.get("date"), 10),
                 "country": text(release.get("country"), 12), "group_id": group_id,
             }
-        if group_id and group_title:
+        if identifier and title and group_id and group_title:
             result[("release-group", group_id)] = {
                 "id": group_id, "kind": "release-group", "title": group_title,
                 "date": text(group.get("first-release-date"), 10), "country": "", "group_id": group_id,
             }
-    return list(result.values())[:16]
+    return list(result.values())
+
+
+def title_names(title: str) -> list[str]:
+    """Keep alternative scripts and a plain title for local textual comparison."""
+    bilingual = BILINGUAL_TITLE.search(title)
+    if bilingual:
+        names = [title[:bilingual.start()], bilingual[1]]
+    else:
+        names = re.split(r"\s+[=/]\s+", title)
+    return list(dict.fromkeys(name.strip() for name in names if name.strip()))
+
+
+def similarity(left: str, right: str) -> float:
+    a, b = normalize_match_text(left), normalize_match_text(right)
+    return SequenceMatcher(None, a, b, autojunk=False).ratio() if a and b else 0
+
+
+def release_similarity(album: str, name: str) -> float:
+    # A singles collection can be tagged with its subtitle while the catalog uses its short title.
+    strip_subtitle = r"\s*[(\[]\s*(?:the\s+)?singles collection\b.*$"
+    return similarity(re.sub(strip_subtitle, "", album, flags=re.I), re.sub(strip_subtitle, "", name, flags=re.I))
+
+
+def version_in(label: str) -> str | None:
+    match = VERSION_PATTERN.search(label)
+    if not match:
+        return None
+    return {"mix": "remix"}.get(match[1].lower(), match[1].lower())
+
+
+def title_version(title: str) -> str | None:
+    qualifier = TITLE_QUALIFIER.search(title)
+    return version_in(qualifier[1] or qualifier[2]) if qualifier else None
+
+
+def standard_album(release: dict) -> bool:
+    group = release.get("release-group")
+    return (isinstance(group, dict) and group.get("primary-type") == "Album"
+            and not group.get("secondary-types") and release.get("status") == "Official")
+
+
+def recording_version(row: dict, name: str, detail: str, items: list[dict]) -> str | None:
+    media = "video" if row.get("video") is True else None
+    if version := version_in(detail) or title_version(name) or media:
+        return version
+    # Only infer from a release if every supplied release points to the same alternate version.
+    release_versions = set()
+    for item in items:
+        group = item.get("release-group")
+        secondary = group.get("secondary-types", []) if isinstance(group, dict) else []
+        album = text(item.get("title"))
+        release_versions.add(
+            "live" if isinstance(secondary, list) and "Live" in secondary
+            else title_version(album) or (
+                version_in(album) if re.match(r"(?i)^(?:live\b|.*\b(?:instrumentals|demos)\b)", album) else None
+            )
+        )
+    return next(iter(release_versions)) if len(release_versions) == 1 else None
+
+
+def title_similarity(query: str, candidate: str) -> float:
+    best = 0.0
+    for left in title_names(query):
+        for right in title_names(candidate):
+            best = max(best, similarity(left, right))
+            # A subtitle can describe a version or a movement. Show the difference in identity evidence.
+            plain_left = TITLE_QUALIFIER.sub("", left)
+            plain_right = TITLE_QUALIFIER.sub("", right)
+            if plain_left != left or plain_right != right:
+                best = max(best, 0.97 * similarity(plain_left, plain_right))
+    return best
 
 
 def recording_candidates(
     payload: dict, title: str, artist: str, album: str, duration_ms: int | None,
-    filename_title: str = "", filename_artist: str = "",
+    filename_title: str = "", filename_artist: str = "", version_hint: str = "", version_detail: str = "",
 ) -> list[dict]:
     result = []
-
-    def similarity(left: str, right: str) -> float:
-        a, b = normalize_match_text(left), normalize_match_text(right)
-        return SequenceMatcher(None, a, b, autojunk=False).ratio() if a and b else 0
-
-    for recording in objects(payload.get("recordings"), 10):
+    expected_version = version_hint or title_version(title)
+    qualifier_words = set(normalize_match_text(version_detail).split())
+    qualifier_words -= {"live", "in", "at", "from", "the", "version", "remix", "mix", "edit", "demo",
+                        "instrumental", "acoustic", "karaoke", "studio", "video", "orchestral", "single"}
+    for recording in objects(payload.get("recordings"), RECORDING_LIMIT):
         identifier, name = mbid(recording.get("id")), text(recording.get("title"))
         if not identifier or not name:
             continue
@@ -293,24 +369,36 @@ def recording_candidates(
             if artist_id := mbid(raw.get("id")):
                 artists.append({"id": artist_id, "name": credit_name})
         credited = text("".join(names))
-        choices = releases(recording)
+        items = objects(recording.get("releases"), 100)
+        choices = release_choices(items)
+        if album:
+            choices.sort(key=lambda choice: -release_similarity(album, choice["title"]))
+        detail = text(recording.get("disambiguation"), 180)
+        version = recording_version(recording, name, detail, items)
+        context_agrees = bool(qualifier_words and version == expected_version and any(
+            qualifier_words <= set(normalize_match_text(context).split())
+            for context in (name, detail, *(text(item.get("title")) for item in items))
+        ))
         length = recording.get("length")
         length = length if type(length) is int and length > 0 else None
         evidence, weighted = {}, []
         for label, query, ratio, weight, available in (
-            ("title", title, similarity(title, name), 5, True),
+            ("title", title, title_similarity(title, name), 5, True),
             ("artist", artist, similarity(artist, credited), 4, bool(credited)),
-            ("album", album, max((similarity(album, choice["title"]) for choice in choices), default=0), 1, bool(choices)),
         ):
             if query and available:
                 weighted.append((ratio, weight))
                 evidence[label] = "agrees" if ratio >= 0.92 else "similar" if ratio >= 0.68 else "differs"
             else:
                 evidence[label] = "unavailable"
-        if duration_ms and length:
-            delta = abs(duration_ms - length)
+        text_score = round(100 * sum(value * weight for value, weight in weighted)
+                           / max(1, sum(weight for _, weight in weighted)))
+        album_score = release_similarity(album, choices[0]["title"]) if album and choices else 0
+        evidence["album"] = ("agrees" if album_score >= 0.92 else "similar" if album_score >= 0.68 else
+                             "differs" if album and choices else "unavailable")
+        delta = abs(duration_ms - length) if duration_ms and length else None
+        if delta is not None:
             evidence["duration"] = "agrees" if delta <= 2500 else "similar" if delta <= 8000 else "differs"
-            weighted.append((1 if delta <= 2500 else 0.5 if delta <= 8000 else 0, 2))
         else:
             evidence["duration"] = "unavailable"
         filename_scores = [
@@ -320,16 +408,31 @@ def recording_candidates(
         if filename_scores:
             ratio = sum(filename_scores) / len(filename_scores)
             evidence["filename"] = "agrees" if ratio >= 0.92 else "similar" if ratio >= 0.68 else "differs"
-            weighted.append((ratio, 1))
         else:
+            ratio = 0
             evidence["filename"] = "unavailable"
-        score = round(100 * sum(value * weight for value, weight in weighted)
-                      / max(1, sum(weight for _, weight in weighted)))
+        duration_points = {"agrees": 0, "similar": -8, "unavailable": -13, "differs": -25}[evidence["duration"]]
+        if expected_version:
+            version_points = 8 if version == expected_version else -9 if version is None else -20
+        else:
+            version_points = -11 if version and version != "studio" else 0
+        identity = ("conflicting" if evidence["duration"] == "differs" or
+                    expected_version and version and version != expected_version
+                    else "supported" if evidence["duration"] == "agrees" and
+                    (version == expected_version or version == "studio" and not expected_version) and
+                    (not qualifier_words or context_agrees)
+                    else "uncertain")
+        album_points = 5 if not version and any(standard_album(item) for item in items) else 0
+        context_points = 12 if context_agrees else 0
+        score = min(100, max(0, round(0.75 * text_score + 9 * album_score + 3 * ratio)
+                             + duration_points + version_points + album_points + context_points))
         result.append({
             "id": identifier, "title": name, "artist": credited, "artists": artists, "duration_ms": length,
-            "releases": choices, "evidence": evidence, "score": score,
+            "releases": choices[:16], "evidence": evidence, "score": score, "text_score": text_score,
+            "duration_delta_ms": delta, "version": version, "disambiguation": detail, "identity": identity,
+            "version_context_agrees": context_agrees,
         })
-    return sorted(result, key=lambda item: (-item["score"], item["id"]))
+    return sorted(result, key=lambda item: -item["score"])
 
 
 TRANSPORT = Transport()
@@ -360,15 +463,60 @@ class Providers:
 
     async def search(
         self, title: str, artist: str, album: str, duration_ms: int | None,
-        filename_title: str = "", filename_artist: str = "",
+        filename_title: str = "", filename_artist: str = "", version_hint: str = "", version_detail: str = "",
     ) -> list[dict]:
         def quoted(value: str) -> str:
             return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
-        parts = [f"{field}:{quoted(value)}" for field, value in (("recording", title), ("artist", artist)) if value]
-        params = urlencode({"query": " AND ".join(parts), "fmt": "json", "limit": 10})
-        payload = await self._json(f"https://{MB}/ws/2/recording?{params}", artwork=False)
-        return recording_candidates(payload, title, artist, album, duration_ms, filename_title, filename_artist)
+        async def recordings(parts: list[str]) -> dict:
+            params = urlencode({"query": " AND ".join(parts), "fmt": "json", "limit": RECORDING_LIMIT})
+            return await self._json(f"https://{MB}/ws/2/recording?{params}", artwork=False)
+
+        def rank(payload: dict) -> list[dict]:
+            return recording_candidates(payload, title, artist, album, duration_ms, filename_title, filename_artist,
+                                        version_hint, version_detail)
+
+        names = title_names(title)[:3]
+        titles = [f"recording:{quoted(name)}" for name in names]
+        credit = [f"artist:{quoted(artist)}"] if artist else []
+        phrase = ["(" + " OR ".join(titles) + ")"] if len(titles) > 1 else titles
+        primary = await recordings(phrase + credit + (["status:official"] if title and artist else []))
+        rows = rank(primary)
+        if not (title and artist) or (rows and rows[0]["text_score"] >= 88 and rows[0]["identity"] == "supported"):
+            return rows[:12]
+
+        # Drop the official-release filter once. Relax title punctuation only when the text itself needs help.
+        fallback = phrase + credit
+        if not rows or rows[0]["text_score"] < 88 or any(TITLE_QUALIFIER.search(name) for name in names):
+            for name in names:
+                base = TITLE_QUALIFIER.sub("", name).strip() or name
+                terms = re.findall(r"[^\W_]+", base, re.UNICODE)
+                if 2 <= len(terms) <= 12:
+                    titles.append("recording:(" + " AND ".join(quoted(term) for term in terms) + ")")
+                elif base != name:
+                    titles.append(f"recording:{quoted(base)}")
+            fallback = ["(" + " OR ".join(dict.fromkeys(titles)) + ")"] + credit
+        try:
+            extra = await recordings(fallback)
+        except ProviderError as exc:
+            if rows and exc.status in {429, 503}:
+                return rows[:12]
+            raise
+        combined = {row["id"]: row for row in rows}
+        for row in rank(extra):
+            if row["id"] not in combined or row["score"] > combined[row["id"]]["score"]:
+                combined[row["id"]] = row
+        return sorted(combined.values(), key=lambda item: -item["score"])[:12]
+
+    async def linked_releases(self, recording_id: str, page: int) -> tuple[list[dict], bool]:
+        offset = (page - 1) * RELEASE_PAGE_SIZE
+        params = urlencode({"recording": recording_id, "inc": "release-groups", "fmt": "json",
+                            "limit": RELEASE_PAGE_SIZE, "offset": offset})
+        payload = await self._json(f"https://{MB}/ws/2/release?{params}", artwork=False)
+        items = objects(payload.get("releases"), RELEASE_PAGE_SIZE)
+        total = payload.get("release-count")
+        more = type(total) is int and offset + RELEASE_PAGE_SIZE < total and page < RELEASE_PAGES
+        return release_choices(items), more
 
     async def cover_list(self, kind: str, identifier: str) -> list[dict]:
         payload = await self._json(f"https://{CAA}/{kind}/{identifier}/", artwork=True)
