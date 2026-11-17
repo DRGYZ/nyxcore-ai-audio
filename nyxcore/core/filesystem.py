@@ -3,10 +3,45 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import unicodedata
 from pathlib import Path
 
 
 FileIdentity = tuple[int, int]
+ORGANIZATION_ACTION = "organization_move_plan"
+
+
+def portable_name_key(name: str) -> str:
+    return unicodedata.normalize("NFC", name.rstrip(" .").upper().casefold())
+
+
+def check_move_path(root: Path, path: Path, *, missing_ok: bool = False) -> os.stat_result | None:
+    """Check the exact spelling, device and type of each component in a reviewed move."""
+    if not path.is_absolute() or ".." in path.parts or not path.is_relative_to(root) or path == root:
+        raise ValueError("Move paths must be inside the authorized library.")
+    info = root.lstat()
+    if is_linked_stat(info) or not stat.S_ISDIR(info.st_mode) or root.resolve(strict=True) != root:
+        raise ValueError("The library root changed or is linked.")
+    device = info.st_dev
+    parts = path.relative_to(root).parts
+    parent = root
+    for index, name in enumerate(parts, 1):
+        with os.scandir(parent) as entries:
+            aliases = {entry.name for entry in entries if portable_name_key(entry.name) == portable_name_key(name)}
+        if aliases and aliases != {name}:
+            raise ValueError(f"Equivalent path spelling is occupied: {parent / name}")
+        try:
+            info = (parent / name).lstat()
+        except FileNotFoundError:
+            if missing_ok:
+                return None
+            raise
+        if not aliases or is_linked_stat(info) or info.st_dev != device:
+            raise ValueError(f"Linked, aliased, or cross-filesystem path: {parent / name}")
+        if index < len(parts) and not stat.S_ISDIR(info.st_mode):
+            raise ValueError(f"A file blocks a destination folder: {parent / name}")
+        parent /= name
+    return info
 
 
 def is_linked_stat(info: os.stat_result) -> bool:
@@ -41,7 +76,7 @@ def regular_file_identity(path: Path) -> FileIdentity | None:
         info = path.lstat()
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+    if not stat.S_ISREG(info.st_mode) or is_linked_stat(info) or not info.st_ino:
         return None
     return info.st_dev, info.st_ino
 
@@ -62,18 +97,31 @@ def file_snapshot(path: Path) -> tuple[FileIdentity, str] | None:
 
 def finish_linked_move(
     source: Path, destination: Path, identity: FileIdentity, *, expected_hash: str | None = None,
+    library_root: Path | None = None, _paths=None,
 ) -> None:
+    if library_root is not None and _paths is None:
+        from nyxcore.core.move_scope import move_scope
+        with move_scope(library_root, source, destination) as paths:
+            finish_linked_move(source, destination, identity, expected_hash=expected_hash, _paths=paths)
+            paths.verify_completed(identity)
+        return
     if expected_hash is not None and file_snapshot(source) != (identity, expected_hash):
         raise RuntimeError("source fingerprint changed before move completion")
     if (source.resolve() == destination.resolve() or regular_file_identity(source) != identity
             or regular_file_identity(destination) != identity):
         raise RuntimeError("move paths do not identify the same regular file")
-    source.unlink()
+    if _paths is not None:
+        if expected_hash is None:
+            raise RuntimeError("Guarded completion requires a source fingerprint.")
+        _paths.unlink_source(identity, expected_hash)
+    else:
+        source.unlink()
 
 
 def move_file_no_replace(
     source: Path, destination: Path, *,
     expected_identity: FileIdentity | None = None, expected_hash: str | None = None,
+    library_root: Path | None = None,
 ) -> None:
     """Move one file without ever replacing an existing destination.
 
@@ -88,6 +136,17 @@ def move_file_no_replace(
     identity = regular_file_identity(source)
     if identity is None or (expected_identity is not None and identity != expected_identity):
         raise RuntimeError(f"source is missing or no longer the expected regular file: {source}")
+    if library_root is not None:
+        from nyxcore.core.move_scope import move_scope
+        with move_scope(library_root, source, destination, create_parents=True) as paths:
+            if expected_hash is None or file_snapshot(source) != (identity, expected_hash):
+                raise RuntimeError("Source fingerprint changed before linking.")
+            paths.verify_before_link(identity)
+            paths.link()
+            # Leave any linked pair in place if completion fails. History owns recovery.
+            finish_linked_move(source, destination, identity, expected_hash=expected_hash, _paths=paths)
+            paths.verify_completed(identity)
+        return
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.link(source, destination)

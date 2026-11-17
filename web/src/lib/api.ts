@@ -18,7 +18,7 @@ import type {
 } from "./types";
 import type { DraftSet, MetadataIssue, MetadataPlan, MetadataProposal, MetadataTrack, PlanInput } from "./metadata";
 import type { CoverChoice, LinkedReleases, LookupQuery, LookupResult, MusicSource, SelectedCover } from "./enrichment";
-import type { OrganizationPageData, OrganizationPreview, OrganizationStatus, OrganizationView } from "./organization";
+import type { OrganizationApproval, OrganizationPageData, OrganizationPreview, OrganizationResult, OrganizationStatus, OrganizationView } from "./organization";
 
 const API_BASE_URL = import.meta.env.PROD
   ? "/api"
@@ -73,6 +73,15 @@ export function buildOrganizationPreview() {
 export function fetchOrganizationPage(id: string, status: OrganizationStatus | "all", view: OrganizationView, offset: number) {
   const params = new URLSearchParams({ status, view, offset: String(offset) });
   return getJson<OrganizationPageData>(`/organization/preview/${encodeURIComponent(id)}?${params}`);
+}
+
+export function reviewOrganizationSelection({ id, paths }: { id: string; paths: string[] }) {
+  return postJson<OrganizationApproval>(`/organization/preview/${encodeURIComponent(id)}/review`, { paths });
+}
+
+export function applyOrganizationSelection({ id, paths, approval }: { id: string; paths: string[]; approval: string }) {
+  return postJson<OrganizationResult>(`/organization/preview/${encodeURIComponent(id)}/apply`,
+    { paths, approval, confirm: true });
 }
 
 export function findMusicInfo(input: LookupQuery) {

@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Callable
 
 from nyxcore.core.filesystem import (
     FileIdentity,
+    ORGANIZATION_ACTION,
     bounded_path,
+    check_move_path,
     file_snapshot,
     move_file_no_replace,
     path_present,
@@ -803,7 +805,8 @@ def execute_authorized_action_plan(
                     batch,
                     operation.operation_id,
                     expected_hash=operation.expected_hash,
-                    move_identity=(regular_file_identity(Path(operation.path))
+                    move_identity=(source_identities.get(operation.operation_id)
+                                   or regular_file_identity(Path(operation.path))
                                    if operation.operation_type in {"rename_file", "quarantine_move"} else None),
                 )
             elif event == "finished" and result is not None:
@@ -901,6 +904,9 @@ def apply_action_plan_report(
         return results
 
     for plan in report.plans:
+        organization_root = library_root if plan.action_type == ORGANIZATION_ACTION else None
+        if plan.action_type == ORGANIZATION_ACTION and (organization_root is None or source_identities is None):
+            raise ValueError("Organization requires a reviewed library and source identities.")
         if not plan.apply_supported:
             results.append(
                 AppliedPlanResult(
@@ -943,7 +949,7 @@ def apply_action_plan_report(
         operation_results: list[AppliedOperationResult] = []
         try:
             for operation in plan.proposed_operations:
-                if operation.operation_type == "keep_preferred" or operation.apply_supported:
+                if organization_root is None and (operation.operation_type == "keep_preferred" or operation.apply_supported):
                     verify_source(operation)
         except Exception as exc:
             results.append(AppliedPlanResult(
@@ -1008,6 +1014,12 @@ def apply_action_plan_report(
                 continue
             uncertain_write = False
             try:
+                if organization_root is not None:
+                    if operation.operation_type != "rename_file" or operation.operation_id not in source_identities:
+                        raise RuntimeError("Organization requires an approved file move.")
+                    check_move_path(organization_root, Path(operation.path))
+                    if check_move_path(organization_root, Path(operation.destination_path), missing_ok=True) is not None:
+                        raise RuntimeError(f"Destination already exists: {operation.destination_path}")
                 source, expected, identity = verify_source(operation)
                 if plan.action_type == "exact_duplicate_keep_plan":
                     verify_source(preferred)
@@ -1042,6 +1054,7 @@ def apply_action_plan_report(
                     lifecycle_callback("started", operation, None)
                 new_snapshot = None
                 write_attempted = False
+                move_attempted = False
                 try:
                     if verify_source(operation) != (source, expected, identity):
                         raise RuntimeError("source changed after operation intent was recorded")
@@ -1049,7 +1062,12 @@ def apply_action_plan_report(
                     if destination is not None:
                         if library_root is not None:
                             _resolved_within(destination, library_root, must_exist=False, label="operation destination")
-                        move_file_no_replace(source, destination, expected_identity=identity, expected_hash=expected)
+                        move_attempted = True
+                        if organization_root is not None:
+                            move_file_no_replace(source, destination, expected_identity=identity, expected_hash=expected,
+                                                 library_root=organization_root)
+                        else:
+                            move_file_no_replace(source, destination, expected_identity=identity, expected_hash=expected)
                         applied_hash = expected
                     else:
                         if backup_roots is not None:
@@ -1090,6 +1108,17 @@ def apply_action_plan_report(
                     )
                 except Exception as exc:
                     message = str(exc)
+                    if organization_root is not None and move_attempted:
+                        try:
+                            left = check_move_path(organization_root, source, missing_ok=True)
+                            right = check_move_path(organization_root, destination, missing_ok=True)
+                            uncertain_write = (left is None or left.st_nlink != 1
+                                               or file_snapshot(source) != (identity, expected)
+                                               or (right is not None and (right.st_dev, right.st_ino) == identity))
+                        except (OSError, ValueError, RuntimeError):
+                            uncertain_write = True
+                        if uncertain_write:
+                            message = f"Move may have started. Inspect History for recovery. {message}"
                     if source_identities and write_attempted:
                         try:
                             uncertain_write = file_snapshot(source) != (identity, expected)

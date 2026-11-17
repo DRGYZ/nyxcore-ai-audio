@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nyxcore.action_plan.ledger import (
@@ -16,12 +17,17 @@ from nyxcore.action_plan.ledger import (
     validate_history_mutation_paths,
 )
 from nyxcore.action_plan.lock import LibraryMutationLock
-from nyxcore.core.filesystem import bounded_path
+from nyxcore.core.filesystem import ORGANIZATION_ACTION, bounded_path
 from nyxcore.review_queue.state import load_review_state, save_review_state
 
 
 class HistoryRecoveryRequiredError(ValueError):
     pass
+
+
+def organization_mutation_enabled(library_root: Path) -> bool:
+    configured = os.environ.get("NYXCORE_WEB_ORGANIZATION_DISPOSABLE_ROOT")
+    return bool(configured and Path(configured).is_absolute() and Path(configured) == library_root.absolute())
 
 
 def inspect_recorded_batch(
@@ -57,6 +63,10 @@ def recover_recorded_batch(
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise ValueError(f"History batch not found: {batch_id}")
+        if not organization_mutation_enabled(library_root) and any(
+            operation.action_type == ORGANIZATION_ACTION for operation in batch.operations
+        ):
+            raise ValueError("Organization recovery requires the configured disposable development library.")
         assessments = apply_batch_recovery(batch, action=action, allowed_roots=(library_root, workspace_root))
         save_operation_ledger(ledger_path, ledger)
         return batch, assessments
@@ -75,6 +85,7 @@ def reverse_recorded_batch(
     target_path: str | None = None,
     stale_lock_token: str | None = None,
     require_settled: bool = False,
+    allow_organization: bool = True,
 ) -> tuple[OperationBatch, list[LedgerOperation]]:
     lock = LibraryMutationLock(library_root)
     lock.acquire(stale_owner_token=stale_lock_token)
@@ -85,6 +96,10 @@ def reverse_recorded_batch(
         batch = find_batch(ledger, batch_id)
         if batch is None:
             raise ValueError(f"History batch not found: {batch_id}")
+        if not (allow_organization and organization_mutation_enabled(library_root)) and any(
+            operation.action_type == ORGANIZATION_ACTION for operation in batch.operations
+        ):
+            raise ValueError("Organization undo requires the configured disposable development library.")
         if require_settled and batch_requires_recovery(batch):
             raise HistoryRecoveryRequiredError("Inspect this batch with recover-review-action --action inspect before reversing.")
         review_state = load_review_state(review_state_path)

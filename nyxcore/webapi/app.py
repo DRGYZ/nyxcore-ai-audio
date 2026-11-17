@@ -22,7 +22,9 @@ from nyxcore.action_plan.service import (
     build_action_plan_report,
     execute_reviewed_action_plan,
 )
-from nyxcore.action_plan.lifecycle import HistoryRecoveryRequiredError, reverse_recorded_batch
+from nyxcore.action_plan.lifecycle import (
+    HistoryRecoveryRequiredError, organization_mutation_enabled, reverse_recorded_batch,
+)
 from nyxcore.action_plan.lock import MutationLockError
 from nyxcore.config import NyxConfig, load_config
 from nyxcore.core.scanner import scan_music_folder
@@ -298,8 +300,13 @@ def create_app(
         analysis = analysis_store.peek(root, _resolve_config(None, None)) if analysis_store else None
         return analysis.records if analysis else []
 
+    def organization_enabled() -> bool:
+        configured = music_root or os.environ.get("NYXCORE_WEB_MUSIC_DIR")
+        return not review_only and configured is not None and organization_mutation_enabled(Path(configured))
+
     install_organization_routes(app, library=organization_library, settings=lambda: _resolve_config(None, None).health,
-                                cached=cached_organization_records)
+                                cached=cached_organization_records, workspace=metadata_workspace,
+                                enabled=organization_enabled, invalidate=invalidate_metadata_generation)
 
     if review_only:
         @app.get("/api/library", response_model=LibraryReportsResponse)
@@ -722,6 +729,7 @@ def create_app(
                 target_path=target_path,
                 stale_lock_token=request.stale_lock_token,
                 require_settled=True,
+                allow_organization=organization_enabled(),
             )
         except (MutationLockError, HistoryRecoveryRequiredError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

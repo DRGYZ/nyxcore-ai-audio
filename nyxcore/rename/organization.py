@@ -38,6 +38,7 @@ class Proposal:
     reasons: tuple[str, ...]
     destination: tuple[str, str, str] | None = None
     inspectable: bool = False
+    source_stat: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +217,8 @@ def _proposal(
             or _utf16_length(destination[-1]) > MAX_FILENAME_LEN or _utf16_length(str(root.joinpath(*destination))) > 259):
         raise ValueError("The proposed path is too long. Verify shorter metadata or use a shorter library root.")
     status = "unchanged" if entry.parts == destination else "ready"
-    return replace(blocked, status=status, reasons=tuple(reasons), destination=destination), (group, album)
+    return replace(blocked, status=status, reasons=tuple(reasons), destination=destination,
+                   source_stat=record.scanned_stat), (group, album)
 
 
 def _album_guards(records: list[TrackRecord]) -> dict[str, set[str]]:
@@ -261,13 +263,18 @@ def _display(value: str) -> str:
     return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
-def build_organization_preview(root: Path, settings: HealthConfig, cached: list[TrackRecord]) -> list[Proposal]:
-    root = root.absolute()
+def organization_root_stat(root: Path) -> os.stat_result:
     if (os.name == "nt" and str(root).startswith("\\\\")) or ".." in root.parts or _unsafe_text(str(root)):
         raise ValueError("Choose a canonical local library folder for organization.")
     info = root.lstat()
     if is_linked_stat(info) or not stat.S_ISDIR(info.st_mode) or root.resolve(strict=True) != root:
         raise ValueError("Choose the original library folder instead of a linked path.")
+    return info
+
+
+def build_organization_preview(root: Path, settings: HealthConfig, cached: list[TrackRecord]) -> list[Proposal]:
+    root = root.absolute()
+    info = organization_root_stat(root)
     occupied, entries = _inventory(root, info)
     cached_by_path = {record.path: record for record in cached}
     stamps = {str(entry.path): _source_stat(entry.parts, root, info.st_dev) for entry in entries if not entry.blocked}
