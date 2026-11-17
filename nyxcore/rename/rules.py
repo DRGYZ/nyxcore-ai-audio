@@ -3,6 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+WINDOWS_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
+MAX_FILENAME_LEN = 180
+
+
+def sanitize_windows_filename(value: str) -> str:
+    return re.sub(r"\s+", " ", WINDOWS_INVALID_CHARS_RE.sub(" ", value)).strip().rstrip(". ").strip()
+
+
 MEANINGFUL_VERSION_TOKENS = {
     "slowed": "Slowed",
     "sped up": "Sped Up",

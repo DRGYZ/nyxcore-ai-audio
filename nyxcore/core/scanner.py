@@ -10,12 +10,15 @@ from mutagen.mp4 import MP4
 from mutagen.mp3 import HeaderNotFoundError
 
 from .audio_files import iter_audio_files
+from .filesystem import scan_stat_key
 from .track import TrackRecord, WarningCode, warn
 from .utils import compute_stats, normalize_tag_value, to_iso_utc, warning_for_missing_tags
 
 LOW_BITRATE_BPS = 128_000
 YOUTUBE_NOISE_PATTERN = re.compile(r"\b(official|lyrics?|audio|video|hd|4k)\b", re.IGNORECASE)
 FEAT_PATTERN = re.compile(r"\b(feat\.?|ft\.?|featuring)\b", re.IGNORECASE)
+ORGANIZATION_FIELDS = ("title", "artist", "album", "albumartist", "tracknumber", "discnumber", "version",
+                       "compilation", "musicbrainz_albumtype")
 
 
 def _extract_tags(audio: object) -> dict[str, str | None]:
@@ -32,6 +35,25 @@ def _extract_tags(audio: object) -> dict[str, str | None]:
     }
 
 
+def _organization_tags(audio: object) -> dict[str, tuple[str, ...]]:
+    tags = getattr(audio, "tags", None) or {}
+    result = {}
+    for field in ORGANIZATION_FIELDS:
+        values = tags.get(field)
+        if values is not None:
+            values = values if isinstance(values, (list, tuple)) else [values]
+            result[field] = tuple(str(value) for value in values)
+    return result
+
+
+def _mp4_details(path: Path) -> tuple[bool, bool]:
+    try:
+        tags = MP4(path).tags or {}
+        return bool(tags.get("covr")), tags.get("cpil") is True
+    except Exception:
+        return False, False
+
+
 def _has_cover_art(path: Path) -> bool:
     try:
         suffix = path.suffix.lower()
@@ -43,8 +65,7 @@ def _has_cover_art(path: Path) -> bool:
             pictures = getattr(audio, "pictures", None)
             return bool(pictures)
         if suffix in {".m4a", ".aac"}:
-            mp4 = MP4(path)
-            return bool(mp4.tags and mp4.tags.get("covr"))
+            return _mp4_details(path)[0]
         return False
     except Exception:
         return False
@@ -87,6 +108,7 @@ def _scan_single_file(path: Path) -> TrackRecord | None:
         stat = path.stat()
         file_size = stat.st_size
         mtime_iso = to_iso_utc(stat.st_mtime)
+        record.scanned_stat = scan_stat_key(stat)
     except OSError:
         if not path.exists():
             return None
@@ -98,6 +120,7 @@ def _scan_single_file(path: Path) -> TrackRecord | None:
             warn(record, WarningCode.read_error)
         else:
             tags = _extract_tags(audio)
+            record.organization_tags = _organization_tags(audio)
             info = getattr(audio, "info", None)
             if info and getattr(info, "length", None) is not None:
                 duration_seconds = round(float(info.length), 3)
@@ -127,9 +150,13 @@ def _scan_single_file(path: Path) -> TrackRecord | None:
     for code in warning_for_missing_tags(tags):
         warn(record, code)
 
-    has_cover_art = _has_cover_art(path)
-    record.has_cover_art = has_cover_art
-    if not has_cover_art:
+    if path.suffix.lower() in {".m4a", ".aac"}:
+        record.has_cover_art, compilation = _mp4_details(path)
+        if compilation:
+            record.organization_tags["compilation"] = (*record.organization_tags.get("compilation", ()), "1")
+    else:
+        record.has_cover_art = _has_cover_art(path)
+    if not record.has_cover_art:
         warn(record, WarningCode.missing_cover_art)
 
     filename = path.stem

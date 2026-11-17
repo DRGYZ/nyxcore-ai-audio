@@ -32,6 +32,7 @@ from nyxcore.review_queue.state import apply_review_action, load_review_state, s
 from nyxcore.search.service import search_tracks
 from nyxcore.webapi.analysis import LibrarySnapshot, ReviewOnlyAnalysis
 from nyxcore.webapi.metadata import install_metadata_routes
+from nyxcore.webapi.organization import install_organization_routes
 from nyxcore.saved_playlists.service import (
     SavedPlaylistDefinition,
     SavedPlaylistLatestResult,
@@ -286,6 +287,19 @@ def create_app(
         records=metadata_records, require_mutations=require_audio_mutations,
         invalidate=invalidate_metadata_generation, review_only=review_only,
     )
+
+    def organization_library() -> Path:
+        configured = music_root or os.environ.get("NYXCORE_WEB_MUSIC_DIR")
+        if not configured:
+            raise HTTPException(409, "Configure a library folder before building an organization preview.")
+        return Path(configured).absolute()
+
+    def cached_organization_records(root: Path):
+        analysis = analysis_store.peek(root, _resolve_config(None, None)) if analysis_store else None
+        return analysis.records if analysis else []
+
+    install_organization_routes(app, library=organization_library, settings=lambda: _resolve_config(None, None).health,
+                                cached=cached_organization_records)
 
     if review_only:
         @app.get("/api/library", response_model=LibraryReportsResponse)

@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import type { DraftSet, MetadataIssue, MetadataPlan, MetadataProposal, MetadataTrack, PlanInput } from "./metadata";
 import type { CoverChoice, LinkedReleases, LookupQuery, LookupResult, MusicSource, SelectedCover } from "./enrichment";
+import type { OrganizationPageData, OrganizationPreview, OrganizationStatus, OrganizationView } from "./organization";
 
 const API_BASE_URL = import.meta.env.PROD
   ? "/api"
@@ -63,6 +64,15 @@ export function refreshLibrary() {
 
 export function fetchMetadataTrack(path: string) {
   return getJson<MetadataTrack>(`/metadata/track?${new URLSearchParams({ path })}`);
+}
+
+export function buildOrganizationPreview() {
+  return postJson<OrganizationPreview>("/organization/preview", {});
+}
+
+export function fetchOrganizationPage(id: string, status: OrganizationStatus | "all", view: OrganizationView, offset: number) {
+  const params = new URLSearchParams({ status, view, offset: String(offset) });
+  return getJson<OrganizationPageData>(`/organization/preview/${encodeURIComponent(id)}?${params}`);
 }
 
 export function findMusicInfo(input: LookupQuery) {
