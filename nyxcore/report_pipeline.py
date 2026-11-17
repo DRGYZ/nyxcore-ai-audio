@@ -25,8 +25,10 @@ class ReviewPipelineReports:
     review_report: ReviewQueueReport
 
 
-def build_duplicate_report(records: list[TrackRecord], *, app_config: NyxConfig) -> DuplicateAnalysisReport:
-    return analyze_duplicates(records, settings=app_config.duplicates)
+def build_duplicate_report(
+    records: list[TrackRecord], *, app_config: NyxConfig, reuse_scanned_bitrate: bool = False,
+) -> DuplicateAnalysisReport:
+    return analyze_duplicates(records, settings=app_config.duplicates, reuse_scanned_bitrate=reuse_scanned_bitrate)
 
 
 def build_duplicate_health_reports(
@@ -35,13 +37,17 @@ def build_duplicate_health_reports(
     *,
     app_config: NyxConfig,
     duplicate_report: DuplicateAnalysisReport | None = None,
+    reuse_scanned_bitrate: bool = False,
 ) -> DuplicateHealthReports:
-    resolved_duplicate_report = duplicate_report or build_duplicate_report(records, app_config=app_config)
+    resolved_duplicate_report = duplicate_report or build_duplicate_report(
+        records, app_config=app_config, reuse_scanned_bitrate=reuse_scanned_bitrate,
+    )
     health_report = build_health_report(
         music,
         records,
         settings=app_config.health,
         duplicate_report=resolved_duplicate_report,
+        reuse_scanned_bitrate=reuse_scanned_bitrate,
     )
     return DuplicateHealthReports(
         duplicate_report=resolved_duplicate_report,

@@ -8,6 +8,11 @@ from fastapi.testclient import TestClient
 import pytest
 
 from nyxcore import report_pipeline
+from nyxcore.config import load_config
+from nyxcore.core.scanner import scan_music_folder
+from nyxcore.core.track import TrackRecord
+from nyxcore.duplicates import service as duplicate_service
+from nyxcore.health.service import CollectionHealthAnalyzer
 from nyxcore.webapi import analysis as analysis_module
 
 webapi = import_module("nyxcore.webapi.app")
@@ -83,6 +88,47 @@ def test_cold_readers_share_one_analysis(library, monkeypatch):
             assert generation(request_json(client, "GET", route)) == generation(shared)
         assert scans == [music]
         assert duplicate_passes == [2]
+
+
+def test_bitrate_reuse_keeps_report_values_and_legacy_reads(library, monkeypatch):
+    music, _ = library
+    config = load_config()
+    records, _ = scan_music_folder(music)
+    assert all(record.scanned_bitrate_bps == 128_000 for record in records)
+    legacy_record = TrackRecord.from_dict(records[0].to_dict())
+    assert legacy_record.scanned_bitrate_bps is None
+    assert "scanned_bitrate_bps" not in legacy_record.to_dict()
+
+    duplicate_reads: list[Path] = []
+    health_reads: list[Path] = []
+    read_duplicate = duplicate_service._load_bitrate_bps
+    read_health = CollectionHealthAnalyzer._load_bitrate
+
+    def counted_duplicate(path):
+        duplicate_reads.append(path)
+        return read_duplicate(path)
+
+    def counted_health(self, path):
+        health_reads.append(path)
+        return read_health(self, path)
+
+    monkeypatch.setattr(duplicate_service, "_load_bitrate_bps", counted_duplicate)
+    monkeypatch.setattr(CollectionHealthAnalyzer, "_load_bitrate", counted_health)
+    reuse = report_pipeline.build_duplicate_health_reports(music, records, app_config=config, reuse_scanned_bitrate=True)
+    assert duplicate_reads == health_reads == []
+
+    fresh = report_pipeline.build_duplicate_health_reports(music, records, app_config=config)
+    assert len(duplicate_reads) == len(health_reads) == 2
+    assert reuse.health_report.quality.bitrate_buckets == fresh.health_report.quality.bitrate_buckets
+    assert reuse.duplicate_report.to_dict() == fresh.duplicate_report.to_dict()
+
+    duplicate_reads.clear()
+    health_reads.clear()
+    fallback = report_pipeline.build_duplicate_health_reports(
+        music, [legacy_record, records[1]], app_config=config, reuse_scanned_bitrate=True,
+    )
+    assert duplicate_reads == health_reads == [Path(legacy_record.path)]
+    assert fallback.duplicate_report.to_dict() == fresh.duplicate_report.to_dict()
 
 
 def test_refresh_publishes_add_remove_and_changed_content_together(library):

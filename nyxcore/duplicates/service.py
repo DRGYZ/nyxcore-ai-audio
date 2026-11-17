@@ -207,13 +207,15 @@ class _DuplicateCandidate:
 
 
 class DuplicateAnalyzer:
-    def __init__(self, settings: DuplicateConfig | None = None) -> None:
+    def __init__(self, settings: DuplicateConfig | None = None, *, reuse_scanned_bitrate: bool = False) -> None:
         self.settings = settings or DuplicateConfig()
+        self._reuse_scanned_bitrate = reuse_scanned_bitrate
 
     def build_candidates(self, records: list[TrackRecord]) -> list[_DuplicateCandidate]:
         candidates: list[_DuplicateCandidate] = []
         for record in sorted(records, key=lambda item: item.path):
             path = Path(record.path)
+            bitrate = record.scanned_bitrate_bps if self._reuse_scanned_bitrate else None
             candidates.append(
                 _DuplicateCandidate(
                     record=record,
@@ -225,7 +227,7 @@ class DuplicateAnalyzer:
                     artist_normalized=_normalize_text(record.tags.get("artist")),
                     album_normalized=_normalize_text(record.tags.get("album")),
                     duration_seconds=record.duration_seconds,
-                    bitrate_bps=_load_bitrate_bps(path),
+                    bitrate_bps=bitrate if bitrate is not None else _load_bitrate_bps(path),
                     has_cover_art=record.has_cover_art,
                     metadata_fields_present=_metadata_richness(record.tags),
                 )
@@ -514,5 +516,10 @@ class DuplicateAnalyzer:
         return self._preference_key(candidate)
 
 
-def analyze_duplicates(records: list[TrackRecord], *, settings: DuplicateConfig | None = None) -> DuplicateAnalysisReport:
-    return DuplicateAnalyzer(settings=settings).analyze(records)
+def analyze_duplicates(
+    records: list[TrackRecord],
+    *,
+    settings: DuplicateConfig | None = None,
+    reuse_scanned_bitrate: bool = False,
+) -> DuplicateAnalysisReport:
+    return DuplicateAnalyzer(settings=settings, reuse_scanned_bitrate=reuse_scanned_bitrate).analyze(records)

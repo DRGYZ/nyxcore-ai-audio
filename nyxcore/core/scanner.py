@@ -106,8 +106,10 @@ def _scan_single_file(path: Path) -> TrackRecord | None:
             bitrate = getattr(info, "bitrate", None) if info is not None else None
             if bitrate is None:
                 warn(record, WarningCode.bitrate_unavailable)
-            elif int(bitrate) < LOW_BITRATE_BPS:
-                warn(record, WarningCode.low_bitrate)
+            else:
+                record.scanned_bitrate_bps = int(bitrate)
+                if record.scanned_bitrate_bps < LOW_BITRATE_BPS:
+                    warn(record, WarningCode.low_bitrate)
     except UnicodeDecodeError:
         warn(record, WarningCode.tag_parse_error)
     except (HeaderNotFoundError, OSError):

@@ -91,6 +91,30 @@ describe("Review Inbox", () => {
     });
   });
 
+  it("opens the page containing a deep-linked finding and keeps navigation bounded", async () => {
+    const item = mockReviewReport.items[0];
+    const items = Array.from({ length: 110 }, (_, index) => ({
+      ...item, item_id: "finding-" + index, summary: "Library finding " + index,
+    }));
+    vi.spyOn(hooks, "useReviewQuery").mockReturnValue({
+      data: { data: { ...mockReviewReport, items } },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      isSuccess: true,
+    } as ReturnType<typeof hooks.useReviewQuery>);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewPage />, { initialEntries: ["/review?item=finding-103"] });
+    const table = within(screen.getByRole("table"));
+    expect(table.getAllByRole("row")).toHaveLength(11);
+    expect(table.getByRole("button", { name: /^Inspect finding: Library finding 103,/ })).toBeVisible();
+    expect(screen.getByText("101–110 of 110 findings")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(table.getAllByRole("row")).toHaveLength(51);
+    expect(screen.getByText("51–100 of 110 findings")).toBeVisible();
+    expect(table.queryByRole("button", { name: /^Inspect finding: Library finding 103,/ })).toBeNull();
+  });
+
   it("filters findings by priority band using aria-pressed buttons", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ReviewPage />);

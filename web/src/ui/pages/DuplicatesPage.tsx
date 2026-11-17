@@ -5,7 +5,9 @@ import { useDuplicatesQuery, useReviewQuery, useStatusQuery } from "../../lib/ho
 import { Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, formatBytes, formatNumber } from "../components";
 import { DuplicateComparison } from "../duplicates/DuplicateComparison";
 import { ApiUnavailableState } from "../feedback";
+import { ListPages } from "../ListPages";
 
+const GROUPS_PER_PAGE = 24;
 const tabs = [
   { kind: "exact", label: "Exact Duplicates", icon: "copy_all" },
   { kind: "likely", label: "Likely Duplicates", icon: "difference" },
@@ -17,6 +19,7 @@ export function DuplicatesPage() {
   const reviewOnly = useStatusQuery().data?.review_only === true;
   const reviewQuery = useReviewQuery();
   const [activeTab, setActiveTab] = useState<"exact" | "likely">("exact");
+  const [requestedPage, setRequestedPage] = useState(0);
   const header = <PageHeader eyebrow="Duplicate Detection" title="Duplicates" description="Compare copies, inspect match evidence, and decide what to keep." />;
 
   if (!duplicatesQuery.data || (duplicatesQuery.isError && !reviewOnly)) {
@@ -40,6 +43,9 @@ export function DuplicatesPage() {
     return sum + group.files.reduce((bytes, file) => bytes + (file.path === group.preferred.path ? 0 : file.file_size_bytes), 0);
   }, 0);
   const groups = activeTab === "exact" ? report.exact_duplicates : report.likely_duplicates;
+  const page = Math.min(requestedPage, Math.max(0, Math.ceil(groups.length / GROUPS_PER_PAGE) - 1));
+  const first = page * GROUPS_PER_PAGE;
+  const visibleGroups = groups.slice(first, first + GROUPS_PER_PAGE);
   const itemType = activeTab === "exact" ? "exact_duplicate_group" : "likely_duplicate_group";
 
   return (
@@ -57,7 +63,10 @@ export function DuplicatesPage() {
       </div>
       <div className="flex flex-wrap gap-2 border-b border-white/[0.07] pb-3" role="group" aria-label="Duplicate type">
         {tabs.map(({ kind, label, icon }) => (
-          <button key={kind} type="button" aria-pressed={activeTab === kind} onClick={() => setActiveTab(kind)}
+          <button key={kind} type="button" aria-pressed={activeTab === kind} onClick={() => {
+            setActiveTab(kind);
+            setRequestedPage(0);
+          }}
             className={"flex items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-medium focus-visible:outline-accent "
               + (activeTab === kind ? "bg-white/[0.08] text-accent ring-1 ring-accent/30" : "text-primary-muted hover:text-primary")}>
             <Icon name={icon} className="text-sm" />
@@ -66,8 +75,9 @@ export function DuplicatesPage() {
           </button>
         ))}
       </div>
+      <ListPages label="duplicate groups" count={groups.length} page={page} pageSize={GROUPS_PER_PAGE} onPageChange={setRequestedPage} />
       <div className="space-y-4">
-        {groups.length ? groups.map((group) => {
+        {visibleGroups.length ? visibleGroups.map((group) => {
           const matches = reviewItems.filter((candidate) => matchesDuplicateFinding(group, candidate, activeTab));
           const item = matches.length === 1 ? matches[0] : undefined;
           return <DuplicateComparison key={activeTab + group.group_id} group={group} kind={activeTab} root={root}

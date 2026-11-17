@@ -30,6 +30,7 @@ import {
 } from "../components";
 import { ReviewDetailPanel } from "../review/ReviewDetailPanel";
 import { ApplyResultPanel, PlanReportModal } from "../review/PlanReportModal";
+import { ListPages } from "../ListPages";
 import { SplitScreen } from "../shell";
 
 const REVIEW_STATUS_FILTERS = [
@@ -39,6 +40,8 @@ const REVIEW_STATUS_FILTERS = [
   { value: "snoozed", label: "snoozed" },
   { value: "resolved", label: "resolved until refresh" },
 ];
+
+const FINDINGS_PER_PAGE = 50;
 
 type PlanPreview = {
   report: ActionPlanReport;
@@ -106,6 +109,10 @@ export function ReviewPage() {
     idKey: "item_id",
     syncUrl: reviewQuery.isSuccess && !reviewQuery.isFetching,
   });
+  const selectedIndex = filtered.findIndex((item) => item.item_id === selected?.item_id);
+  const page = Math.max(0, Math.floor(selectedIndex / FINDINGS_PER_PAGE));
+  const first = page * FINDINGS_PER_PAGE;
+  const visibleFindings = filtered.slice(first, first + FINDINGS_PER_PAGE);
 
   const reviewMeta = reviewQuery.data?.meta;
   useEffect(() => {
@@ -364,6 +371,13 @@ export function ReviewPage() {
               </div>
             </Panel>
 
+            <ListPages
+              label="findings"
+              count={filtered.length}
+              page={page}
+              pageSize={FINDINGS_PER_PAGE}
+              onPageChange={(nextPage) => selectById(filtered[nextPage * FINDINGS_PER_PAGE].item_id)}
+            />
             {filtered.length === 0 ? (
               <EmptyState
                 title="No review items match the current filters"
@@ -395,7 +409,7 @@ export function ReviewPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
-                      {filtered.map((item) => {
+                      {visibleFindings.map((item) => {
                         const active = selected?.item_id === item.item_id;
                         const kind = duplicateKind(item.item_type);
                         const reason = kind === "exact" ? "SHA-256 byte match"
@@ -464,7 +478,7 @@ export function ReviewPage() {
                   </table>
                 </div>
                 <div className="flex items-center justify-between border-t border-white/[0.05] bg-surface-low/40 px-4 py-2 font-mono text-[10px] text-primary-subtle">
-                  <span>{filtered.length} visible / {report.items.length} total findings</span>
+                  <span>{report.items.length} total findings</span>
                   <span>Sorted by Priority Score (Descending)</span>
                 </div>
               </Panel>

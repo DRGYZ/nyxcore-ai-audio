@@ -29,9 +29,12 @@ class TrackRecord:
     has_cover_art: bool
     duration_seconds: float | None
     warnings: list[WarningCode] = field(default_factory=list)
+    # Transient metadata from this scan. Incremental state keeps its existing format.
+    scanned_bitrate_bps: int | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         data = asdict(self)
+        del data["scanned_bitrate_bps"]
         data["warnings"] = [code.value for code in self.warnings]
         return data
 

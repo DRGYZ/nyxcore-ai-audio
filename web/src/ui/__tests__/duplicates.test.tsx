@@ -79,6 +79,28 @@ describe("Duplicate comparison", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it("pages large duplicate sets and starts each tab on its first page", async () => {
+    report = {
+      ...duplicateReport,
+      exact_duplicates: Array.from({ length: 30 }, (_, index) => ({
+        ...duplicateReport.exact_duplicates[0],
+        group_id: "exact-" + index,
+      })),
+    };
+    const user = userEvent.setup();
+    renderWithProviders(<DuplicatesPage />);
+    await screen.findByRole("navigation", { name: "duplicate groups pages" });
+    expect(screen.getAllByRole("article")).toHaveLength(24);
+    expect(screen.getByText("1–24 of 30 duplicate groups")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getAllByRole("article")).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Likely Duplicates/ }));
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Exact Duplicates/ }));
+    expect(screen.getByText("1–24 of 30 duplicate groups")).toBeVisible();
+  });
+
   it("explains verified byte identity, deterministic preference and quarantine for three exact copies", async () => {
     const user = userEvent.setup();
     renderWithProviders(<DuplicatesPage />);

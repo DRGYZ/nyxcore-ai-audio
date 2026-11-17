@@ -70,7 +70,7 @@ class ReviewOnlyAnalysis:
         next(music.iterdir(), None)  # Fail on an unavailable root before scanning.
         before = build_file_snapshots(music)
         records = self._load_records(music)
-        reports = build_duplicate_health_reports(music, records, app_config=config)
+        reports = build_duplicate_health_reports(music, records, app_config=config, reuse_scanned_bitrate=True)
         next(music.iterdir(), None)
         after = build_file_snapshots(music)
         if before != after or len(records) != len(after):

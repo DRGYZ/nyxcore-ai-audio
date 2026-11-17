@@ -209,10 +209,11 @@ class CollectionHealthAnalyzer:
         *,
         settings: HealthConfig | None = None,
         duplicate_report: DuplicateAnalysisReport | None = None,
+        reuse_scanned_bitrate: bool = False,
     ) -> HealthReport:
         settings = settings or HealthConfig()
         if duplicate_report is None:
-            duplicate_report = analyze_duplicates(records)
+            duplicate_report = analyze_duplicates(records, reuse_scanned_bitrate=reuse_scanned_bitrate)
 
         folder_counter: Counter[str] = Counter()
         format_counter: Counter[str] = Counter()
@@ -276,7 +277,8 @@ class CollectionHealthAnalyzer:
             else:
                 artwork_without += 1
 
-            bitrate_buckets[self._bitrate_bucket(path, settings)] += 1
+            bitrate = record.scanned_bitrate_bps if reuse_scanned_bitrate else None
+            bitrate_buckets[self._bitrate_bucket(path, settings, scanned_bitrate=bitrate)] += 1
             if WarningCode.low_bitrate in record.warnings:
                 low_bitrate.append(record.path)
                 issue_hits += 1
@@ -384,8 +386,8 @@ class CollectionHealthAnalyzer:
             priorities=priority_section,
         )
 
-    def _bitrate_bucket(self, path: Path, settings: HealthConfig) -> str:
-        bitrate = self._load_bitrate(path)
+    def _bitrate_bucket(self, path: Path, settings: HealthConfig, *, scanned_bitrate: int | None = None) -> str:
+        bitrate = scanned_bitrate if scanned_bitrate is not None else self._load_bitrate(path)
         if bitrate is None:
             return "unknown"
         threshold = settings.low_bitrate_threshold_bps
@@ -494,5 +496,8 @@ def build_health_report(
     *,
     settings: HealthConfig | None = None,
     duplicate_report: DuplicateAnalysisReport | None = None,
+    reuse_scanned_bitrate: bool = False,
 ) -> HealthReport:
-    return CollectionHealthAnalyzer().analyze(root, records, settings=settings, duplicate_report=duplicate_report)
+    return CollectionHealthAnalyzer().analyze(
+        root, records, settings=settings, duplicate_report=duplicate_report, reuse_scanned_bitrate=reuse_scanned_bitrate,
+    )
