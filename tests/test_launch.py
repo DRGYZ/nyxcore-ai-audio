@@ -36,7 +36,7 @@ def test_static_routes_and_api_remain_distinct(checkout):
     out = checkout / "out"
     app = launch.create_local_app(frontend_dir=checkout / "web/dist", music_root=music, workspace_root=out)
     with TestClient(app, base_url="http://127.0.0.1") as client:
-        for route in ("/", "/review?item=example", "/duplicates", "/history", "/search", "/health", "/playlists"):
+        for route in ("/", "/review?item=example", "/duplicates", "/history", "/search", "/health", "/playlists", "/metadata"):
             response = client.get(route)
             assert response.status_code == 200
             assert response.headers["content-type"].startswith("text/html")

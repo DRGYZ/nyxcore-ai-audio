@@ -4,6 +4,7 @@ import type { ReviewItem } from "../../lib/types";
 import { Button, Chip, Drawer, Icon, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
 import { formatDuplicateScore } from "../duplicates/DuplicateComparison";
 import { DuplicateDecisionEvidence } from "./DuplicateDecisionEvidence";
+import { MetadataDraftLink, MetadataEditButton } from "../metadata/MetadataEditor";
 
 const AFFECTED_PATH_PREVIEW_LIMIT = 20;
 
@@ -31,7 +32,11 @@ export function ReviewDetailPanel({
   onClose?: () => void;
 }) {
   const affectedPaths = item?.affected_paths ?? item?.sample_paths ?? [];
-  const displayedAffectedPaths = affectedPaths.slice(0, AFFECTED_PATH_PREVIEW_LIMIT);
+  const editable = !usingMock && (item?.item_type === "missing_metadata" || item?.item_type === "weak_or_placeholder_metadata");
+  const [paging, setPaging] = useState({ item: "", page: 0 });
+  const page = editable && paging.item === item?.item_id ? paging.page : 0;
+  const start = page * AFFECTED_PATH_PREVIEW_LIMIT;
+  const displayedAffectedPaths = affectedPaths.slice(start, start + AFFECTED_PATH_PREVIEW_LIMIT);
   const remainingAffectedPathCount = affectedPaths.length - displayedAffectedPaths.length;
   const kind = duplicateKind(item?.item_type);
   const detailedEvidence = duplicateEvidence?.status === "matched";
@@ -157,10 +162,21 @@ export function ReviewDetailPanel({
             value={
               affectedPaths.length > 0 ? (
                 <div className="space-y-1.5">
+                  {editable && <MetadataDraftLink />}
                   {displayedAffectedPaths.map((path) => (
-                    <PathBlock key={path} value={path} />
+                    <div key={path} className="space-y-1.5">
+                      <PathBlock value={path} />
+                      {editable && <MetadataEditButton path={path} />}
+                    </div>
                   ))}
-                  {remainingAffectedPathCount > 0 ? (
+                  {editable && affectedPaths.length > AFFECTED_PATH_PREVIEW_LIMIT ? (
+                    <nav aria-label="Metadata finding files" className="flex flex-wrap items-center gap-2 text-xs text-primary-muted">
+                      <Button type="button" disabled={page === 0} onClick={() => setPaging({ item: item.item_id, page: page - 1 })}>Previous</Button>
+                      <span>{start + 1}–{start + displayedAffectedPaths.length} of {affectedPaths.length}</span>
+                      <Button type="button" disabled={start + displayedAffectedPaths.length >= affectedPaths.length}
+                        onClick={() => setPaging({ item: item.item_id, page: page + 1 })}>Next</Button>
+                    </nav>
+                  ) : remainingAffectedPathCount > 0 ? (
                     <p className="px-1 font-sans text-[11px] text-primary-subtle">
                       {remainingAffectedPathCount} more paths. Generate a plan to inspect full operations.
                     </p>
@@ -180,3 +196,4 @@ export function ReviewDetailPanel({
     </Drawer>
   );
 }
+import { useState } from "react";

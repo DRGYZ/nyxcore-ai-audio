@@ -168,7 +168,23 @@ To switch libraries, press **Ctrl+C** in the launcher terminal and restart with 
 .\.venv\Scripts\python.exe -m nyxcore.launch --music 'D:\Music Library' --out 'C:\NyxCore\my-library-reports'
 ```
 
-The launcher binds only to `127.0.0.1` and runs in **review-only mode** for every library. Search, findings, plan previews, and history inspection are available. Triage decisions and saved playlists may write local state to the workspace. The API refuses apply, restore, and undo requests. Mutations remain experimental.
+The launcher binds only to `127.0.0.1` and runs in **review-only mode** for every library. Search, findings, plan previews, and history inspection are available. Triage decisions, saved playlists, and staged metadata proposals may write local state to the workspace. The API refuses apply, restore, and undo requests. Mutations remain experimental.
+
+Open a track from a metadata issue in Library Health, a metadata finding in Review Inbox, or an Archive Search result. Inspect the embedded values, then stage replacements for title, artist, or album. Filename suggestions are guesses, and NyxCore leaves missing album suggestions unavailable. Open **Review staged metadata** to select up to 50 files, set a shared artist or album, and generate a before-and-after preview. Staged proposals persist in `metadata_drafts.json` in the workspace. After a library refresh or server restart, reopen stale drafts and stage them against the current tags.
+
+Only the development workflow below can apply metadata repairs. Configure an explicit disposable library root and a separate workspace. The editor supports writes to readable MP3, FLAC, and M4A files. Clearing tags is unavailable. Every applied file has a full backup in the workspace. Use **History** to reverse verified edits and inspect any operation that needs recovery.
+
+### Find Music Info and front covers
+
+In the metadata editor, open **Find Music Info**, check the query, and choose **Search MusicBrainz**. Title and artist are sent to MusicBrainz. Album, duration, and filename clues are used locally to compare the results. Cover lookup sends the selected MusicBrainz release or release-group identifier to Cover Art Archive. NyxCore sends no audio, paths, hashes, workspace identifiers, or unrelated tracks. Manual editing and the rest of library review work offline.
+
+Compare the recording candidates, then choose the release whose album or artwork belongs on your file. A recording may appear on multiple releases. The match score describes how the returned result compares with the available clues. Select the suggested tags or a front cover before staging. You can edit the proposed fields and keep an existing cover unless you explicitly approve its replacement.
+
+The workspace cache is limited to 64 MiB and 160 entries. Search and artwork-index results expire after seven days and cached images after 14 days. Approved artwork is a locally decoded and normalized JPEG. NyxCore accepts single-frame JPEG and PNG inputs up to 6 MiB and 16 megapixels. If cached artwork is missing, expired, or changed, select the cover again. A server restart also requires a fresh inspection and re-selection or removal of the previous online source from the draft.
+
+The source and portable launchers allow lookup and previews in review-only mode. Apply and undo are available for disposable development libraries. Front-cover editing uses native ID3, FLAC picture blocks, and M4A cover atoms. Files with multiple front covers require manual inspection. Other picture types in MP3 and FLAC are preserved.
+
+MusicBrainz offers its public API for noncommercial use. Commercial users should consult its service plans. MusicBrainz core metadata is CC0. Cover Art Archive images retain the rights of their respective copyright owners. [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) · [MusicBrainz data licenses](https://musicbrainz.org/doc/About/Data_License) · [Cover Art Archive](https://coverartarchive.org/)
 
 - If the port is occupied, append `--port 8001` or choose another free port. Leave the existing service running.
 - If the browser does not open, use the printed URL. Add `--no-browser` to open it yourself.

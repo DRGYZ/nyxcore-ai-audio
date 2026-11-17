@@ -1,0 +1,120 @@
+{
+  "recordings": {
+    "count": 2,
+    "recordings": [
+      {
+        "id": "b6aadbe2-5eeb-437f-835e-12785da98335",
+        "title": "Meridian",
+        "score": 100,
+        "artist-credit": [
+          {
+            "name": "Écho Ensemble",
+            "artist": {
+              "id": "a6aadbe2-5eeb-437f-835e-12785da98336",
+              "name": "Écho Ensemble"
+            }
+          }
+        ],
+        "length": 197000,
+        "releases": [
+          {
+            "id": "d6aadbe2-5eeb-437f-835e-12785da98337",
+            "title": "Lumière — 夜",
+            "date": "2017-01-18",
+            "country": "JP",
+            "release-group": {
+              "id": "f6aadbe2-5eeb-437f-835e-12785da98339",
+              "title": "Lumière — 夜"
+            }
+          },
+          {
+            "id": "e6aadbe2-5eeb-437f-835e-12785da98338",
+            "title": "Collected Sessions",
+            "date": "2023-03-04",
+            "country": "FR",
+            "release-group": {
+              "id": "f6aadbe2-5eeb-437f-835e-12785da98340",
+              "title": "Collected Sessions"
+            }
+          }
+        ]
+      },
+      {
+        "id": "c6aadbe2-5eeb-437f-835e-12785da98334",
+        "title": "Méridian",
+        "score": 95,
+        "artist-credit": [
+          {
+            "name": "Écho Ensemble",
+            "artist": {
+              "id": "a6aadbe2-5eeb-437f-835e-12785da98336",
+              "name": "Écho Ensemble"
+            }
+          }
+        ],
+        "length": 192000,
+        "releases": [
+          {
+            "id": "d6aadbe2-5eeb-437f-835e-12785da98337",
+            "title": "Lumière — 夜",
+            "date": "2017-01-18",
+            "country": "JP",
+            "release-group": {
+              "id": "f6aadbe2-5eeb-437f-835e-12785da98339",
+              "title": "Lumière — 夜"
+            }
+          },
+          {
+            "id": "e6aadbe2-5eeb-437f-835e-12785da98338",
+            "title": "Collected Sessions",
+            "date": "2023-03-04",
+            "country": "FR",
+            "release-group": {
+              "id": "f6aadbe2-5eeb-437f-835e-12785da98340",
+              "title": "Collected Sessions"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "covers": {
+    "release": "https://musicbrainz.org/release/d6aadbe2-5eeb-437f-835e-12785da98337",
+    "images": [
+      {
+        "id": 916201341,
+        "approved": true,
+        "types": [
+          "Front"
+        ],
+        "front": true,
+        "comment": "Original front"
+      },
+      {
+        "id": "916201342",
+        "approved": true,
+        "types": [
+          "Front"
+        ],
+        "front": false,
+        "comment": "Alternate front"
+      },
+      {
+        "id": "916201343",
+        "approved": true,
+        "types": [
+          "Back"
+        ],
+        "front": false
+      },
+      {
+        "id": "916201344",
+        "approved": false,
+        "types": [
+          "Front"
+        ],
+        "front": true
+      }
+    ]
+  }
+}

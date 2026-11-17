@@ -52,6 +52,7 @@ type PlanPreview = {
 
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
+  const metadataEditorOpen = searchParams.has("editTrack");
   const requestedItemType = searchParams.get("type");
   const reviewQuery = useReviewQuery();
   const reviewOnly = useStatusQuery().data?.review_only === true;
@@ -169,7 +170,7 @@ export function ReviewPage() {
   }
 
   useEffect(() => {
-    if (!mobileInspectorOpen || planReport) return;
+    if (!mobileInspectorOpen || planReport || metadataEditorOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         handleCloseMobileInspector();
@@ -177,7 +178,7 @@ export function ReviewPage() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mobileInspectorOpen, planReport, selected]);
+  }, [mobileInspectorOpen, planReport, selected, metadataEditorOpen]);
 
   const outcome = applyResult ? (
     <div ref={resultsRef} tabIndex={-1} aria-label="Apply results">
@@ -508,8 +509,8 @@ export function ReviewPage() {
       {mobileInspectorOpen && selected ? (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-sm xl:hidden"
-          role="dialog"
-          aria-modal="true"
+          role={metadataEditorOpen ? undefined : "dialog"}
+          aria-modal={metadataEditorOpen ? undefined : true}
           aria-label={`Finding Inspector: ${selected.summary}`}
           onMouseDown={handleCloseMobileInspector}
         >

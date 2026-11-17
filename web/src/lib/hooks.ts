@@ -64,6 +64,7 @@ export function useRefreshLibrary() {
   return useMutation({
     mutationFn: async () => {
       await refreshLibrary();
+      await queryClient.invalidateQueries({ queryKey: ["metadata"] });
       await queryClient.cancelQueries({ queryKey: libraryQuery.queryKey });
       try {
         await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey }, { throwOnError: true });
@@ -94,7 +95,18 @@ const selectReview = ({ meta, review }: LibraryReports) => ({ meta, data: review
 const selectDuplicates = ({ meta, duplicates }: LibraryReports) => ({ meta, data: duplicates });
 
 export function useHealthQuery() {
-  return useLibraryReport("health", fetchHealth, selectHealth);
+  return useLibraryReport("health", () => fetchHealth(), selectHealth);
+}
+
+export function useRefreshHealthAudit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => fetchHealth(true),
+    onSuccess: (report) => {
+      queryClient.setQueryData(["health"], report);
+      return queryClient.invalidateQueries({ queryKey: ["metadata"] });
+    },
+  });
 }
 
 export function useReviewQuery() {
@@ -240,6 +252,8 @@ export function useReverseHistoryMutation() {
     mutationFn: ({ batchId, target_path, alternate_restore_dir }: { batchId: string; target_path?: string; alternate_restore_dir?: string }) =>
       restoreHistoryBatch(batchId, { target_path, alternate_restore_dir }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["metadata"] });
+      queryClient.invalidateQueries({ queryKey: ["search"] });
       queryClient.invalidateQueries({ queryKey: ["health"] });
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
       queryClient.invalidateQueries({ queryKey: ["history"] });

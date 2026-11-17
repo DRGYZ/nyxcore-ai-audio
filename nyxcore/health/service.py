@@ -27,7 +27,7 @@ def _folder_key(path: Path, root: Path) -> str:
         return str(path.parent)
 
 
-def _is_placeholder(value: str | None, settings: HealthConfig) -> bool:
+def is_placeholder(value: str | None, settings: HealthConfig) -> bool:
     normalized = _normalize_text(value)
     if not normalized:
         return False
@@ -45,6 +45,15 @@ def _parse_filename_artist_title(stem: str) -> tuple[str | None, str | None]:
     if not left or not right:
         return None, None
     return left, right
+
+
+def is_suspicious_swap(path: Path, record: TrackRecord) -> bool:
+    parsed_artist, parsed_title = _parse_filename_artist_title(path.stem)
+    if parsed_artist is None or parsed_title is None:
+        return False
+    title = _normalize_text(record.tags.get("title"))
+    artist = _normalize_text(record.tags.get("artist"))
+    return bool(title and artist and title == parsed_artist and artist == parsed_title)
 
 
 @dataclass(slots=True)
@@ -265,10 +274,10 @@ class CollectionHealthAnalyzer:
             if WarningCode.missing_album in record.warnings:
                 missing_album.append(record.path)
                 issue_hits += 1
-            if any(_is_placeholder(record.tags.get(field), settings) for field in ("title", "artist", "album")):
+            if any(is_placeholder(record.tags.get(field), settings) for field in ("title", "artist", "album")):
                 placeholder_metadata.append(record.path)
                 issue_hits += 1
-            if self._is_suspicious_swap(path, record):
+            if is_suspicious_swap(path, record):
                 suspicious_swaps.append(record.path)
                 issue_hits += 1
 
@@ -409,14 +418,6 @@ class CollectionHealthAnalyzer:
             return int(bitrate)
         except Exception:
             return None
-
-    def _is_suspicious_swap(self, path: Path, record: TrackRecord) -> bool:
-        parsed_artist, parsed_title = _parse_filename_artist_title(path.stem)
-        if parsed_artist is None or parsed_title is None:
-            return False
-        title = _normalize_text(record.tags.get("title"))
-        artist = _normalize_text(record.tags.get("artist"))
-        return bool(title and artist and title == parsed_artist and artist == parsed_title)
 
     def _has_filename_metadata_disagreement(self, path: Path, record: TrackRecord) -> bool:
         parsed_artist, parsed_title = _parse_filename_artist_title(path.stem)

@@ -22,7 +22,7 @@ from nyxcore.rename.rules import deterministic_cleanup
 from nyxcore.rename.service import build_rename_result
 from nyxcore.review_queue.service import ReviewQueueItem, ReviewQueueReport
 from nyxcore.review_queue.state import ReviewStateStore, apply_review_action
-from nyxcore.tagging.writer import backup_file, plan_backup_path, write_tags
+from nyxcore.tagging.writer import ArtworkEdit, backup_file, plan_backup_path, verify_written_artwork, verify_written_tags, write_tags
 
 if TYPE_CHECKING:
     from nyxcore.action_plan.ledger import OperationBatch
@@ -715,6 +715,33 @@ def execute_reviewed_action_plan(
 ) -> tuple[ActionPlanReport, list[AppliedPlanResult], "OperationBatch"]:
     """Rebuild, authorize, validate, and execute one reviewed plan selection."""
 
+    generated_report = build_action_plan_report(
+        library_root.resolve(strict=True),
+        records,
+        review_report,
+        source_review_item_ids=list(requested_report.source_review_item_ids),
+    )
+    authorized_report = authorize_action_plan_selection(generated_report, requested_report)
+    return execute_authorized_action_plan(
+        library_root, lambda: (authorized_report, {}), review_state=review_state,
+        review_state_path=review_state_path, ledger_path=ledger_path, backup_dir=backup_dir,
+        workspace_root=workspace_root,
+    )
+
+
+def execute_authorized_action_plan(
+    library_root: Path,
+    authorize: Callable[[], tuple[ActionPlanReport, dict[str, FileIdentity]]],
+    *,
+    review_state: ReviewStateStore | None = None,
+    review_state_path: Path,
+    ledger_path: Path,
+    backup_dir: Path | None = None,
+    workspace_root: Path | None = None,
+    artwork_changes: dict[str, ArtworkEdit] | None = None,
+) -> tuple[ActionPlanReport, list[AppliedPlanResult], "OperationBatch"]:
+    """Execute a server-authorized plan using the existing lock and journal."""
+
     root = library_root.resolve(strict=True)
     if not root.is_dir():
         raise ValueError(f"library root is not a directory: {root}")
@@ -729,13 +756,6 @@ def execute_reviewed_action_plan(
             raise ValueError(f"backup directory is outside the configured workspace root: {resolved_backup}") from exc
         backup_dir = resolved_backup
 
-    generated_report = build_action_plan_report(
-        root,
-        records,
-        review_report,
-        source_review_item_ids=list(requested_report.source_review_item_ids),
-    )
-    authorized_report = authorize_action_plan_selection(generated_report, requested_report)
     from nyxcore.action_plan.ledger import (
         finalize_operation_batch,
         load_operation_ledger,
@@ -748,6 +768,7 @@ def execute_reviewed_action_plan(
     from nyxcore.review_queue.state import load_review_state, save_review_state
 
     with LibraryMutationLock(root):
+        authorized_report, source_identities = authorize()
         validate_action_plan_boundaries(root, authorized_report)
         if workspace_root is not None:
             bounded_path(ledger_path, (workspace_root,), label="history path")
@@ -797,11 +818,14 @@ def execute_reviewed_action_plan(
             lifecycle_callback=persist_lifecycle,
             library_root=root,
             backup_roots=backup_roots,
+            source_identities=source_identities,
+            artwork_changes=artwork_changes,
         )
         finalize_operation_batch(batch, results)
         save_operation_ledger(ledger_path, ledger)
         save_review_state(review_state_path, current_review_state)
-        review_state.items = current_review_state.items
+        if review_state is not None:
+            review_state.items = current_review_state.items
     return authorized_report, results, batch
 
 
@@ -814,6 +838,8 @@ def apply_action_plan_report(
     lifecycle_callback: Callable[[str, ActionPlanOperation, AppliedOperationResult | None], None] | None = None,
     library_root: Path | None = None,
     backup_roots: tuple[Path, ...] | None = None,
+    source_identities: dict[str, FileIdentity] | None = None,
+    artwork_changes: dict[str, ArtworkEdit] | None = None,
 ) -> list[AppliedPlanResult]:
     results: list[AppliedPlanResult] = []
     now = datetime.now(tz=UTC)
@@ -829,10 +855,12 @@ def apply_action_plan_report(
             _resolved_within(source, library_root, must_exist=True, label="operation source")
         prior = metadata_writes.get(source.resolve())
         expected = operation.expected_hash
-        identity = None
+        identity = (source_identities or {}).get(operation.operation_id)
         if prior is not None and expected in prior[:2]:
             _, expected, identity = prior
         current = file_snapshot(source)
+        if identity is not None and source_identities and source.stat().st_nlink != 1:
+            raise RuntimeError(f"source has multiple hard links: {operation.operation_id}")
         if current is None or current[1] != expected or (identity is not None and current[0] != identity):
             raise RuntimeError(f"source changed since review: {operation.operation_id}")
         return source, expected, current[0]
@@ -966,15 +994,19 @@ def apply_action_plan_report(
                 )
                 continue
             if halt_remaining:
-                operation_results.append(AppliedOperationResult(
+                skipped = AppliedOperationResult(
                     operation_id=operation.operation_id,
                     operation_type=operation.operation_type,
                     path=operation.path,
                     destination_path=operation.destination_path,
                     status="skipped",
                     message="not attempted after an earlier operation failed",
-                ))
+                )
+                if source_identities and lifecycle_callback is not None:
+                    lifecycle_callback("finished", operation, skipped)
+                operation_results.append(skipped)
                 continue
+            uncertain_write = False
             try:
                 source, expected, identity = verify_source(operation)
                 if plan.action_type == "exact_duplicate_keep_plan":
@@ -1009,6 +1041,7 @@ def apply_action_plan_report(
                 if lifecycle_callback is not None:
                     lifecycle_callback("started", operation, None)
                 new_snapshot = None
+                write_attempted = False
                 try:
                     if verify_source(operation) != (source, expected, identity):
                         raise RuntimeError("source changed after operation intent was recorded")
@@ -1027,16 +1060,28 @@ def apply_action_plan_report(
                             raise RuntimeError("backup differs from the reviewed fingerprint")
                         if verify_source(operation) != (source, expected, identity):
                             raise RuntimeError("source changed after the backup was made")
+                        artwork = (artwork_changes or {}).get(operation.operation_id)
+                        if operation.values.get("front_cover") != (artwork.digest if artwork else None):
+                            raise RuntimeError("The verified artwork does not match the authorized operation.")
+                        write_attempted = True
                         write_tags(
                             source,
                             title=operation.values.get("title"),
                             artist=operation.values.get("artist"),
                             album=operation.values.get("album"),
                             fields=list(operation.fields),
+                            preserve_id3=bool(source_identities),
+                            **({"artwork": artwork} if artwork is not None else {}),
                         )
                         new_snapshot = file_snapshot(source)
                         if new_snapshot is None:
                             raise RuntimeError("metadata write left no regular file at the source path")
+                        if source_identities:
+                            verify_written_tags(source, operation.values)
+                            if artwork is not None:
+                                verify_written_artwork(source, artwork)
+                            if file_snapshot(source) != new_snapshot:
+                                raise RuntimeError("source changed while verifying the written metadata")
                         applied_hash = new_snapshot[1]
                     result = AppliedOperationResult(
                         operation.operation_id, operation.operation_type, operation.path,
@@ -1044,11 +1089,19 @@ def apply_action_plan_report(
                         backup_path=backup_path, applied_hash=applied_hash,
                     )
                 except Exception as exc:
+                    message = str(exc)
+                    if source_identities and write_attempted:
+                        try:
+                            uncertain_write = file_snapshot(source) != (identity, expected)
+                        except (OSError, RuntimeError):
+                            uncertain_write = True
+                        if uncertain_write:
+                            message = f"File may have changed. Inspect History for recovery before retrying. {message}"
                     result = AppliedOperationResult(
                         operation.operation_id, operation.operation_type, operation.path,
-                        operation.destination_path, "error", str(exc),
+                        operation.destination_path, "error", message,
                     )
-            if lifecycle_callback is not None:
+            if lifecycle_callback is not None and not uncertain_write:
                 lifecycle_callback("finished", operation, result)
             operation_results.append(result)
             if result.status != "ok":
