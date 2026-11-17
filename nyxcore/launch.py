@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import socket
 import sys
@@ -24,11 +25,14 @@ from nyxcore.webapi.app import configured_config_path, create_app
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
 SPA_ROUTES = ("/", "/search", "/review", "/duplicates", "/health", "/history", "/playlists")
+PREVIEW_BUILD = "PREVIEW_BUILD.json"
 
 
 def create_local_app(*, frontend_dir: Path, music_root: Path, workspace_root: Path) -> FastAPI:
     index = frontend_dir / "index.html"
-    build_error = f"Frontend build is missing or incomplete at {frontend_dir}. Run npm ci and npm run build in web/."
+    preview = frontend_dir.parent.parent / PREVIEW_BUILD
+    repair = "Extract a fresh copy of the preview ZIP." if preview.is_file() else "Run npm ci and npm run build in web/."
+    build_error = f"Frontend build is missing or incomplete at {frontend_dir}. {repair}"
     if not index.is_file():
         raise ValueError(build_error)
     assets = re.findall(r'(?:href|src)="(/assets/[^"]+)"', index.read_text(encoding="utf-8"))
@@ -36,6 +40,18 @@ def create_local_app(*, frontend_dir: Path, music_root: Path, workspace_root: Pa
         not (frontend_dir / asset.lstrip("/")).is_file() for asset in assets
     ):
         raise ValueError(build_error)
+    if preview.is_file():
+        try:
+            expected = json.loads(preview.read_bytes())["frontend_files"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ValueError(build_error) from exc
+        if not isinstance(expected, list) or "index.html" not in expected or not all(
+            isinstance(name, str)
+            and (frontend_dir / name).resolve().is_relative_to(frontend_dir)
+            and (frontend_dir / name).is_file()
+            for name in expected
+        ):
+            raise ValueError(build_error)
 
     app = create_app(music_root=music_root, workspace_root=workspace_root, review_only=True)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST])
@@ -78,7 +94,7 @@ class LocalServer(uvicorn.Server):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Launch NyxCore locally in review-only mode.")
     library = parser.add_mutually_exclusive_group(required=True)
-    library.add_argument("--demo", action="store_true", help="Use the generated synthetic library in this checkout")
+    library.add_argument("--demo", action="store_true", help="Use the synthetic demo library")
     library.add_argument("--music", type=Path, help="Folder to inspect")
     parser.add_argument("--out", type=Path, required=True, help="Separate workspace for reports and review state")
     parser.add_argument("--port", type=int, default=8000, help="Loopback port (default: 8000)")
@@ -91,7 +107,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.demo:
             music = (SOURCE_ROOT / "demo/generated/sample-library").resolve()
             if not (music / "nyxcore_demo_manifest.json").is_file():
-                parser.error("Synthetic demo is missing. Run python demo/create_demo_library.py first.")
+                repair = (
+                    "Extract a fresh copy of the preview ZIP."
+                    if (SOURCE_ROOT / PREVIEW_BUILD).is_file()
+                    else "Run python demo/create_demo_library.py first."
+                )
+                parser.error(f"Synthetic demo is missing. {repair}")
         else:
             music = args.music.expanduser().resolve()
         out = args.out.expanduser().resolve()

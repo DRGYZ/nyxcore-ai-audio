@@ -1,6 +1,6 @@
 # NyxCore on Windows via WSL2 (Ubuntu)
 
-The synthetic review demo was verified on Windows 11 with Ubuntu 24.04 LTS under WSL2, using Python 3.12, Node.js 22.22.2, and FFmpeg 6.1.1. Python 3.11 also passed the backend suite. For a native Windows setup, see the [PowerShell quickstart](README.md#native-windows-quickstart).
+The synthetic review demo was verified on Windows 11 with Ubuntu 24.04 LTS under WSL2, using Python 3.12, Node.js 22.22.2, and FFmpeg 6.1.1. Python 3.11 also passed the backend suite. For a native Windows source setup, see the [PowerShell quickstart](README.md#source-launcher-on-native-windows). The [prebuilt preview](INSTALL_PREVIEW.md) already includes the compiled frontend.
 
 ## 1. Prerequisites
 

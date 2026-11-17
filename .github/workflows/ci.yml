@@ -65,3 +65,47 @@ jobs:
         run: |
           cd web
           npm run build
+
+  preview:
+    name: Package Review-Only Preview
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install FFmpeg for synthetic audio
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Build preview ZIP and verify checksum
+        run: |
+          python scripts/build_preview.py
+          cd dist/preview
+          sha256sum --check "nyxcore-review-preview-${{ github.sha }}.zip.sha256"
+
+      - name: Upload preview ZIP and checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: nyxcore-review-preview-${{ github.sha }}
+          path: |
+            dist/preview/nyxcore-review-preview-${{ github.sha }}.zip
+            dist/preview/nyxcore-review-preview-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

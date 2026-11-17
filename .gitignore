@@ -8,6 +8,7 @@ web/dist/
 web/*.js
 web/*.d.ts
 web/*.tsbuildinfo
+/dist/preview/
 
 tests/_runtime_*/
 tests/tmp*/

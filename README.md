@@ -120,7 +120,23 @@ NyxCore is designed around defensive, local-first safety primitives:
 
 ---
 
-## Native Windows Quickstart
+## Prebuilt Preview
+
+Use the prebuilt preview for local review with Python 3.12. The ZIP includes the compiled frontend and seven synthetic tracks, so users can launch without Node.js, Vite, or FFmpeg. The preview uses an editable Python install from the extracted folder. It is experimental, review-only, and intended for trying the application.
+
+Open a successful main-branch [GitHub Actions CI run](https://github.com/DRGYZ/nyxcore-ai-audio/actions/workflows/ci.yml?query=branch%3Amain) and download `nyxcore-review-preview-<commit>` from its **Artifacts** section. GitHub sign-in is required and artifacts expire after 30 days. The download contains the ZIP and its SHA-256 checksum. Follow the [preview installation guide](INSTALL_PREVIEW.md).
+
+### Build a preview from source
+
+From a clean checkout of the commit to package, use Python 3.12, Git, FFmpeg, and Node.js 22 with npm on PATH.
+
+```bash
+python scripts/build_preview.py
+```
+
+The script builds from Git HEAD in a temporary directory and writes the ZIP and checksum to `dist/preview/`. It installs from the npm lockfile and generates the bundled demo with FFmpeg. `PREVIEW_BUILD.json` records the source commit, lockfile hash, build tool versions, and expected frontend files. File ordering, ZIP timestamps, and ZIP permissions are normalized. Compare checksums with the same toolchain because frontend, audio encoding, and compression can vary across tool versions and platforms.
+
+## Source Launcher on Native Windows
 
 Use Windows 11, Python 3.12, and Node.js 22 (22.13 or later within 22.x). Put FFmpeg on PATH to generate the synthetic library. These PowerShell commands set up the launcher in a source checkout.
 
@@ -161,7 +177,7 @@ For Ubuntu 24.04 under WSL2, follow the [WSL2 Setup Guide](INSTALL_WSL.md).
 
 ---
 
-## Development Workflow
+## Vite and FastAPI Development Workflow
 
 The separate Vite and FastAPI workflow is for development. Use disposable libraries with it. The [WSL2 Setup Guide](INSTALL_WSL.md) covers system prerequisites. Run the commands below in Bash inside the Linux environment.
 

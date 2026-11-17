@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import wave
 from importlib import import_module
@@ -114,6 +115,34 @@ def test_missing_build_fails_before_creating_workspace(checkout, capsys, asset):
     assert result.value.code == 2
     assert "Frontend build is missing or incomplete" in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_preview_fails_clearly_when_a_bundled_asset_is_missing(checkout, capsys):
+    assets = ["index.html", "assets/app.js", "assets/app.css", "assets/font.woff2"]
+    (checkout / launch.PREVIEW_BUILD).write_text(json.dumps({"frontend_files": assets}), encoding="utf-8")
+    font = checkout / "web/dist" / assets[-1]
+    font.write_bytes(b"placeholder font")
+    music = checkout / "music"
+    music.mkdir()
+    out = checkout / "out"
+    launch.create_local_app(frontend_dir=checkout / "web/dist", music_root=music, workspace_root=out)
+    font.unlink()
+
+    with pytest.raises(SystemExit) as result:
+        launch.main(["--music", str(music), "--out", str(out)])
+    assert result.value.code == 2
+    assert "Extract a fresh copy of the preview ZIP." in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_preview_explains_how_to_restore_missing_demo(checkout, capsys):
+    (checkout / launch.PREVIEW_BUILD).write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit) as result:
+        launch.main(["--demo", "--out", str(checkout / "out")])
+    assert result.value.code == 2
+    message = capsys.readouterr().err
+    assert "Synthetic demo is missing." in message
+    assert "Extract a fresh copy of the preview ZIP." in message
 
 
 def test_launcher_requires_explicit_library_and_valid_configuration(checkout, monkeypatch, capsys):
