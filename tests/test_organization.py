@@ -4,6 +4,8 @@ import hashlib
 import os
 import shutil
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,7 @@ from mutagen.mp4 import MP4
 
 from nyxcore.config import HealthConfig
 from nyxcore.action_plan.ledger import find_batch, load_operation_ledger
-from nyxcore.action_plan.lifecycle import inspect_recorded_batch, recover_recorded_batch
+from nyxcore.action_plan.lifecycle import inspect_recorded_batch, recover_recorded_batch, reverse_recorded_batch
 from nyxcore.core import filesystem
 from nyxcore.core.filesystem import is_linked_stat
 from nyxcore.core.scanner import scan_audio_files
@@ -422,3 +424,159 @@ def test_destination_parent_substitution_at_link_boundary(reviewed, tmp_path, mo
     else:
         assert result["status"] == "error" and filesystem.file_snapshot(source) == before
         assert not list(displaced.iterdir())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux mount IDs")
+@pytest.mark.parametrize("contents", [None, b"pos: 0\n", b"mnt_id: invalid\n", b"mnt_id: 0\n", b"mnt_id: 1\nmnt_id: 2\n"])
+def test_unavailable_or_invalid_mount_identity_fails_closed(tmp_path, monkeypatch, contents):
+    monkeypatch.setattr(filesystem, "_FDINFO", tmp_path)
+    if contents is not None:
+        (tmp_path / "42").write_bytes(contents)
+    with pytest.raises(ValueError, match="mount information is unavailable or invalid"):
+        filesystem.descriptor_mount_id(42)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux mount IDs")
+def test_preview_and_apply_fail_without_mount_information(reviewed, tmp_path, monkeypatch):
+    root, workspace, client, source, _, _ = reviewed
+    endpoint, approval, moves = _approval(client, source)
+    before = filesystem.file_snapshot(source)
+    monkeypatch.setattr(filesystem, "_FDINFO", tmp_path / "unavailable")
+    response = client.post(endpoint + "/apply", json=approval)
+    assert response.status_code == 409 and "mount information" in response.json()["detail"]
+    assert filesystem.file_snapshot(source) == before and not Path(moves[0]["destination"]).parent.exists()
+    assert not workspace.exists()
+    assert client.post("/api/organization/preview").status_code == 409
+
+
+@contextmanager
+def _bind_mount(source, target):
+    subprocess.run(["mount", "--bind", str(source), str(target)], check=True, timeout=10, capture_output=True)
+    try:
+        assert source.stat().st_dev == target.stat().st_dev
+        yield
+    finally:
+        subprocess.run(["umount", str(target)], check=True, timeout=10, capture_output=True)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux bind mounts")
+def test_same_device_bind_mounts(reviewed, tmp_path, monkeypatch, request):
+    namespace = os.readlink("/proc/self/ns/mnt")
+    parent_namespace = os.environ.get("NYXCORE_TEST_PARENT_MOUNT_NAMESPACE")
+    if not parent_namespace:
+        if any(shutil.which(cmd) is None for cmd in ("unshare", "mount", "umount")):
+            pytest.skip("Private mount namespace tools are unavailable.")
+        command = ["unshare", "-Ur", "-m", "--propagation", "private"]
+        probe = subprocess.run([*command, "true"], capture_output=True, timeout=10)
+        if probe.returncode:
+            pytest.skip("This environment does not allow a private user and mount namespace.")
+        completed = subprocess.run(
+            [*command, sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             "--basetemp", str(tmp_path / "isolated"), request.node.nodeid],
+            env=dict(os.environ, NYXCORE_TEST_PARENT_MOUNT_NAMESPACE=namespace),
+            capture_output=True, text=True, timeout=60,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        return
+    assert namespace != parent_namespace, "Bind-mount tests require a private mount namespace."
+
+    from nyxcore.core.move_scope import MovePaths
+
+    root, workspace, client, source, _, _ = reviewed
+    outside = tmp_path / "Outside \\ music\t"
+    remote_inbox = outside / "Inbox"
+    remote_inbox.mkdir(parents=True)
+    remote_track = remote_inbox / source.name
+    shutil.copyfile(source, remote_track)
+    before = filesystem.file_snapshot(source)
+    outside_before = _state(outside)
+    artist = root / "Artist"
+    artist.mkdir()
+    scanned = []
+    real_scan = organization.scan_audio_files
+
+    def record_scan(paths):
+        paths = list(paths)
+        scanned.extend(paths)
+        return real_scan(paths)
+
+    with _bind_mount(outside, artist):
+        monkeypatch.setattr(organization, "scan_audio_files", record_scan)
+        preview = client.post("/api/organization/preview").json()
+        endpoint = f"/api/organization/preview/{preview['id']}"
+        rows = {row["source"]: row for row in client.get(endpoint).json()["rows"]}
+        assert preview["counts"]["ready"] == 0
+        assert rows["Artist"]["status"] == "needs_review" and "mount boundary" in rows["Artist"]["reasons"][0]
+        mounted_track = artist / "Inbox" / source.name
+        assert source in scanned and not any(path.is_relative_to(artist) for path in scanned)
+        assert client.post(endpoint + "/review", json={"paths": [str(mounted_track)]}).status_code == 409
+        with pytest.raises(ValueError, match="mount boundary"):
+            snapshot = filesystem.file_snapshot(mounted_track)
+            filesystem.move_file_no_replace(mounted_track, artist / "Record" / "First.flac",
+                                            expected_identity=snapshot[0], expected_hash=snapshot[1], library_root=root)
+    assert _state(outside) == outside_before and not (outside / "Record").exists()
+
+    endpoint, approval, moves = _approval(client, source)
+    with _bind_mount(outside, artist):
+        assert client.post(endpoint + "/apply", json=approval).status_code == 409
+        assert filesystem.file_snapshot(source) == before and not workspace.exists()
+    assert _state(outside) == outside_before and not (outside / "Record").exists()
+
+    # A mount at the configured root is valid, including a root with an escaped name.
+    mounted_root = tmp_path / "Mounted \\ Library"
+    mounted_root.mkdir()
+    with _bind_mount(root, mounted_root):
+        mounted_source = mounted_root / source.relative_to(root)
+        monkeypatch.setenv("NYXCORE_WEB_ORGANIZATION_DISPOSABLE_ROOT", str(mounted_root))
+        mounted_client = TestClient(create_app(music_root=mounted_root, workspace_root=workspace))
+        endpoint, approval, moves = _approval(mounted_client, mounted_source)
+        destination = Path(moves[0]["destination"])
+        result = mounted_client.post(endpoint + "/apply", json=approval).json()
+        assert result["operations"][0]["status"] == "ok"
+        assert not mounted_source.exists() and filesystem.file_snapshot(destination) == before
+
+        ledger_path = workspace / "review_history.json"
+        args = dict(ledger_path=ledger_path, library_root=mounted_root, workspace_root=workspace)
+        with _bind_mount(remote_inbox, mounted_source.parent):
+            with pytest.raises(ValueError, match="mount boundary"):
+                reverse_recorded_batch(**args, batch_id=result["batch_id"], review_state_path=workspace / "review_state.json")
+            assert filesystem.file_snapshot(destination) == before and _state(outside) == outside_before
+        reverse = mounted_client.post(f"/api/history/{result['batch_id']}/undo", json={})
+        assert reverse.json()["changed_operations"][0]["undo_status"] == "ok"
+        assert filesystem.file_snapshot(mounted_source) == before and not destination.exists()
+
+        endpoint, approval, _ = _approval(mounted_client, mounted_source)
+        with monkeypatch.context() as patch:
+            def interrupt(*args, **kwargs):
+                raise OSError("controlled interruption after linking")
+
+            patch.setattr(filesystem, "finish_linked_move", interrupt)
+            result = mounted_client.post(endpoint + "/apply", json=approval).json()
+        assert result["operations"][0]["status"] == "error"
+        batch_id = result["batch_id"]
+        batch, assessments = inspect_recorded_batch(ledger_path, batch_id, library_root=mounted_root, workspace_root=workspace)
+        assert batch.operations[0].journal_state == "applying"
+        assert assessments[0].classification == "destination_linked_source_present"
+        with _bind_mount(root / destination.parent.relative_to(mounted_root), destination.parent):
+            with pytest.raises(ValueError, match="mount boundary"):
+                recover_recorded_batch(**args, batch_id=batch_id, action="finalize")
+            assert filesystem.file_snapshot(mounted_source) == filesystem.file_snapshot(destination) == before
+        recover_recorded_batch(**args, batch_id=batch_id, action="finalize")
+        assert not mounted_source.exists() and filesystem.file_snapshot(destination) == before
+        reverse = mounted_client.post(f"/api/history/{batch_id}/undo", json={})
+        assert reverse.json()["changed_operations"][0]["undo_status"] == "ok"
+        assert filesystem.file_snapshot(mounted_source) == before and not destination.exists()
+
+        # Mount the very same directory after the move scope has pinned it.
+        endpoint, approval, _ = _approval(mounted_client, mounted_source)
+        original_link = MovePaths.link
+
+        def change_mount(paths):
+            with _bind_mount(root / destination.parent.relative_to(mounted_root), destination.parent):
+                original_link(paths)
+
+        monkeypatch.setattr(MovePaths, "link", change_mount)
+        result = mounted_client.post(endpoint + "/apply", json=approval).json()["operations"][0]
+        assert result["status"] == "error" and "mount boundary" in result["message"]
+        assert filesystem.file_snapshot(mounted_source) == before and not destination.exists()
+    assert _state(outside) == outside_before

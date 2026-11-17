@@ -3,12 +3,43 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import sys
 import unicodedata
 from pathlib import Path
 
 
 FileIdentity = tuple[int, int]
 ORGANIZATION_ACTION = "organization_move_plan"
+_FDINFO = Path("/proc/self/fdinfo")
+
+
+def descriptor_mount_id(fd: int) -> int | None:
+    """Read the kernel's mount ID for an open Linux file or directory."""
+    if sys.platform != "linux":
+        return None
+    message = "Cannot verify Linux mount boundaries: mount information is unavailable or invalid."
+    try:
+        with (_FDINFO / str(fd)).open("rb") as info:
+            fields = [line[len(b"mnt_id:"):].strip() for line in info if line.startswith(b"mnt_id:")]
+    except OSError as exc:
+        raise ValueError(message) from exc
+    if len(fields) != 1 or not fields[0].isdigit() or len(fields[0]) > 20:
+        raise ValueError(message)
+    mount_id = int(fields[0])
+    if not mount_id:
+        raise ValueError(message)
+    return mount_id
+
+
+def path_mount_id(path: Path | str, *, dir_fd: int | None = None) -> int | None:
+    if sys.platform != "linux":
+        return None
+    # O_PATH checks the mount without opening the entry for reading.
+    fd = os.open(path, os.O_PATH | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        return descriptor_mount_id(fd)
+    finally:
+        os.close(fd)
 
 
 def portable_name_key(name: str) -> str:
@@ -23,6 +54,7 @@ def check_move_path(root: Path, path: Path, *, missing_ok: bool = False) -> os.s
     if is_linked_stat(info) or not stat.S_ISDIR(info.st_mode) or root.resolve(strict=True) != root:
         raise ValueError("The library root changed or is linked.")
     device = info.st_dev
+    mount = path_mount_id(root)
     parts = path.relative_to(root).parts
     parent = root
     for index, name in enumerate(parts, 1):
@@ -38,6 +70,8 @@ def check_move_path(root: Path, path: Path, *, missing_ok: bool = False) -> os.s
             raise
         if not aliases or is_linked_stat(info) or info.st_dev != device:
             raise ValueError(f"Linked, aliased, or cross-filesystem path: {parent / name}")
+        if path_mount_id(parent / name) != mount:
+            raise ValueError(f"Path crosses a mount boundary inside the library: {parent / name}")
         if index < len(parts) and not stat.S_ISDIR(info.st_mode):
             raise ValueError(f"A file blocks a destination folder: {parent / name}")
         parent /= name

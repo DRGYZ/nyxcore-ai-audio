@@ -9,7 +9,9 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from nyxcore.core.filesystem import FileIdentity, check_move_path, is_linked_stat, portable_name_key
+from nyxcore.core.filesystem import (
+    FileIdentity, check_move_path, descriptor_mount_id, is_linked_stat, path_mount_id, portable_name_key,
+)
 
 
 def _identity(info: os.stat_result) -> FileIdentity:
@@ -63,6 +65,7 @@ class Directory:
     path: Path
     identity: FileIdentity
     fd: int | None
+    mount: int | None
 
     def entry(self, name: str) -> os.stat_result | None:
         with os.scandir(self.path if self.fd is None else self.fd) as entries:
@@ -78,12 +81,16 @@ class Directory:
             return None
         if not matches or is_linked_stat(info) or info.st_dev != self.identity[0]:
             raise RuntimeError(f"Linked, aliased, or cross-filesystem path: {self.path / name}")
+        if path_mount_id(name, dir_fd=self.fd) != self.mount:
+            raise RuntimeError(f"Path crosses a mount boundary inside the library: {self.path / name}")
         return info
 
     def verify(self) -> None:
         info = self.path.lstat()
         if (is_linked_stat(info) or not stat.S_ISDIR(info.st_mode) or _identity(info) != self.identity):
             raise RuntimeError(f"Move directory changed: {self.path}")
+        if path_mount_id(self.path) != self.mount:
+            raise RuntimeError(f"Move directory crosses a mount boundary inside the library: {self.path}")
 
 
 @dataclass(frozen=True)
@@ -125,6 +132,8 @@ class MovePaths:
         if self.source_parent.fd is None:
             os.link(self.source, self.destination)
         else:
+            if path_mount_id(self.source.name, dir_fd=self.source_parent.fd) != self.source_parent.mount:
+                raise RuntimeError(f"Move source crosses a mount boundary inside the library: {self.source}")
             os.link(self.source.name, self.destination.name, src_dir_fd=self.source_parent.fd,
                     dst_dir_fd=self.destination_parent.fd, follow_symlinks=False)
 
@@ -141,6 +150,7 @@ def move_scope(root: Path, source: Path, destination: Path, *, create_parents: b
     check_move_path(root, source)
     if check_move_path(root, destination, missing_ok=True) is not None and create_parents:
         raise RuntimeError(f"Destination already exists: {destination}")
+    mount = path_mount_id(root)
     with ExitStack() as stack:
         directories: dict[Path, Directory] = {}
 
@@ -157,7 +167,9 @@ def move_scope(root: Path, source: Path, destination: Path, *, create_parents: b
                 stack.callback(os.close, fd)
                 if _identity(os.fstat(fd)) != _identity(info):
                     raise RuntimeError(f"Move directory changed while opening: {path}")
-            directory = Directory(path, _identity(info), fd)
+                if descriptor_mount_id(fd) != mount:
+                    raise RuntimeError(f"Move directory crosses a mount boundary inside the library: {path}")
+            directory = Directory(path, _identity(info), fd, mount)
             directory.verify()
             directories[path] = directory
             return directory
