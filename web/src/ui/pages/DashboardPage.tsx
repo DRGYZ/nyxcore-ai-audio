@@ -25,7 +25,7 @@ import {
   formatNumber,
 } from "../components";
 
-export function DashboardPage() {
+export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
   const navigate = useNavigate();
   const statusQuery = useStatusQuery();
   const healthQuery = useHealthQuery();
@@ -92,7 +92,9 @@ export function DashboardPage() {
           </div>
           <details className="border-t border-white/[0.07] pt-2 text-xs text-primary-muted">
             <summary className="cursor-pointer text-primary focus-visible:outline-accent">Inspect a different library</summary>
-            {status.review_only ? (
+            {desktop ? (
+              <p className="mt-2">Close this window, then reopen <code>nyxcore-desktop.exe</code> with <code>--music</code> set to the library and <code>--out</code> set to a separate workspace.</p>
+            ) : status.review_only ? (
               <p className="mt-2">Press <kbd>Ctrl+C</kbd> in the launcher terminal. Restart with <code>--music</code> set to the desired library and <code>--out</code> set to a separate workspace, then open the printed URL.</p>
             ) : (
               <p className="mt-2">Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>

@@ -10,6 +10,7 @@ const navItems = [
   { to: "/review", label: "Review Inbox", icon: "inbox" },
   { to: "/duplicates", label: "Duplicates", icon: "copy_all" },
   { to: "/health", label: "Library Health", icon: "health_and_safety" },
+  { to: "/metadata", label: "Metadata", icon: "sell", desktopOnly: true },
   { to: "/organization", label: "Library Organization", icon: "folder_open" },
   { to: "/history", label: "History", icon: "history" },
 ];
@@ -81,16 +82,19 @@ function LibraryAnalysisStatus() {
   );
 }
 
-export function AppShell({ children }: PropsWithChildren) {
+export function AppShell({ children, desktop = false }: PropsWithChildren<{ desktop?: boolean }>) {
   const location = useLocation();
   const navigate = useNavigate();
   const statusQuery = useStatusQuery();
   const reviewQuery = useReviewQuery();
   const notificationRef = useRef<HTMLDivElement | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const isConnected = !!statusQuery.data && !statusQuery.isError;
+  const isConnecting = !isConnected && statusQuery.isPending;
+  const engineState = isConnected ? "Connected" : isConnecting ? "Connecting" : "Offline";
   const status = statusQuery.data;
   const review = isConnected ? reviewQuery.data?.data : undefined;
   const reviewCount = review ? review.items.filter((item) => item.review_status === "new").length : 0;
@@ -109,6 +113,10 @@ export function AppShell({ children }: PropsWithChildren) {
     setNotificationsOpen(false);
     setMobileNavOpen(false);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (desktop && mainRef.current) mainRef.current.scrollTop = 0;
+  }, [desktop, location.pathname]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -146,9 +154,8 @@ export function AppShell({ children }: PropsWithChildren) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-primary">
-      {/* Compact mobile navigation header on < lg */}
-      <div className="flex items-center justify-between border-b border-white/[0.07] bg-surface px-4 py-3 lg:hidden">
+    <div className={`bg-background text-primary ${desktop ? "flex h-screen flex-col overflow-hidden" : "min-h-screen"}`}>
+      <div className={`flex shrink-0 items-center justify-between border-b border-white/[0.07] bg-surface px-4 py-3 ${desktop ? "md:hidden" : "lg:hidden"}`}>
         <div className="flex items-center gap-2.5">
           <div className="flex size-7 items-center justify-center rounded-[3px] border border-white/[0.08] bg-surface-low text-accent">
             <span className="size-2 rounded-[1px] bg-accent" />
@@ -159,7 +166,7 @@ export function AppShell({ children }: PropsWithChildren) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Chip tone={isConnected ? "accent" : "neutral"}>{isConnected ? "Connected" : "Offline"}</Chip>
+          <Chip tone={isConnected ? "accent" : "neutral"}>{engineState}</Chip>
           <button
             type="button"
             aria-label="Toggle navigation menu"
@@ -173,14 +180,15 @@ export function AppShell({ children }: PropsWithChildren) {
         </div>
       </div>
 
-      <div className="flex min-h-screen flex-col lg:flex-row">
+      <div className={`flex flex-col ${desktop ? "min-h-0 flex-1 md:flex-row" : "min-h-screen lg:flex-row"}`}>
         <aside
           id="main-sidebar-nav"
-          className={`border-r border-white/[0.07] bg-surface lg:w-64 lg:shrink-0 ${
-            mobileNavOpen ? "block border-b border-white/[0.07] lg:border-b-0" : "hidden lg:block"
+          className={`border-r border-white/[0.07] bg-surface ${desktop ? "overflow-y-auto md:w-52 md:shrink-0 lg:w-56" : "lg:w-64 lg:shrink-0"} ${
+            mobileNavOpen ? `block border-b border-white/[0.07] ${desktop ? "md:border-b-0" : "lg:border-b-0"}`
+              : desktop ? "hidden md:block" : "hidden lg:block"
           }`}
         >
-          <div className="hidden items-center gap-3 border-b border-white/[0.07] px-5 py-4 lg:flex">
+          <div className={`hidden items-center gap-3 border-b border-white/[0.07] px-5 py-4 ${desktop ? "md:flex" : "lg:flex"}`}>
             <div className="flex size-7 items-center justify-center rounded-[3px] border border-white/[0.08] bg-surface-low text-accent">
               <span className="size-2 rounded-[1px] bg-accent" />
             </div>
@@ -193,7 +201,7 @@ export function AppShell({ children }: PropsWithChildren) {
             <div>
               <p className="px-2.5 font-mono text-[9px] font-semibold uppercase tracking-[0.2em] text-primary-subtle">Navigation</p>
               <div className="mt-1.5 space-y-0.5">
-                {navItems.map((item) => (
+                {navItems.filter((item) => desktop || !item.desktopOnly).map((item) => (
                   <SidebarLink
                     key={item.to}
                     {...item}
@@ -206,7 +214,7 @@ export function AppShell({ children }: PropsWithChildren) {
             <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="font-sans text-[11px] font-medium text-primary-subtle">Engine Status</p>
-                <Chip tone={isConnected ? "accent" : "neutral"}>{isConnected ? "Connected" : "Offline"}</Chip>
+                <Chip tone={isConnected ? "accent" : "neutral"}>{engineState}</Chip>
               </div>
               {isConnected ? (
                 <>
@@ -226,26 +234,28 @@ export function AppShell({ children }: PropsWithChildren) {
                 </>
               ) : (
                 <p className="mt-2 font-sans text-xs leading-relaxed text-primary-subtle">
-                  {import.meta.env.PROD ? "Local backend unreachable. Restart the NyxCore launcher." : "Local backend unreachable. Start uvicorn on port 8000."}
+                  {isConnecting ? "Connecting to the local engine…" : import.meta.env.PROD
+                    ? "Local backend unreachable. Reopen NyxCore."
+                    : "Local backend unreachable. Start uvicorn on port 8000."}
                 </p>
               )}
             </div>
           </nav>
         </aside>
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex items-center justify-between gap-4 border-b border-white/[0.07] bg-background/90 px-6 py-2.5 backdrop-blur-md">
+        <div className={`flex min-w-0 flex-1 flex-col ${desktop ? "min-h-0" : "min-h-screen"}`}>
+          <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between gap-4 border-b border-white/[0.07] bg-background/90 px-6 py-2.5 backdrop-blur-md">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <div className="hidden min-w-0 max-w-sm items-center gap-2 text-primary-muted sm:flex">
                 <Icon name={isConnected ? "folder_open" : "cloud_off"} className="shrink-0 text-sm text-accent" />
                 <span className="truncate font-mono text-xs text-primary-muted">
-                  {isConnected ? status?.music_path : "Local API Disconnected"}
+                  {isConnected ? status?.music_path : isConnecting ? "Connecting to library" : "Local API Disconnected"}
                 </span>
               </div>
               <div className="hidden h-3.5 w-px shrink-0 bg-white/[0.08] lg:block" />
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
                 <span className={`size-1.5 rounded-full ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
                 <span className="font-sans text-[11px] text-primary-subtle">
-                  {isConnected ? "Local Engine Active" : "Disconnected"}
+                  {isConnected ? "Local Engine Active" : isConnecting ? "Connecting" : "Disconnected"}
                 </span>
               </div>
             </div>
@@ -333,23 +343,28 @@ export function AppShell({ children }: PropsWithChildren) {
               </div>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto bg-background px-6 py-6 lg:px-8">
+          <main ref={mainRef} className={`flex-1 overflow-y-auto bg-background px-6 py-6 ${desktop ? "lg:px-7" : "lg:px-8"}`}>
             <div className="mx-auto max-w-[1400px]">
               {status?.review_only ? <LibraryAnalysisStatus /> : null}
               {children}
             </div>
           </main>
-          <footer className="border-t border-white/[0.07] bg-surface-low/40 px-6 py-2.5 font-sans text-[11px] text-primary-subtle">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex min-w-0 flex-wrap items-center gap-4">
-                <span className="flex items-center gap-1.5">
+          <footer className="shrink-0 border-t border-white/[0.07] bg-surface-low/40 px-6 py-2.5 font-sans text-[11px] text-primary-subtle">
+            <div className={`flex gap-2 ${desktop ? "items-center justify-between" : "flex-col lg:flex-row lg:items-center lg:justify-between"}`}>
+              <div className={`flex min-w-0 items-center gap-4 ${desktop ? "" : "flex-wrap"}`}>
+                <span className="flex shrink-0 items-center gap-1.5">
                   <span className={`size-1.5 rounded-full ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
-                  {isConnected ? "Local API Connected" : "Local API Unavailable"}
+                  {isConnected ? "Local API Connected" : isConnecting ? "Connecting to local engine" : "Local API Unavailable"}
                 </span>
-                {isConnected && status?.music_path ? <span className="min-w-0 font-mono text-primary-muted [overflow-wrap:anywhere]">Library: {status.music_path}</span> : null}
+                {isConnected && status?.music_path ? (
+                  <span title={desktop ? status.music_path : undefined}
+                    className={`min-w-0 font-mono text-primary-muted ${desktop ? "truncate" : "[overflow-wrap:anywhere]"}`}>
+                    Library: {status.music_path}
+                  </span>
+                ) : null}
               </div>
               {isConnected ? (
-                <div className="flex flex-wrap gap-4 font-mono text-[10px]">
+                <div className={`gap-4 font-mono text-[10px] ${desktop ? "hidden shrink-0 lg:flex" : "flex flex-wrap"}`}>
                   <span>Review State: {status?.review_state_exists ? "Loaded" : "Empty"}</span>
                   <span>Ledger: {status?.history_exists ? "Available" : "Empty"}</span>
                 </div>

@@ -6,12 +6,13 @@ import { App } from "./ui/App";
 import "./index.css";
 
 const queryClient = new QueryClient();
+const desktop = new URLSearchParams(window.location.search).get("desktop") === "1";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <App desktop={desktop} />
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

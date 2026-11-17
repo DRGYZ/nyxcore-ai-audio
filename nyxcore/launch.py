@@ -74,6 +74,40 @@ def _open_browser(url: str) -> None:
     print(f"Could not open a browser automatically. Open {url} in your browser.", file=sys.stderr, flush=True)
 
 
+def resolve_library_workspace(music_path: Path | None, workspace: Path) -> tuple[Path, Path]:
+    if music_path is None:
+        music = (SOURCE_ROOT / "demo/generated/sample-library").resolve()
+        if not (music / "nyxcore_demo_manifest.json").is_file():
+            repair = (
+                "Extract a fresh copy of the preview ZIP."
+                if (SOURCE_ROOT / PREVIEW_BUILD).is_file()
+                else "Run python demo/create_demo_library.py first."
+            )
+            raise ValueError(f"Synthetic demo is missing. {repair}")
+    else:
+        music = music_path.expanduser().resolve()
+    out = workspace.expanduser().resolve()
+    if not music.is_dir():
+        raise ValueError(f"Music directory does not exist or is inaccessible: {music}")
+    next(music.iterdir(), None)
+    if out.is_relative_to(music) or music.is_relative_to(out):
+        raise ValueError("--out and the music directory must be separate, non-overlapping folders")
+    try:
+        load_config(configured_config_path())
+    except (OSError, ValueError, TypeError, AttributeError, YAMLError) as exc:
+        raise ValueError(f"Invalid NyxCore configuration: {exc}") from exc
+    return music, out
+
+
+def check_workspace(out: Path) -> None:
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        with TemporaryFile(dir=out):
+            pass
+    except OSError as exc:
+        raise ValueError(f"Cannot write to workspace {out}. Choose a writable --out directory. ({exc})") from exc
+
+
 class LocalServer(uvicorn.Server):
     def __init__(self, app: FastAPI, *, port: int, music: Path, out: Path, open_browser: bool) -> None:
         super().__init__(uvicorn.Config(app, host=HOST, port=port, workers=1, proxy_headers=False))
@@ -104,27 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--port must be between 1 and 65535")
 
     try:
-        if args.demo:
-            music = (SOURCE_ROOT / "demo/generated/sample-library").resolve()
-            if not (music / "nyxcore_demo_manifest.json").is_file():
-                repair = (
-                    "Extract a fresh copy of the preview ZIP."
-                    if (SOURCE_ROOT / PREVIEW_BUILD).is_file()
-                    else "Run python demo/create_demo_library.py first."
-                )
-                parser.error(f"Synthetic demo is missing. {repair}")
-        else:
-            music = args.music.expanduser().resolve()
-        out = args.out.expanduser().resolve()
-        if not music.is_dir():
-            parser.error(f"Music directory does not exist or is inaccessible: {music}")
-        next(music.iterdir(), None)
-        if out.is_relative_to(music) or music.is_relative_to(out):
-            parser.error("--out and the music directory must be separate, non-overlapping folders")
-        try:
-            load_config(configured_config_path())
-        except (OSError, ValueError, TypeError, AttributeError, YAMLError) as exc:
-            parser.error(f"Invalid NyxCore configuration: {exc}")
+        music, out = resolve_library_workspace(args.music, args.out)
         app = create_local_app(frontend_dir=SOURCE_ROOT / "web/dist", music_root=music, workspace_root=out)
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
@@ -139,11 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             parser.error(f"Cannot bind {HOST}:{args.port}. Try another --port. ({exc})")
         try:
-            out.mkdir(parents=True, exist_ok=True)
-            with TemporaryFile(dir=out):
-                pass
-        except OSError as exc:
-            parser.error(f"Cannot write to workspace {out}. Choose a writable --out directory. ({exc})")
+            check_workspace(out)
+        except ValueError as exc:
+            parser.error(str(exc))
 
         server = LocalServer(app, port=args.port, music=music, out=out, open_browser=not args.no_browser)
         try:

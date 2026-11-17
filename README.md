@@ -124,6 +124,8 @@ NyxCore is designed around defensive, local-first safety primitives:
 
 Use the prebuilt preview for local review with Python 3.12. The ZIP includes the compiled frontend and seven synthetic tracks, so users can launch without Node.js, Vite, or FFmpeg. The preview uses an editable Python install from the extracted folder. It is experimental, review-only, and intended for trying the application.
 
+The [Windows desktop prototype](INSTALL_DESKTOP.md) runs the same review-only application in a dedicated WebView2 window from a source checkout.
+
 The launcher analyzes the selected library on first use. Overview, Duplicates, Review Inbox, and Archive Search share the latest analysis in memory. Select **Refresh Library** after changing files. A refresh performs a full scan and keeps the previous successful results available if it fails. Restarting the launcher or requesting a different analysis profile rebuilds the analysis. If NyxCore detects changes during a scan, let the transfers or edits finish and try again. Triage is saved independently in the workspace. A finding marked resolved can return as Seen if it remains after a fresh analysis.
 
 Open a successful main-branch [GitHub Actions CI run](https://github.com/DRGYZ/nyxcore-ai-audio/actions/workflows/ci.yml?query=branch%3Amain) and download `nyxcore-review-preview-<commit>` from its **Artifacts** section. GitHub sign-in is required and artifacts expire after 30 days. The download contains the ZIP and its SHA-256 checksum. Follow the [preview installation guide](INSTALL_PREVIEW.md).
