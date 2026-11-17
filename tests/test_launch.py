@@ -42,6 +42,7 @@ def test_static_routes_and_api_remain_distinct(checkout):
             assert response.headers["content-type"].startswith("text/html")
             assert "/assets/app.js" in response.text
         assert client.head("/review").status_code == 200
+        assert client.get("/organization").headers["content-type"].startswith("text/html")
         assert client.get("/assets/app.js").text == "console.log('NyxCore')"
         assert client.get("/assets/app.css").headers["content-type"].startswith("text/css")
         assert client.get("/assets/missing.js").status_code == 404

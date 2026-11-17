@@ -9,6 +9,17 @@ from pathlib import Path
 FileIdentity = tuple[int, int]
 
 
+def is_linked_stat(info: os.stat_result) -> bool:
+    """Recognize symlinks, Windows junctions, and other reparse points from lstat."""
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
+
+
+def scan_stat_key(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size
+
+
 def bounded_path(path: Path, roots: tuple[Path, ...], *, label: str, must_exist: bool = False) -> Path:
     resolved = path.resolve(strict=must_exist)
     if not any(resolved.is_relative_to(root.resolve()) for root in roots):

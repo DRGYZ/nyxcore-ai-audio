@@ -10,6 +10,7 @@ const navItems = [
   { to: "/review", label: "Review Inbox", icon: "inbox" },
   { to: "/duplicates", label: "Duplicates", icon: "copy_all" },
   { to: "/health", label: "Library Health", icon: "health_and_safety" },
+  { to: "/organization", label: "Library Organization", icon: "folder_open" },
   { to: "/history", label: "History", icon: "history" },
 ];
 

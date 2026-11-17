@@ -32,6 +32,10 @@ class ReviewOnlyAnalysis:
         self._current: tuple[tuple[Path, str], LibrarySnapshot] | None = None
         self._pending: tuple[tuple[Path, str], Future[LibrarySnapshot]] | None = None
 
+    def peek(self, music: Path, config: NyxConfig) -> LibrarySnapshot | None:
+        with self._lock:
+            return self._current[1] if self._current and self._current[0] == (music, config.model_dump_json()) else None
+
     def get(self, music: Path, config: NyxConfig, *, refresh: bool = False) -> LibrarySnapshot:
         key = (music, config.model_dump_json())
         while True:

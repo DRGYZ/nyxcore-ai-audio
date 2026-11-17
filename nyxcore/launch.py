@@ -24,7 +24,7 @@ from nyxcore.webapi.app import configured_config_path, create_app
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
-SPA_ROUTES = ("/", "/search", "/review", "/duplicates", "/health", "/history", "/playlists", "/metadata")
+SPA_ROUTES = ("/", "/search", "/review", "/duplicates", "/health", "/history", "/playlists", "/metadata", "/organization")
 PREVIEW_BUILD = "PREVIEW_BUILD.json"
 
 

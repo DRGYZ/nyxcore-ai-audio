@@ -174,6 +174,12 @@ Open a track from a metadata issue in Library Health, a metadata finding in Revi
 
 Only the development workflow below can apply metadata repairs. Configure an explicit disposable library root and a separate workspace. The editor supports writes to readable MP3, FLAC, and M4A files. Clearing tags is unavailable. Every applied file has a full backup in the workspace. Use **History** to reverse verified edits and inspect any operation that needs recovery.
 
+### Library Organization preview
+
+Open **Library Organization** and choose **Build preview** to see proposed `Artist / Album / Track.ext` paths from embedded tags. The planner prefers an explicit album artist and uses a track artist only when the observed album credits agree. Files with missing tags, uncertain compilation credits, unsafe paths, or collisions stay outside the ready folder tree. Use **Files** to inspect the reason and open the Metadata Editor for supported fields. Album artist and track or disc numbers may need a separate tag editor.
+
+The preview only reads the configured library. It uses no metadata providers and keeps the latest plan in memory. Rebuild after changing tags or files.
+
 ### Find Music Info and front covers
 
 In the metadata editor, open **Find Music Info**, check the query, and choose **Search MusicBrainz**. Title and artist are sent to MusicBrainz. Album, duration, and filename clues are used locally to compare the results. Cover lookup sends the selected MusicBrainz release or release-group identifier to Cover Art Archive. NyxCore sends no audio, paths, hashes, workspace identifiers, or unrelated tracks. Manual editing and the rest of library review work offline.
