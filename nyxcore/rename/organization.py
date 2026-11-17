@@ -12,7 +12,7 @@ from typing import Literal
 
 from nyxcore.config import HealthConfig
 from nyxcore.core.audio_files import INTERNAL_AUDIO_DIRS, SUPPORTED_AUDIO_EXTENSIONS
-from nyxcore.core.filesystem import is_linked_stat, scan_stat_key
+from nyxcore.core.filesystem import is_linked_stat, path_mount_id, scan_stat_key
 from nyxcore.core.scanner import scan_audio_files
 from nyxcore.core.text import normalize_match_text
 from nyxcore.core.track import TrackRecord, WarningCode
@@ -38,6 +38,7 @@ class Proposal:
     reasons: tuple[str, ...]
     destination: tuple[str, str, str] | None = None
     inspectable: bool = False
+    source_stat: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,7 @@ def _unsafe_text(value: str) -> bool:
     return any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
 
 
-def _inventory(root: Path, info: os.stat_result) -> tuple[dict[tuple[str, ...], list[Entry]], list[Entry]]:
+def _inventory(root: Path, info: os.stat_result, mount: int | None) -> tuple[dict[tuple[str, ...], list[Entry]], list[Entry]]:
     occupied: dict[tuple[str, ...], list[Entry]] = defaultdict(list)
     candidates = []
     pending = [root]
@@ -85,6 +86,8 @@ def _inventory(root: Path, info: os.stat_result) -> tuple[dict[tuple[str, ...], 
                     blocked = "Linked paths are excluded. Inspect the original location."
                 elif node.st_dev != info.st_dev:
                     blocked = "This location is on another filesystem."
+                elif path_mount_id(path) != mount:
+                    blocked = "This path crosses a mount boundary inside the library."
                 elif _unsafe_text(path.name) or (path.drive and ":" in path.name):
                     blocked = "The current path contains unsupported characters."
                 elif audio and not stat.S_ISDIR(node.st_mode) and (not stat.S_ISREG(node.st_mode) or node.st_nlink != 1):
@@ -216,7 +219,8 @@ def _proposal(
             or _utf16_length(destination[-1]) > MAX_FILENAME_LEN or _utf16_length(str(root.joinpath(*destination))) > 259):
         raise ValueError("The proposed path is too long. Verify shorter metadata or use a shorter library root.")
     status = "unchanged" if entry.parts == destination else "ready"
-    return replace(blocked, status=status, reasons=tuple(reasons), destination=destination), (group, album)
+    return replace(blocked, status=status, reasons=tuple(reasons), destination=destination,
+                   source_stat=record.scanned_stat), (group, album)
 
 
 def _album_guards(records: list[TrackRecord]) -> dict[str, set[str]]:
@@ -240,7 +244,7 @@ def _album_guards(records: list[TrackRecord]) -> dict[str, set[str]]:
     return credits
 
 
-def _source_stat(parts: tuple[str, ...], root: Path, device: int) -> tuple[int, int, int, int] | None:
+def _source_stat(parts: tuple[str, ...], root: Path, device: int, mount: int | None) -> tuple[int, int, int, int] | None:
     """Recheck each source chain before reading tags or using cached scan metadata."""
     current = root
     try:
@@ -250,7 +254,7 @@ def _source_stat(parts: tuple[str, ...], root: Path, device: int) -> tuple[int, 
             if (is_linked_stat(node) or node.st_dev != device
                     or (index < len(parts) and not stat.S_ISDIR(node.st_mode))):
                 return None
-        if stat.S_ISREG(node.st_mode) and node.st_nlink == 1:
+        if stat.S_ISREG(node.st_mode) and node.st_nlink == 1 and path_mount_id(current) == mount:
             return scan_stat_key(node)
     except OSError:
         pass
@@ -261,16 +265,22 @@ def _display(value: str) -> str:
     return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
-def build_organization_preview(root: Path, settings: HealthConfig, cached: list[TrackRecord]) -> list[Proposal]:
-    root = root.absolute()
+def organization_root_stat(root: Path) -> os.stat_result:
     if (os.name == "nt" and str(root).startswith("\\\\")) or ".." in root.parts or _unsafe_text(str(root)):
         raise ValueError("Choose a canonical local library folder for organization.")
     info = root.lstat()
     if is_linked_stat(info) or not stat.S_ISDIR(info.st_mode) or root.resolve(strict=True) != root:
         raise ValueError("Choose the original library folder instead of a linked path.")
-    occupied, entries = _inventory(root, info)
+    return info
+
+
+def build_organization_preview(root: Path, settings: HealthConfig, cached: list[TrackRecord]) -> list[Proposal]:
+    root = root.absolute()
+    info = organization_root_stat(root)
+    mount = path_mount_id(root)
+    occupied, entries = _inventory(root, info, mount)
     cached_by_path = {record.path: record for record in cached}
-    stamps = {str(entry.path): _source_stat(entry.parts, root, info.st_dev) for entry in entries if not entry.blocked}
+    stamps = {str(entry.path): _source_stat(entry.parts, root, info.st_dev, mount) for entry in entries if not entry.blocked}
     accepted = {
         path: record for path, stamp in stamps.items()
         if stamp is not None and (record := cached_by_path.get(path)) is not None and record.scanned_stat == stamp
@@ -282,7 +292,7 @@ def build_organization_preview(root: Path, settings: HealthConfig, cached: list[
     records = {
         path: record for path, record in accepted.items()
         if record.scanned_stat is not None and record.scanned_stat == stamps.get(path)
-        and _source_stat(Path(path).relative_to(root).parts, root, info.st_dev) == record.scanned_stat
+        and _source_stat(Path(path).relative_to(root).parts, root, info.st_dev, mount) == record.scanned_stat
     }
     album_guards = _album_guards(list(records.values()))
 

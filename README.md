@@ -178,7 +178,13 @@ Only the development workflow below can apply metadata repairs. Configure an exp
 
 Open **Library Organization** and choose **Build preview** to see proposed `Artist / Album / Track.ext` paths from embedded tags. The planner prefers an explicit album artist and uses a track artist only when the observed album credits agree. Files with missing tags, uncertain compilation credits, unsafe paths, or collisions stay outside the ready folder tree. Use **Files** to inspect the reason and open the Metadata Editor for supported fields. Album artist and track or disc numbers may need a separate tag editor.
 
-The preview only reads the configured library. It uses no metadata providers and keeps the latest plan in memory. Rebuild after changing tags or files.
+Building a preview only reads the configured library. It uses no metadata providers and keeps the latest plan in memory. Ready indicates that a proposed path passed the structural checks. Review recording identity separately and rebuild after changing tags or files.
+
+On Linux, organization uses readable mount IDs from `/proc/self/fdinfo`. A configured library may be a mount point, and mounts beneath it are excluded from organization.
+
+The development server can apply selected organization moves when `NYXCORE_WEB_ORGANIZATION_DISPOSABLE_ROOT` is set to the exact absolute path of the disposable library configured in `NYXCORE_WEB_MUSIC_DIR`. Use a separate workspace. Select up to 50 Ready files, review the exact paths, then confirm the batch. History can undo applied moves to their exact original paths. An occupied path blocks undo. Directories created by a move remain in place after undo.
+
+If a move is interrupted, inspect the batch with `recover-review-action --action inspect` using the same library and workspace. The journal identifies moves that can be finalized or aborted. Keep the disposable-root opt-in set for recovery that changes state, and resolve any abandoned mutation lock first. Close other applications that edit or move files in the fixture while this workflow runs. The packaged launcher offers the organization preview in review-only mode.
 
 ### Find Music Info and front covers
 

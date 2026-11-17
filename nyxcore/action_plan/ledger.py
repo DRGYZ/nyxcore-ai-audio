@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, Callable
 from nyxcore.core.atomic import atomic_write_text
 from nyxcore.core.filesystem import (
     FileIdentity,
+    ORGANIZATION_ACTION,
     bounded_path,
+    check_move_path,
     file_snapshot,
     finish_linked_move,
     move_file_no_replace,
@@ -445,6 +447,16 @@ def validate_history_mutation_paths(
     if target_path is not None:
         bounded_path(Path(target_path), allowed_roots, label="target path")
     for operation in batch.operations:
+        if operation.action_type == ORGANIZATION_ACTION:
+            if not library or not operation.move_identity and operation.status == "ok":
+                raise ValueError("Organization reversal requires the recorded move identity and library.")
+            if alternate_restore_dir is not None:
+                raise ValueError("Organization moves can only be restored to their exact original paths.")
+            for path in (operation.original_path, operation.current_path, operation.destination_path):
+                if path is not None:
+                    check_move_path(library[0], Path(path), missing_ok=True)
+            if operation.reversal_intent and operation.reversal_intent.destination_path != operation.original_path:
+                raise ValueError("Organization reversal intent differs from the original path.")
         current_roots = allowed_roots if operation.undo_status == "ok" else library
         for label, value, roots in (
             ("history original path", operation.original_path, library),
@@ -472,7 +484,7 @@ def validate_history_mutation_paths(
 
 
 def _move_state(
-    source: Path, destination: Path, expected_hash: str, identity: FileIdentity,
+    source: Path, destination: Path, expected_hash: str, identity: FileIdentity, *, strict_links: bool = False,
 ) -> tuple[str, str]:
     if source.resolve() == destination.resolve():
         return "manual_intervention", "move source and destination resolve to the same path"
@@ -480,9 +492,9 @@ def _move_state(
     left, right = file_snapshot(source), file_snapshot(destination)
     if left == expected and not path_present(destination):
         return "not_started", "source matches the recorded file and destination is absent"
-    if right == expected and not path_present(source):
+    if right == expected and not path_present(source) and (not strict_links or destination.lstat().st_nlink == 1):
         return "completed_unfinalized", "destination matches the recorded file and source is absent"
-    if left == right == expected:
+    if left == right == expected and (not strict_links or source.lstat().st_nlink == 2):
         return "destination_linked_source_present", "both names refer to the recorded regular file"
     if not path_present(source) and not path_present(destination):
         return "manual_intervention", "source and destination are both missing"
@@ -494,7 +506,8 @@ def _reversal_state(operation: LedgerOperation, intent: ReversalIntent) -> tuple
     if operation.operation_type in _MOVE_TYPES and operation.current_path:
         expected = operation.applied_hash or operation.expected_hash
         if expected:
-            return _move_state(Path(operation.current_path), destination, expected, intent.source_identity)
+            return _move_state(Path(operation.current_path), destination, expected, intent.source_identity,
+                               strict_links=operation.action_type == ORGANIZATION_ACTION)
     elif (operation.operation_type == "write_metadata" and intent.staging_path
           and intent.staging_identity and operation.expected_hash and operation.applied_hash):
         stage = Path(intent.staging_path)
@@ -541,7 +554,8 @@ def assess_operation_recovery(batch: OperationBatch, operation: LedgerOperation)
             return assessment("manual_intervention", [], "source and destination are both missing")
         if state != "applying" or not operation.started_at or operation.move_identity is None:
             return assessment("manual_intervention", [], "move journal lacks evidence that this move created the destination")
-        classification, detail = _move_state(source, destination, operation.expected_hash, operation.move_identity)
+        classification, detail = _move_state(source, destination, operation.expected_hash, operation.move_identity,
+                                             strict_links=operation.action_type == ORGANIZATION_ACTION)
         actions = ["finalize"] if classification in {"completed_unfinalized", "destination_linked_source_present"} else []
         return assessment(classification, actions, detail)
 
@@ -633,12 +647,17 @@ def apply_batch_recovery(
             validate_history_mutation_paths(batch, allowed_roots=allowed_roots)
         if assessment != assess_operation_recovery(batch, operation):
             raise RuntimeError("filesystem state changed during recovery; refusing to finalize")
+        strict = operation.action_type == ORGANIZATION_ACTION
+        if strict and not allowed_roots:
+            raise ValueError("Organization recovery requires the configured library root.")
+        scope = {"library_root": allowed_roots[0]} if strict else {}
         intent = operation.reversal_intent
         if intent is not None:
             if assessment.classification == "reversal_destination_linked_source_present":
                 finish_linked_move(
                     Path(operation.current_path), Path(intent.destination_path), intent.source_identity,
                     expected_hash=operation.applied_hash or operation.expected_hash,
+                    **scope,
                 )
             _finish_reversal(operation, now)
             continue
@@ -646,6 +665,7 @@ def apply_batch_recovery(
             finish_linked_move(
                 Path(operation.original_path), Path(operation.destination_path), operation.move_identity,
                 expected_hash=operation.expected_hash,
+                **scope,
             )
         if operation.operation_type in _MOVE_TYPES:
             operation.applied_hash = operation.expected_hash
@@ -725,7 +745,7 @@ def _prepare_reversal(
     raise RuntimeError("undo is not supported for this operation")
 
 
-def _continue_reversal(operation: LedgerOperation, intent: ReversalIntent) -> None:
+def _continue_reversal(operation: LedgerOperation, intent: ReversalIntent, library_root: Path) -> None:
     classification, detail = _reversal_state(operation, intent)
     if classification == "completed_unfinalized":
         return
@@ -733,11 +753,13 @@ def _continue_reversal(operation: LedgerOperation, intent: ReversalIntent) -> No
     if operation.operation_type in _MOVE_TYPES:
         source = Path(operation.current_path)
         expected_hash = operation.applied_hash or operation.expected_hash
+        scope = {"library_root": library_root} if operation.action_type == ORGANIZATION_ACTION else {}
         if classification == "not_started":
-            move_file_no_replace(source, destination, expected_identity=intent.source_identity, expected_hash=expected_hash)
+            move_file_no_replace(source, destination, expected_identity=intent.source_identity, expected_hash=expected_hash,
+                                 **scope)
             return
         if classification == "destination_linked_source_present":
-            finish_linked_move(source, destination, intent.source_identity, expected_hash=expected_hash)
+            finish_linked_move(source, destination, intent.source_identity, expected_hash=expected_hash, **scope)
             return
     elif operation.operation_type == "write_metadata" and classification == "not_started":
         _verify_backup(operation)
@@ -806,7 +828,7 @@ def reverse_operation_batch(
                     raise RuntimeError("file was restored to an alternate location; earlier reversal needs manual review")
                 intent = _prepare_reversal(operation, allowed_roots, alternate_restore_dir)
                 operation.reversal_intent = intent
-        except (OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             operation.undo_status = "error"
             operation.undone_at = now_iso
             operation.undo_message = str(exc)
@@ -819,8 +841,8 @@ def reverse_operation_batch(
             persist()
         try:
             validate_paths()
-            _continue_reversal(operation, intent)
-        except (OSError, RuntimeError) as exc:
+            _continue_reversal(operation, intent, allowed_roots[0])
+        except (OSError, RuntimeError, ValueError) as exc:
             operation.undo_status = "error"
             operation.undone_at = now_iso
             operation.undo_message = str(exc)
