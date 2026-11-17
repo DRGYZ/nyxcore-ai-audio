@@ -197,7 +197,7 @@ function PlanCard({
 }
 
 export function PlanReportModal({
-  report, duplicateEvidence, selection, root, confirming, applyPending, applyError, selectedOperationIds,
+  report, duplicateEvidence, selection, root, confirming, reviewOnly, applyPending, applyError, selectedOperationIds,
   onToggleOperation, onClose, onContinue, onCancel, onApply,
 }: {
   report: ActionPlanReport | null;
@@ -205,6 +205,7 @@ export function PlanReportModal({
   selection: ActionPlanReport | null;
   root?: string;
   confirming: boolean;
+  reviewOnly: boolean;
   applyPending: boolean;
   applyError: string | null;
   selectedOperationIds: ReadonlySet<string>;
@@ -228,16 +229,18 @@ export function PlanReportModal({
   return (
     <Modal
       open={!!report}
-      title={confirming ? "Confirm Plan Apply" : "Generated Action Plan"}
+      title={confirming ? (reviewOnly ? "Selected Changes" : "Confirm Plan Apply") : "Generated Action Plan"}
       subtitle={confirming ? selectedChanges.length + (selectedChanges.length === 1 ? " selected change" : " selected changes") : "Preview leaves audio files unchanged"}
       onClose={confirming ? onCancel : onClose}
       dismissible={!applyPending}
       footer={confirming ? (
         <>
-          <Button tone="ghost" disabled={applyPending} onClick={onCancel}>Cancel</Button>
-          <Button tone="primary" disabled={applyPending || !selectedChanges.length} onClick={onApply}>
-            {applyPending ? "Applying…" : "Apply Plan"}
-          </Button>
+          <Button tone="ghost" disabled={applyPending} onClick={onCancel}>{reviewOnly ? "Back" : "Cancel"}</Button>
+          {!reviewOnly ? (
+            <Button tone="primary" disabled={applyPending || !selectedChanges.length} onClick={onApply}>
+              {applyPending ? "Applying…" : "Apply Plan"}
+            </Button>
+          ) : null}
         </>
       ) : (
         <>
@@ -249,7 +252,11 @@ export function PlanReportModal({
       {confirming ? (
         <div className="min-w-0 space-y-3">
           {applyError ? <ActionBanner tone="error" message={applyError} /> : null}
-          <p className="text-sm text-primary-muted">Apply changes the files listed below. Unchecked operations are excluded.</p>
+          <p className="text-sm text-primary-muted">
+            {reviewOnly
+              ? "This is a preview. File changes are disabled in review-only mode."
+              : "Apply changes the files listed below. Unchecked operations are excluded."}
+          </p>
           <div className="flex flex-wrap gap-2">
             {[...groups].map(([type, count]) => <Chip key={type} tone="default">{ACTION_GROUP_LABELS[type]} · {count}</Chip>)}
           </div>

@@ -195,7 +195,7 @@ export function AppShell({ children }: PropsWithChildren) {
                 </>
               ) : (
                 <p className="mt-2 font-sans text-xs leading-relaxed text-primary-subtle">
-                  Local backend unreachable. Start uvicorn on port 8000.
+                  {import.meta.env.PROD ? "Local backend unreachable. Restart the NyxCore launcher." : "Local backend unreachable. Start uvicorn on port 8000."}
                 </p>
               )}
             </div>
@@ -303,14 +303,21 @@ export function AppShell({ children }: PropsWithChildren) {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto bg-background px-6 py-6 lg:px-8">
-            <div className="mx-auto max-w-[1400px]">{children}</div>
+            <div className="mx-auto max-w-[1400px]">
+              {status?.review_only ? (
+                <p className="mb-4 rounded-[3px] border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-primary">
+                  <strong>Review-only mode.</strong> Browse findings, save triage decisions, and preview plans. Applying plans and reversing file changes are disabled.
+                </p>
+              ) : null}
+              {children}
+            </div>
           </main>
           <footer className="border-t border-white/[0.07] bg-surface-low/40 px-6 py-2.5 font-sans text-[11px] text-primary-subtle">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap items-center gap-4">
                 <span className="flex items-center gap-1.5">
                   <span className={`size-1.5 rounded-full ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
-                  {isConnected ? "Local API Connected (127.0.0.1:8000)" : "Local API Unavailable"}
+                  {isConnected ? "Local API Connected" : "Local API Unavailable"}
                 </span>
                 {isConnected && status?.music_path ? <span className="font-mono text-primary-muted">Library: {status.music_path}</span> : null}
               </div>

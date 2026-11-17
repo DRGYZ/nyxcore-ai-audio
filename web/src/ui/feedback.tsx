@@ -57,7 +57,11 @@ export function ApiUnavailableState({
         <div className="space-y-4 text-sm text-primary-muted">
           <h3 className="font-sans font-semibold text-primary">Setup Instructions</h3>
           <ol className="list-decimal space-y-4 pl-5">
-            <li>
+            {import.meta.env.PROD ? (
+              <li>
+                <p><strong className="text-primary">Restart the NyxCore launcher.</strong> Use the same library, workspace, and port, then reopen the printed URL.</p>
+              </li>
+            ) : <li>
               <p><strong className="text-primary">Start the backend with the synthetic library.</strong> Run the commands from the repository root with your NyxCore Python environment active. The generator needs FFmpeg and can be skipped if the demo already exists.</p>
               {DEMO_COMMANDS.map(({ shell, command }) => (
                 <details key={shell} className="mt-2 min-w-0 rounded-[3px] border border-white/[0.08] bg-surface-low/60 p-3">
@@ -68,7 +72,7 @@ export function ApiUnavailableState({
                 </details>
               ))}
               <p className="mt-2 text-xs text-primary-subtle">For installation on Windows via WSL2, see <code>INSTALL_WSL.md</code> in the project root. PowerShell commands assume the dependencies are already installed.</p>
-            </li>
+            </li>}
             <li>
               <p><strong className="text-primary">Confirm the connection.</strong> Leave the backend running and check the connection here.</p>
               <Button className="mt-2" tone="primary" onClick={handleCheck} disabled={isChecking}>

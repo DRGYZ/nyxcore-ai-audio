@@ -20,6 +20,7 @@ const HISTORY_FILTERS: Array<{ value: HistoryFilter; label: string }> = [
 export function HistoryPage() {
   const historyQuery = useHistoryQuery();
   const statusQuery = useStatusQuery();
+  const reviewOnly = statusQuery.data?.review_only === true;
   const reverseMutation = useReverseHistoryMutation();
   const [banner, setBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [confirmBatchId, setConfirmBatchId] = useState<string | null>(null);
@@ -89,6 +90,7 @@ export function HistoryPage() {
   }
 
   async function handleReverse(batchId: string) {
+    if (reviewOnly) return;
     try {
       const responsePayload = await reverseMutation.mutateAsync({ batchId });
       setMutationResult(responsePayload);
@@ -204,7 +206,7 @@ export function HistoryPage() {
                                 tone="secondary"
                                 id={`reverse-button-${item.batch_id}`}
                                 className="px-2 py-1 text-xs sm:px-3"
-                                disabled={!canReverseHistoryBatch(item) || busy}
+                                disabled={reviewOnly || !canReverseHistoryBatch(item) || busy}
                                 onClick={() => {
                                   setConfirmBatchId(item.batch_id);
                                 }}
@@ -228,7 +230,7 @@ export function HistoryPage() {
               batch={selected}
               meta={response.meta}
               mutationResult={mutationResult && mutationResult.batch_id === selected?.batch_id ? mutationResult : null}
-              busy={busy}
+              reversalDisabled={busy || reviewOnly}
               onReverse={() => selected && canReverseHistoryBatch(selected) && setConfirmBatchId(selected.batch_id)}
             />
             <Panel className="p-5">
@@ -279,7 +281,7 @@ export function HistoryPage() {
             </Button>
             <Button
               tone="primary"
-              disabled={busy || !confirmBatch || !canReverseHistoryBatch(confirmBatch)}
+            disabled={reviewOnly || busy || !confirmBatch || !canReverseHistoryBatch(confirmBatch)}
               onClick={() => {
                 if (!busy && confirmBatch && canReverseHistoryBatch(confirmBatch)) {
                   void handleReverse(confirmBatch.batch_id);

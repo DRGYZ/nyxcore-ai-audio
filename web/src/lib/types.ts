@@ -26,6 +26,7 @@ export interface StatusResponse {
   review_state_exists: boolean;
   history_exists: boolean;
   saved_playlist_count: number;
+  review_only?: boolean;
 }
 
 export interface ReportEnvelope<T> {

@@ -8,12 +8,14 @@ import { DashboardPage } from "../pages/DashboardPage";
 describe("Overview first run", () => {
   const status = { ...mockStatus, music_path: "C:\\Synthetic Library\\音楽" };
   let historyStatus: number;
+  let reviewOnly: boolean;
 
   beforeEach(() => {
     historyStatus = 200;
+    reviewOnly = false;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const path = new URL(url, "http://localhost").pathname;
-      if (path === "/api/status") return Response.json(status);
+      if (path === "/api/status") return Response.json({ ...status, review_only: reviewOnly });
       if (path === "/api/health") return Response.json({ data: mockHealthReport });
       if (path === "/api/review") return Response.json({ data: mockReviewReport });
       if (path === "/api/duplicates") return Response.json({ data: mockDuplicateReport });
@@ -36,6 +38,18 @@ describe("Overview first run", () => {
     await user.click(screen.getByText("Inspect a different library"));
     expect(screen.getByText("NYXCORE_WEB_MUSIC_DIR")).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("shows launcher instructions for switching libraries in review-only mode", async () => {
+    reviewOnly = true;
+    const user = userEvent.setup();
+    renderWithProviders(<DashboardPage />);
+
+    await user.click(await screen.findByText("Inspect a different library"));
+    expect(screen.getByText("--music")).toBeVisible();
+    expect(screen.getByText("--out")).toBeVisible();
+    expect(screen.queryByText(/Use a disposable library to test Apply/)).toBeNull();
+    expect(screen.queryByText("NYXCORE_WEB_MUSIC_DIR")).toBeNull();
   });
 
   it("keeps the configured library visible when only History fails and refreshes on retry", async () => {

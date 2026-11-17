@@ -1,6 +1,6 @@
 # NyxCore on Windows via WSL2 (Ubuntu)
 
-The synthetic review demo was verified on Windows 11 with Ubuntu 24.04 LTS under WSL2, using Python 3.12, Node.js 22.22.2, npm 10.9.7, and FFmpeg 6.1.1. Python 3.11 also passed the backend suite. Native Windows, other distributions, and library mutations were outside this verification.
+The synthetic review demo was verified on Windows 11 with Ubuntu 24.04 LTS under WSL2, using Python 3.12, Node.js 22.22.2, and FFmpeg 6.1.1. Python 3.11 also passed the backend suite. For a native Windows setup, see the [PowerShell quickstart](README.md#native-windows-quickstart).
 
 ## 1. Prerequisites
 
@@ -55,9 +55,17 @@ Ubuntu 24.04 uses Python 3.12. Run `which python` to check that it points to `.v
 
 ## 5. Demo Fixture and Reports
 
-Follow the [demo and report commands](README.md#2-generate-the-demo-and-reports) from the repository root. This creates the synthetic fixture under `demo/generated/sample-library/` and writes reports and local state to `data/demo-reports/`.
+For normal use, build the frontend once and launch from the repository root with the virtual environment active.
 
-## 6. Run the Local FastAPI Backend
+```bash
+(cd web && npm ci --engine-strict && npm run build)
+python demo/create_demo_library.py
+python -m nyxcore.launch --demo --out data/demo-reports
+```
+
+Open the printed `http://127.0.0.1:8000/` URL in your Windows browser if needed. Use `--port` to choose a free port and `--no-browser` to skip opening a browser. Ctrl+C stops the launcher. To change libraries, restart with `--music "/path/to/library"` and a separate `--out` directory. The launcher blocks apply, restore, and undo at the API. For the optional CLI reports, see the [demo and report commands](README.md#2-generate-the-demo-and-reports).
+
+## 6. Run the FastAPI Backend for Development
 
 From the repository root with the virtual environment active:
 
@@ -69,7 +77,7 @@ uvicorn nyxcore.webapi.app:app --reload --host 127.0.0.1 --port 8000
 
 Open [API status](http://127.0.0.1:8000/api/status) and check that `music_path` points at the synthetic fixture.
 
-## 7. Run the React Web UI
+## 7. Run the Vite Frontend for Development
 
 In a second Ubuntu terminal, from the repository root:
 

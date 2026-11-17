@@ -11,10 +11,11 @@ describe("History Page", () => {
   let history: HistoryResponse;
   let historyStatus: number;
   let connected: boolean;
+  let reviewOnly: boolean;
   const fetchMock = vi.fn(async (input: string, options?: RequestInit) => {
     if (!connected) throw new TypeError("Failed to fetch");
     const path = new URL(input, "http://localhost").pathname;
-    if (path === "/api/status") return Response.json({ status: "ok" });
+    if (path === "/api/status") return Response.json({ status: "ok", review_only: reviewOnly });
     if (path === "/api/history") return Response.json(history, { status: historyStatus });
     if (path === "/api/history/" + completed.batch_id + "/restore" && options?.method === "POST") {
       const changedOperation = { ...completed.operations[0], undo_status: "ok" as const, undo_message: "undone" };
@@ -35,6 +36,7 @@ describe("History Page", () => {
     history = mockHistoryResponse;
     historyStatus = 200;
     connected = true;
+    reviewOnly = false;
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -49,6 +51,16 @@ describe("History Page", () => {
     expect(screen.queryByRole("button", { name: /^undo$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^restore batch$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^undo batch$/i })).not.toBeInTheDocument();
+  });
+
+  it("shows recorded batches with reversal disabled in review-only mode", async () => {
+    reviewOnly = true;
+    renderWithProviders(<HistoryPage />);
+
+    expect(await screen.findByRole("button", { name: "Reverse Batch" })).toBeDisabled();
+    for (const button of screen.getAllByRole("button", { name: "Reverse" })) {
+      expect(button).toBeDisabled();
+    }
   });
 
   it("opens reversal confirmation dialog, traps focus, and closes on cancel with focus restoration", async () => {

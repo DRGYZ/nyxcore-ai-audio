@@ -113,18 +113,57 @@ NyxCore is designed around defensive, local-first safety primitives:
 ## Requirements
 
 - **Python**: `3.11` or `3.12` are tested. The package minimum is `3.11`.
-- **Node.js**: Use Node.js `22.13+` on the 22.x line and npm. Node 18 and 20 do not meet the locked frontend test dependencies' requirements.
+- **Node.js for frontend builds and development**: Use Node.js 22.13 or later within 22.x and npm. The launcher uses the compiled assets at runtime.
 - **Audio Metadata Support**: Pure Python via `mutagen` (`.mp3`, `.flac`, `.ogg`, `.m4a`, `.wav`, `.aif`, `.opus`). No external media binaries are required for core indexing, health reporting, duplicate matching, or action plans.
 - **Optional External Tools**:
   - `ffmpeg`: **Only** required if you want to generate synthetic audio test files with `demo/create_demo_library.py` or run optional CLAP audio transcoding. It is not required for the core scanner or web application.
 
 ---
 
-## Quickstart: Review a Synthetic Library
+## Native Windows Quickstart
 
-The demo was verified on Windows 11 using Ubuntu 24.04 under WSL2, with the checkout and fixture on the Linux filesystem, Python 3.12, Node.js 22, and a Windows browser. Backend tests also passed on Python 3.11. Native Windows, macOS, other Linux distributions, and operations that modify music files are outside this verification. NyxCore is still experimental.
+Use Windows 11, Python 3.12, and Node.js 22 (22.13 or later within 22.x). Put FFmpeg on PATH to generate the synthetic library. These PowerShell commands set up the launcher in a source checkout.
 
-On Windows, follow the [WSL2 Setup Guide](INSTALL_WSL.md) for system prerequisites. Run the commands below in Bash inside the Linux environment.
+```powershell
+git clone https://github.com/DRGYZ/nyxcore-ai-audio.git
+Set-Location nyxcore-ai-audio
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e '.[web]'
+Push-Location web
+npm.cmd ci --engine-strict
+npm.cmd run build
+Pop-Location
+```
+
+Generate the demo once, then launch it.
+
+```powershell
+.\.venv\Scripts\python.exe demo/create_demo_library.py
+.\.venv\Scripts\python.exe -m nyxcore.launch --demo --out data/demo-reports
+```
+
+NyxCore prints the configured library, workspace, and local URL, then opens the browser when ready. Check **Active library** in Overview. In **Review Inbox**, select the exact duplicate finding for **Blue Hour**, click **Generate Plan**, and inspect which copy would be kept and which would be moved.
+
+To switch libraries, press **Ctrl+C** in the launcher terminal and restart with an explicit library and a separate workspace for that library.
+
+```powershell
+.\.venv\Scripts\python.exe -m nyxcore.launch --music 'D:\Music Library' --out 'C:\NyxCore\my-library-reports'
+```
+
+The launcher binds only to `127.0.0.1` and runs in **review-only mode** for every library. Search, findings, plan previews, and history inspection are available. Triage decisions and saved playlists may write local state to the workspace. The API refuses apply, restore, and undo requests. Mutations remain experimental.
+
+- If the port is occupied, append `--port 8001` or choose another free port. Leave the existing service running.
+- If the browser does not open, use the printed URL. Add `--no-browser` to open it yourself.
+- If the build is missing or incomplete, repeat the commands in `web/`. After building, the launcher runs without Node.js or Vite. Keep `web/dist/` next to the Python source in the checkout.
+- If the demo is missing, run the generator from the repository root. Choose an existing music folder and a writable workspace that does not overlap it.
+
+For Ubuntu 24.04 under WSL2, follow the [WSL2 Setup Guide](INSTALL_WSL.md).
+
+---
+
+## Development Workflow
+
+The separate Vite and FastAPI workflow is for development. Use disposable libraries with it. The [WSL2 Setup Guide](INSTALL_WSL.md) covers system prerequisites. Run the commands below in Bash inside the Linux environment.
 
 ### 1. Set Up Python
 

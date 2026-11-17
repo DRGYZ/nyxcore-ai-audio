@@ -75,7 +75,8 @@ export function DashboardPage() {
           <h2 className="font-display text-base font-semibold text-primary">Active library</h2>
           <PathBlock value={status.music_path} />
           <p className="text-xs leading-relaxed text-primary-muted">
-            Overview reads the library configured in your local backend. Browsing, reviewing findings, and generating plan previews leave audio files unchanged. Applying a selected plan can change files. Use a disposable library to test Apply.
+            Overview reads the library configured in your local backend. Browsing, reviewing findings, and generating plan previews leave audio files unchanged.
+            {!status.review_only ? " Applying a selected plan can change files. Use a disposable library to test Apply." : null}
           </p>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
             {firstFinding ? (
@@ -85,7 +86,11 @@ export function DashboardPage() {
           </div>
           <details className="border-t border-white/[0.07] pt-2 text-xs text-primary-muted">
             <summary className="cursor-pointer text-primary focus-visible:outline-accent">Inspect a different library</summary>
-            <p className="mt-2">Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
+            {status.review_only ? (
+              <p className="mt-2">Press <kbd>Ctrl+C</kbd> in the launcher terminal. Restart with <code>--music</code> set to the desired library and <code>--out</code> set to a separate workspace, then open the printed URL.</p>
+            ) : (
+              <p className="mt-2">Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
+            )}
           </details>
         </Panel>
       ) : null}

@@ -12,6 +12,7 @@ import {
   useGenerateReviewPlanMutation,
   useReviewQuery,
   useReviewStateMutation,
+  useStatusQuery,
 } from "../../lib/hooks";
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import type { ActionPlanReport, ApiMeta, ReviewItem, ReviewPlanApplyResponse } from "../../lib/types";
@@ -49,6 +50,8 @@ export function ReviewPage() {
   const [searchParams] = useSearchParams();
   const requestedItemType = searchParams.get("type");
   const reviewQuery = useReviewQuery();
+  const reviewOnly = useStatusQuery().data?.review_only === true;
+  const description = "Inspect library findings, save triage decisions, and preview proposed file changes.";
   const reviewMutation = useReviewStateMutation();
   const planMutation = useGenerateReviewPlanMutation();
   const applyPlanMutation = useApplyReviewPlanMutation();
@@ -170,7 +173,7 @@ export function ReviewPage() {
         <PageHeader
           eyebrow="Review Findings"
           title="Review Inbox"
-          description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
+          description={description}
         />
         {outcome}
         <ApiUnavailableState contextLabel="Review Inbox" />
@@ -184,7 +187,7 @@ export function ReviewPage() {
         <PageHeader
           eyebrow="Review Findings"
           title="Review Inbox"
-          description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
+          description={description}
         />
         {outcome}
         <Panel className="p-8 text-center text-sm text-slate-400">
@@ -239,7 +242,7 @@ export function ReviewPage() {
   }
 
   async function handleApplyPlan() {
-    if (!confirmApply || !selection?.plans.length || applyPlanMutation.isPending) return;
+    if (reviewOnly || !confirmApply || !selection?.plans.length || applyPlanMutation.isPending) return;
     setApplyError(null);
     try {
       const response = await applyPlanMutation.mutateAsync({
@@ -271,7 +274,7 @@ export function ReviewPage() {
             Review Inbox <span className="font-editorial text-xl font-normal italic text-primary-subtle">precision triage</span>
           </span>
         }
-        description="Inspect library findings, triage issues, generate explicit action plans, and review proposed changes before applying."
+        description={description}
         actions={
           <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
             <Icon name="refresh" className={`text-base ${reviewQuery.isFetching || checking ? "animate-spin" : ""}`} />
@@ -524,6 +527,7 @@ export function ReviewPage() {
         selection={selection}
         root={plan?.root}
         confirming={confirmApply}
+        reviewOnly={reviewOnly}
         applyPending={applyPlanMutation.isPending}
         applyError={applyError}
         selectedOperationIds={selectedOperationIds}

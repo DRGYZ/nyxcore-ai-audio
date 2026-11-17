@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ReviewPage } from "../pages/ReviewPage";
 import { renderWithProviders } from "../../test/test-utils";
 import * as hooks from "../../lib/hooks";
-import { mockReviewReport } from "../../lib/mock-data";
+import { mockReviewReport, mockStatus } from "../../lib/mock-data";
 import type { ActionPlan, ActionPlanOperation, ActionPlanReport, ReviewPlanApplyResponse } from "../../lib/types";
 
 const musicRoot = "C:\\Synthetic Library";
@@ -72,6 +72,7 @@ describe("Review Inbox", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(hooks, "useStatusQuery").mockReturnValue({ data: mockStatus } as ReturnType<typeof hooks.useStatusQuery>);
 
     vi.spyOn(hooks, "useReviewQuery").mockReturnValue({
       data: { data: mockReviewReport } as any,
@@ -202,6 +203,25 @@ describe("Review Inbox", () => {
     expect(modal.getByText("New name.mp3")).toBeVisible();
     expect(modal.getByText("This operation cannot be applied.")).toBeVisible();
     expect(modal.getAllByRole("checkbox")).toHaveLength(4);
+  });
+
+  it("previews selected changes without an apply action in review-only mode", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(hooks, "useStatusQuery").mockReturnValue({
+      data: { ...mockStatus, review_only: true },
+    } as ReturnType<typeof hooks.useStatusQuery>);
+    renderWithProviders(<ReviewPage />);
+
+    await user.click(screen.getAllByRole("button", { name: "Generate Plan" })[0]);
+    const preview = within(await screen.findByRole("dialog", { name: "Generated Action Plan" }));
+    await user.click(preview.getByRole("checkbox", { name: /quarantine duplicate.*重複/ }));
+    await user.click(preview.getByRole("button", { name: "Review Selected Changes" }));
+
+    const selection = within(screen.getByRole("dialog", { name: "Selected Changes" }));
+    expect(selection.getByText(/file changes are disabled/i)).toBeVisible();
+    expect(selection.getByText("Imports\\重複 copy.flac")).toBeVisible();
+    expect(selection.queryByRole("button", { name: "Apply Plan" })).toBeNull();
+    expect(mockApplyMutation.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("keeps only selected changes in confirmation and sends the same approved paths and fingerprint", async () => {

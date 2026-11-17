@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ActionPlanOperation, ActionPlanReport, ApiMeta, DuplicateFileInfo, DuplicateGroup, DuplicateReport, ReviewItem } from "../../lib/types";
 import { renderWithProviders } from "../../test/test-utils";
@@ -90,6 +90,7 @@ describe("Duplicate evidence in Review Inbox", () => {
     vi.stubGlobal("innerWidth", 1440);
     vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
       const path = new URL(url, "http://localhost").pathname;
+      if (path === "/api/status") return Response.json({ status: "ok", review_only: false });
       if (path === "/api/review") return Response.json({ meta, data: { items: [exact, likely, unrelated] } });
       if (path === "/api/duplicates") {
         duplicateRequests();
@@ -208,7 +209,7 @@ describe("Duplicate evidence in Review Inbox", () => {
     await user.click(screen.getByRole("button", { name: "Refresh Inbox" }));
     expect(await screen.findByText(/Detailed duplicate evidence is unavailable/)).toBeVisible();
     expect(screen.queryByText(/Deterministic tie-break/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mark Seen" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark Seen" })).toBeEnabled());
   });
 
   it("keeps the inbox usable after a duplicate endpoint failure", async () => {

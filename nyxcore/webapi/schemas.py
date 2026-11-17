@@ -24,6 +24,7 @@ class ApiStatusResponse(BaseModel):
     review_state_exists: bool
     history_exists: bool
     saved_playlist_count: int
+    review_only: bool = False
 
 
 class ApiMetaResponse(BaseModel):

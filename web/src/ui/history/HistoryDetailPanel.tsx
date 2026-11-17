@@ -43,14 +43,14 @@ export function HistoryDetailPanel({
   meta,
   mutationResult,
   usingMock,
-  busy,
+  reversalDisabled,
   onReverse,
 }: {
   batch?: HistoryBatch;
   meta: ApiMeta;
   mutationResult?: HistoryMutationResponse | null;
   usingMock?: boolean;
-  busy: boolean;
+  reversalDisabled: boolean;
   onReverse: () => void;
 }) {
   const state = batch ? historyBatchState(batch) : null;
@@ -68,7 +68,7 @@ export function HistoryDetailPanel({
       title="Batch Details"
       subtitle={batch ? `BATCH: ${batch.batch_id}` : "No batch selected"}
       footer={
-        <Button tone="primary" className="w-full" disabled={usingMock || busy || !batch || !canReverseHistoryBatch(batch)} onClick={onReverse}>
+        <Button tone="primary" className="w-full" disabled={usingMock || reversalDisabled || !batch || !canReverseHistoryBatch(batch)} onClick={onReverse}>
           Reverse Batch
         </Button>
       }

@@ -92,28 +92,16 @@ def _resolve_bounded_path(value: str, *, roots: tuple[Path, ...], label: str) ->
     return candidate
 
 
-def _resolve_music_path(music_path: str | None) -> Path:
-    return _resolve_configured_root(
-        music_path,
-        configured_root=_default_music_path(),
-        label="music_path",
-    )
-
-
-def _resolve_out_path(out_path: str | None) -> Path:
-    return _resolve_configured_root(
-        out_path,
-        configured_root=_default_out_path(),
-        label="out_path",
-    )
+def configured_config_path() -> Path | None:
+    configured_value = os.environ.get("NYXCORE_WEB_CONFIG_PATH")
+    return Path(configured_value).resolve() if configured_value is not None else None
 
 
 def _resolve_config(config_path: str | None, profile: str | None) -> NyxConfig:
-    configured_value = os.environ.get("NYXCORE_WEB_CONFIG_PATH")
+    configured_path = configured_config_path()
     if config_path is not None:
-        if configured_value is None:
+        if configured_path is None:
             raise HTTPException(status_code=403, detail="config_path overrides are disabled for this server")
-        configured_path = Path(configured_value).resolve()
         candidate = Path(config_path).resolve()
         if candidate != configured_path:
             raise HTTPException(
@@ -121,7 +109,7 @@ def _resolve_config(config_path: str | None, profile: str | None) -> NyxConfig:
                 detail=f"config_path must match the server-configured file: {configured_path}",
             )
     else:
-        candidate = None if configured_value is None else Path(configured_value).resolve()
+        candidate = configured_path
     return load_config(candidate, profile=profile)
 
 
@@ -194,18 +182,41 @@ def _build_review_dependencies(
     return records, pipeline.duplicate_report, pipeline.health_report, review_state, pipeline.review_report
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    music_root: Path | None = None,
+    workspace_root: Path | None = None,
+    review_only: bool = False,
+) -> FastAPI:
     app = FastAPI(title="NyxCore Web API", version=__version__)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-        ],
-        allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["*"],
-    )
+    if not review_only:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://127.0.0.1:5173",
+                "http://localhost:5173",
+            ],
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["*"],
+        )
+
+    def _resolve_music_path(music_path: str | None) -> Path:
+        return _resolve_configured_root(
+            music_path, configured_root=music_root or _default_music_path(), label="music_path",
+        )
+
+    def _resolve_out_path(out_path: str | None) -> Path:
+        return _resolve_configured_root(
+            out_path, configured_root=workspace_root or _default_out_path(), label="out_path",
+        )
+
+    def require_audio_mutations() -> None:
+        if review_only:
+            raise HTTPException(
+                status_code=403,
+                detail="This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled.",
+            )
 
     @app.get("/api/status", response_model=ApiStatusResponse)
     def status(
@@ -225,6 +236,7 @@ def create_app() -> FastAPI:
             review_state_exists=(resolved_out / "review_state.json").exists(),
             history_exists=(resolved_out / "review_history.json").exists(),
             saved_playlist_count=len(store.playlists),
+            review_only=review_only,
         )
 
     @app.get("/api/duplicates", response_model=ApiReportEnvelope)
@@ -378,6 +390,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/review/plan/apply", response_model=ReviewPlanApplyResponse)
     def apply_review_plan(request: ReviewPlanApplyRequest) -> ReviewPlanApplyResponse:
+        require_audio_mutations()
         resolved_music = _resolve_music_path(request.music_path)
         resolved_out = _resolve_out_path(request.out_path)
         app_config = _resolve_config(request.config_path, request.profile)
@@ -532,7 +545,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/history/{batch_id}/restore", response_model=HistoryMutationResponse)
     def restore_history_batch(batch_id: str, request: HistoryMutationRequest) -> HistoryMutationResponse:
-        resolved_music = _default_music_path()
+        require_audio_mutations()
+        resolved_music = _resolve_music_path(None)
         resolved_out = _resolve_out_path(request.out_path)
         ledger_path = resolved_out / "review_history.json"
         review_state_path = resolved_out / "review_state.json"
