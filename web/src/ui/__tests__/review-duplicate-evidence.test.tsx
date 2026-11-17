@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ActionPlanOperation, ActionPlanReport, ApiMeta, DuplicateFileInfo, DuplicateGroup, DuplicateReport, ReviewItem } from "../../lib/types";
-import { renderWithProviders } from "../../test/test-utils";
+import { createTestQueryClient, renderWithProviders } from "../../test/test-utils";
 import { ReviewPage } from "../pages/ReviewPage";
 
 const meta: ApiMeta = { music_path: "/fixture", out_path: "/reports", active_profile: "default", mode: "live" };
@@ -68,8 +68,11 @@ const exactPlan: ActionPlanReport = {
   },
 };
 
-function openFinding(item: ReviewItem) {
-  return renderWithProviders(<ReviewPage />, { initialEntries: ["/review?item=" + encodeURIComponent(item.item_id)] });
+function openFinding(item: ReviewItem, queryClient = createTestQueryClient()) {
+  return renderWithProviders(<ReviewPage />, {
+    initialEntries: ["/review?item=" + encodeURIComponent(item.item_id)],
+    queryClient,
+  });
 }
 
 describe("Duplicate evidence in Review Inbox", () => {
@@ -214,12 +217,15 @@ describe("Duplicate evidence in Review Inbox", () => {
 
   it("keeps the inbox usable after a duplicate endpoint failure", async () => {
     const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryDefaults(["duplicates"], { retryDelay: 0 });
     duplicateStatus = 500;
-    openFinding(unrelated);
+    openFinding(unrelated, queryClient);
     expect(await screen.findByRole("heading", { name: "Missing artist" })).toBeVisible();
     expect(duplicateRequests).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /Inspect finding: Exact finding/ }));
     expect(await screen.findByText(/Detailed duplicate evidence is unavailable/)).toBeVisible();
+    expect(duplicateRequests).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Mark Seen" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: /Inspect finding: Missing artist/ }));
     expect(screen.getByRole("heading", { name: "Missing artist" })).toBeVisible();
