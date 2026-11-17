@@ -1,5 +1,6 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchMetadataDrafts, fetchMetadataTrack, saveMetadataDrafts } from "../../lib/api";
@@ -19,6 +20,7 @@ export function MetadataEditButton({ path }: { path: string }) {
   const [, setSearch] = useSearchParams();
   return (
     <Button type="button" aria-label={`Edit metadata for ${pathFilename(path)}`} tone="secondary"
+      data-metadata-editor-path={path}
       onClick={() => setSearch((params) => {
         const next = new URLSearchParams(params);
         next.set("editTrack", path);
@@ -50,8 +52,26 @@ export function MetadataEditor() {
     enabled: Boolean(path), retry: false, refetchOnWindowFocus: false,
   });
   const drafts = useMetadataDrafts(Boolean(path));
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
+  const closingPath = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (path || !closingPath.current) return;
+    const targetPath = closingPath.current;
+    const frame = requestAnimationFrame(() => {
+      closingPath.current = null;
+      // Search can replace its result nodes while the editor is open.
+      const buttons = document.querySelectorAll<HTMLButtonElement>("button[data-metadata-editor-path]");
+      const trigger = Array.from(buttons).find((button) =>
+        button.dataset.metadataEditorPath === targetPath && button.getClientRects().length > 0,
+      );
+      trigger?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [path]);
 
   function close() {
+    closingPath.current = path;
     setSearch((previous) => {
       const next = new URLSearchParams(previous);
       next.delete("editTrack");
@@ -61,15 +81,24 @@ export function MetadataEditor() {
 
   if (!path) return null;
   const failure = track.error || drafts.error;
+  const ready = !failure && track.data && drafts.data && !track.isFetching;
   return (
-    <Modal open title="Edit track metadata" subtitle={pathFilename(path)} onClose={close}>
+    <Modal open title="Edit track metadata" subtitle={pathFilename(path)} onClose={close}
+      footer={ready && track.data?.readable ? <div className="w-full space-y-2" ref={setActionsTarget} /> : undefined}>
       {failure ? (
         <div className="space-y-3">
           <ActionBanner tone="error" message={failure.message} />
           <Button type="button" onClick={() => { void track.refetch(); void drafts.refetch(); }}>Retry inspection</Button>
         </div>
       ) : track.data && drafts.data && !track.isFetching ? (
-        <MetadataForm key={track.data.inspection} track={track.data} drafts={drafts.data} />
+        track.data.readable ? (
+          <MetadataForm key={track.data.inspection} track={track.data} drafts={drafts.data} actionsTarget={actionsTarget} />
+        ) : (
+          <div className="space-y-3">
+            <PathBlock value={track.data.path} />
+            <ActionBanner tone="error" message={track.data.write_blocker ?? "Embedded metadata could not be read."} />
+          </div>
+        )
       ) : <p className="text-sm text-primary-muted" role="status">Reading embedded metadata…</p>}
     </Modal>
   );
@@ -84,7 +113,11 @@ const CONFIDENCE_LABELS = {
   tentative: "Tentative", ambiguous: "Ambiguous",
 };
 
-function MetadataForm({ track, drafts }: { track: MetadataTrack; drafts: DraftSet }) {
+function MetadataForm({ track, drafts, actionsTarget }: {
+  track: MetadataTrack;
+  drafts: DraftSet;
+  actionsTarget: HTMLDivElement | null;
+}) {
   const id = useId();
   const existing = drafts.entries.find((entry) => entry.path === track.path);
   const [changes, setChanges] = useState<TagValues>(existing?.values ?? {});
@@ -129,12 +162,12 @@ function MetadataForm({ track, drafts }: { track: MetadataTrack; drafts: DraftSe
   }
 
   return (
-    <form onSubmit={stage} className="space-y-4">
+    <form id={id} onSubmit={stage} className="space-y-4">
       <PathBlock value={track.path} />
       {track.issues.length > 0 && <div className="flex flex-wrap gap-1.5">
         {track.issues.map((issue) => <Chip tone="warning" key={issue}>{ISSUE_LABELS[issue]}</Chip>)}
       </div>}
-      {!track.supported && <ActionBanner tone="info" message="This file can be inspected. Writing is available for readable MP3, FLAC, and M4A files with a single filesystem link." />}
+      {track.write_blocker && <ActionBanner tone="info" message={track.write_blocker} />}
       {staleDraft && <ActionBanner tone="warning" message="This staged edit is stale. Compare it with the current tags before staging it again." />}
       {generationChanged && <ActionBanner tone="warning" message="The library was refreshed. Close and reopen this track to inspect the latest values." />}
       {track.swap && track.supported && <Button type="button" tone="secondary" onClick={() => {
@@ -182,19 +215,24 @@ function MetadataForm({ track, drafts }: { track: MetadataTrack; drafts: DraftSe
       </div>
       <p className="text-xs text-primary-muted">Clearing tags is unavailable. Staging saves a proposal to the workspace without touching audio.</p>
       {full && <ActionBanner tone="warning" message="The batch is full. Review or remove an edit before staging another file." />}
-      {save.error && <ActionBanner tone="error" message={save.error.message} />}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" tone="primary" disabled={!track.supported || !ready || save.isPending}>
-          {save.isPending ? "Staging…" : "Stage metadata edit"}
-        </Button>
-        <Button type="button" disabled={!changedSinceStaging || save.isPending} onClick={() => {
-          setChanges(existing?.values ?? {});
-          setOrigins({});
-          setSaved(false);
-        }}>Discard unsaved edits</Button>
-        <MetadataDraftLink />
-      </div>
-      <p role="status" className="text-xs text-primary-muted">{saved ? "Staged in the workspace." : ready ? "Ready to stage." : invalid ? "Correct the highlighted values to stage this edit." : existing ? "A draft is staged." : "Enter a replacement to stage this track."}</p>
+      {actionsTarget && createPortal(
+        <>
+          {save.error && <ActionBanner tone="error" message={save.error.message} />}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" form={id} tone="primary" disabled={!track.supported || !ready || save.isPending}>
+              {save.isPending ? "Staging…" : "Stage metadata edit"}
+            </Button>
+            <Button type="button" disabled={!changedSinceStaging || save.isPending} onClick={() => {
+              setChanges(existing?.values ?? {});
+              setOrigins({});
+              setSaved(false);
+            }}>Discard unsaved edits</Button>
+            <MetadataDraftLink />
+          </div>
+          <p role="status" className="text-xs text-primary-muted">{saved ? "Staged in the workspace." : ready ? "Ready to stage." : invalid ? "Correct the highlighted values to stage this edit." : existing ? "A draft is staged." : "Enter a replacement to stage this track."}</p>
+        </>,
+        actionsTarget,
+      )}
     </form>
   );
 }

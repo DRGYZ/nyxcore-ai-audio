@@ -18,9 +18,10 @@ describe("metadata repair", () => {
   let applyRequests: unknown[];
   let revision: string;
   let planned: PlanInput | undefined;
+  let fileStatus: Partial<MetadataTrack>;
 
   const track = (path: string): MetadataTrack => ({
-    path, generation, supported: true, inspection: `inspection-${path}-${generation}`,
+    path, generation, supported: true, readable: true, write_blocker: null, inspection: `inspection-${path}-${generation}`,
     tags: { title: [], artist: ["Coltrane"], album: [] },
     issues: ["missing_title", "missing_album"], swap: false,
     suggestions: {
@@ -38,6 +39,7 @@ describe("metadata repair", () => {
     revision = "1";
     applyRequests = [];
     planned = undefined;
+    fileStatus = {};
     vi.stubGlobal("fetch", vi.fn(async (raw: string, options?: RequestInit) => {
       const url = new URL(raw, "http://127.0.0.1");
       const body = options?.body ? JSON.parse(String(options.body)) : undefined;
@@ -61,7 +63,7 @@ describe("metadata repair", () => {
           }],
         });
         case "/api/metadata/issues": return Response.json({ paths: [first], total: 78 });
-        case "/api/metadata/track": return Response.json(track(url.searchParams.get("path")!));
+        case "/api/metadata/track": return Response.json({ ...track(url.searchParams.get("path")!), ...fileStatus });
         case "/api/metadata/drafts":
           if (body) {
             entries = body.entries;
@@ -88,6 +90,24 @@ describe("metadata repair", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it("explains read-only files while keeping their embedded tags visible", async () => {
+    fileStatus = { supported: false, write_blocker: "This file is read-only. Check its permissions." };
+    renderWithProviders(<App />, { initialEntries: [`/health?editTrack=${encodeURIComponent(first)}`] });
+    const dialog = within(await screen.findByRole("dialog", { name: "Edit track metadata" }));
+    expect(await dialog.findByText(/file is read-only/)).toBeVisible();
+    expect(dialog.getByRole("textbox", { name: "Proposed artist" })).toHaveValue("Coltrane");
+    expect(dialog.getByRole("button", { name: "Stage metadata edit" })).toBeDisabled();
+  });
+
+  it("shows unreadable metadata without claiming that its tags are missing", async () => {
+    fileStatus = { readable: false, supported: false, write_blocker: "Embedded metadata could not be read." };
+    renderWithProviders(<App />, { initialEntries: [`/health?editTrack=${encodeURIComponent(first)}`] });
+    const dialog = within(await screen.findByRole("dialog", { name: "Edit track metadata" }));
+    expect(await dialog.findByRole("alert")).toHaveTextContent("Embedded metadata could not be read.");
+    expect(dialog.queryByText("Missing Title")).not.toBeInTheDocument();
+    expect(dialog.queryByRole("textbox")).not.toBeInTheDocument();
+  });
 
   it("opens from Health, validates and reverts edits, then stages another correction from Search", async () => {
     const user = userEvent.setup();

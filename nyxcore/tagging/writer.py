@@ -94,7 +94,8 @@ def write_tags(
             value = values[field]
             if field in fields and value and value.upper() != "UNKNOWN":
                 tags.setall(frame.__name__, [frame(encoding=1, text=[value])])
-        tags.save(path, v2_version=3 if tags.version[1] == 3 else 4)
+        # Preserve existing NUL-separated lists instead of flattening them with slashes.
+        tags.save(path, v2_version=3 if tags.version[1] == 3 else 4, v23_sep=None)
         return
 
     if "title" in fields and title and title.upper() != "UNKNOWN":

@@ -14,6 +14,8 @@ export type MetadataTrack = {
   path: string;
   tags: EmbeddedTags;
   supported: boolean;
+  readable: boolean;
+  write_blocker: string | null;
   issues: MetadataIssue[];
   suggestions: Record<MetadataField, {
     value: string | null;

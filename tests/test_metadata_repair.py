@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from mutagen import File as MutagenFile
-from mutagen.id3 import COMM, ID3
+from mutagen.id3 import COMM, ID3, TCON, TPE1, TXXX
 
 from nyxcore.action_plan import service
 from nyxcore.action_plan.lock import LibraryMutationLock
@@ -118,6 +119,59 @@ def test_disposable_batch_applies_verifies_and_undoes_all_three_formats(library)
     assert all(path.read_bytes() == before[path] for path in paths)
     assert client.get("/api/metadata/issues", params={"issue": "missing_artist"}).json()["total"] == 3
     assert client.post("/api/metadata/plan/apply", json=request).status_code == 409
+
+
+def test_id3v23_repair_preserves_unrelated_multiple_values(library):
+    path = synth(library[0], "Artist - Dawn.mp3")
+    tags = ID3(path, translate=False)
+    frames = [
+        TPE1(encoding=1, text=["Écho", "第二"]),
+        TCON(encoding=1, text=["Ambient", "Electronic"]),
+        TXXX(encoding=1, desc="catalog", text=["First", "二"]),
+    ]
+    for frame in frames:
+        tags.add(frame)
+    tags.save(path, v2_version=3, v23_sep=None)
+    before = path.read_bytes()
+    client = client_for(library)
+    request, _ = preview(client, [entry(inspection(client, path), album="New album")])
+    response = client.post("/api/metadata/plan/apply", json=request)
+    assert response.status_code == 200
+    assert response.json()["results"][0]["operation_results"][0]["status"] == "ok"
+    current = ID3(path, translate=False)
+    assert current.version[:2] == (2, 3)
+    assert all(current[frame.HashKey].text == frame.text for frame in frames)
+    assert current["TALB"].text == ["New album"]
+    batch_id = response.json()["batch_id"]
+    assert client.post(f"/api/history/{batch_id}/undo", json={}).status_code == 200
+    assert path.read_bytes() == before
+
+
+def test_metadata_reports_unreadable_tags_and_rechecks_write_permissions(library):
+    path = synth(library[0], "Artist - Dawn.flac")
+    malformed = library[0] / "Broken.flac"
+    malformed.write_bytes(b"fLaC" + bytes(49))
+    client = client_for(library)
+    broken = inspection(client, malformed)
+    assert not broken["readable"] and not broken["supported"]
+    assert not broken["issues"] and not broken["suggestions"]
+    assert "could not be read" in broken["write_blocker"]
+    before = path.read_bytes()
+    request, _ = preview(client, [entry(inspection(client, path), title="New title")])
+    original_mode = path.stat().st_mode
+    try:
+        path.chmod(stat.S_IREAD)
+        if os.access(path, os.W_OK):
+            pytest.skip("The effective user can write to a read-only file")
+        track = inspection(client, path)
+        assert track["readable"] and not track["supported"]
+        assert "read-only" in track["write_blocker"]
+        response = client.post("/api/metadata/plan/apply", json=request)
+        assert response.status_code == 409 and "read-only" in response.json()["detail"]
+        assert not (library[1] / "review_history.json").exists()
+        assert path.read_bytes() == before
+    finally:
+        path.chmod(original_mode)
 
 
 def test_inspection_suggestions_and_unsupported_files(library):

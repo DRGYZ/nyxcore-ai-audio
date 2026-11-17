@@ -340,12 +340,12 @@ export function AppShell({ children }: PropsWithChildren) {
           </main>
           <footer className="border-t border-white/[0.07] bg-surface-low/40 px-6 py-2.5 font-sans text-[11px] text-primary-subtle">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-4">
+              <div className="flex min-w-0 flex-wrap items-center gap-4">
                 <span className="flex items-center gap-1.5">
                   <span className={`size-1.5 rounded-full ${isConnected ? "bg-accent" : "bg-amber-400"}`} />
                   {isConnected ? "Local API Connected" : "Local API Unavailable"}
                 </span>
-                {isConnected && status?.music_path ? <span className="font-mono text-primary-muted">Library: {status.music_path}</span> : null}
+                {isConnected && status?.music_path ? <span className="min-w-0 font-mono text-primary-muted [overflow-wrap:anywhere]">Library: {status.music_path}</span> : null}
               </div>
               {isConnected ? (
                 <div className="flex flex-wrap gap-4 font-mono text-[10px]">

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import stat
 from dataclasses import dataclass
@@ -90,7 +91,8 @@ class ConfirmedProposal(ProposalSelection):
 class Inspection:
     path: Path
     tags: dict[str, list[str]]
-    supported: bool
+    readable: bool
+    write_blocker: str | None
     snapshot: tuple[FileIdentity, str]
 
 
@@ -120,6 +122,22 @@ def _track_path(root: Path, value: str) -> Path:
     return path
 
 
+def _write_blocker(path: Path, audio: object) -> str | None:
+    if not isinstance(audio, (EasyMP3, FLAC, EasyMP4)) or path.suffix.lower() not in {".mp3", ".flac", ".m4a"}:
+        return "Writing tags is available for compatible MP3, FLAC, and M4A files."
+    if path.stat().st_nlink != 1:
+        return "This file has multiple hard links. Use a separate copy before editing."
+    if not os.access(path, os.W_OK):
+        return "This file is read-only or your account cannot write to it. Check its permissions before staging."
+    if isinstance(audio, EasyMP3):
+        try:
+            if ID3(path, translate=False, load_v1=False).version[:2] not in {(2, 3), (2, 4)}:
+                return "This MP3 uses an unsupported ID3 version. Tag editing supports ID3v2.3 and ID3v2.4."
+        except ID3NoHeaderError:
+            pass
+    return None
+
+
 def _inspect(root: Path, value: str) -> Inspection:
     try:
         path = _track_path(root, value)
@@ -127,7 +145,8 @@ def _inspect(root: Path, value: str) -> Inspection:
         if before is None:
             raise ValueError("Choose a regular audio file.")
         tags = {field: [] for field in FIELDS}
-        supported = False
+        readable = False
+        blocker = "Embedded metadata could not be read. Check the file before editing."
         try:
             audio = MutagenFile(path, easy=True)
             stored = getattr(audio, "tags", None)
@@ -136,19 +155,14 @@ def _inspect(root: Path, value: str) -> Inspection:
                     values = stored.get(field)
                     if values is not None:
                         tags[field] = [str(item) for item in values] if isinstance(values, (list, tuple)) else [str(values)]
-            supported = (isinstance(audio, (EasyMP3, FLAC, EasyMP4))
-                         and path.suffix.lower() in {".mp3", ".flac", ".m4a"}
-                         and path.stat().st_nlink == 1)
-            if supported and isinstance(audio, EasyMP3):
-                try:
-                    supported = ID3(path, translate=False, load_v1=False).version[:2] in {(2, 3), (2, 4)}
-                except ID3NoHeaderError:
-                    pass
+            if audio is not None:
+                blocker = _write_blocker(path, audio)
+                readable = True
         except (MutagenError, KeyError, OSError, ValueError):
             pass
         if _track_path(root, value) != path or file_snapshot(path) != before:
             raise ValueError("The file changed during inspection. Reopen it and try again.")
-        return Inspection(path, tags, supported, before)
+        return Inspection(path, tags, readable, blocker, before)
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(409, "The file is missing, unreadable, or changed. Refresh the library and inspect it again.") from exc
 
@@ -253,8 +267,8 @@ def install_metadata_routes(
         inspected = _inspect(library(), entry.path)
         if not hmac.compare_digest(entry.inspection, inspection_proof(inspected, version)):
             raise HTTPException(409, f"File changed since inspection: {inspected.path.name}. Reopen and stage it again.")
-        if not inspected.supported:
-            raise HTTPException(409, f"Metadata writing is unavailable for {inspected.path.name}.")
+        if inspected.write_blocker:
+            raise HTTPException(409, f"Metadata writing is unavailable for {inspected.path.name}. {inspected.write_blocker}")
         changes = {field: value for field, value in entry.values.items() if inspected.tags[field] != [value]}
         if not changes:
             raise HTTPException(409, f"No metadata changes for {inspected.path.name}.")
@@ -299,8 +313,9 @@ def install_metadata_routes(
     def metadata_track(path: TrackPath) -> dict:
         version = generation()
         item = _inspect(library(), path)
-        issues, suggestions, swap = _suggest(item, settings())
-        return {"path": str(item.path), "tags": item.tags, "supported": item.supported, "issues": issues,
+        issues, suggestions, swap = _suggest(item, settings()) if item.readable else ([], {}, False)
+        return {"path": str(item.path), "tags": item.tags, "supported": item.write_blocker is None,
+                "readable": item.readable, "write_blocker": item.write_blocker, "issues": issues,
                 "suggestions": suggestions, "swap": swap, "generation": version,
                 "inspection": inspection_proof(item, version)}
 
