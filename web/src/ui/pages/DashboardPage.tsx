@@ -4,6 +4,7 @@ import {
   useDuplicatesQuery,
   useHealthQuery,
   useHistoryQuery,
+  useLibraryAnalysis,
   useReviewQuery,
   useStatusQuery,
 } from "../../lib/hooks";
@@ -31,8 +32,10 @@ export function DashboardPage() {
   const reviewQuery = useReviewQuery();
   const duplicatesQuery = useDuplicatesQuery();
   const historyQuery = useHistoryQuery();
+  const analysis = useLibraryAnalysis().data;
   const { checkConnection, checking } = useCheckConnection();
   const status = statusQuery.data;
+  const reviewOnly = status?.review_only === true;
 
   const refreshing =
     healthQuery.isFetching ||
@@ -54,7 +57,10 @@ export function DashboardPage() {
     );
   }
 
-  const firstFinding = reviewQuery.isError ? undefined : reviewQuery.data?.data.items.find(
+  const health = reviewOnly ? analysis?.health : healthQuery.data?.data;
+  const review = reviewOnly ? analysis?.review : reviewQuery.data?.data;
+  const duplicates = reviewOnly ? analysis?.duplicates : duplicatesQuery.data?.data;
+  const firstFinding = !reviewOnly && reviewQuery.isError ? undefined : review?.items.find(
     (item) => item.review_status === "new" || item.review_status === "seen",
   );
   const viewHeader = (
@@ -63,7 +69,7 @@ export function DashboardPage() {
         eyebrow="Library Overview"
         title="Overview"
         description="Inspect your local library, review findings, and preview proposed changes."
-        actions={status ? (
+        actions={status && !reviewOnly ? (
           <Button tone="secondary" onClick={() => void checkConnection()} disabled={refreshing}>
             <Icon name="refresh" className={`text-base ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Refreshing…" : "Refresh Overview"}
@@ -97,27 +103,24 @@ export function DashboardPage() {
     </>
   );
   const failedSections = [
-    healthQuery.isError && "library health",
-    reviewQuery.isError && "review findings",
-    duplicatesQuery.isError && "duplicates",
+    healthQuery.isError && !reviewOnly && "library health",
+    reviewQuery.isError && !reviewOnly && "review findings",
+    duplicatesQuery.isError && !reviewOnly && "duplicates",
     historyQuery.isError && "recent operations",
   ].filter(Boolean);
-  if (!status || failedSections.length || !healthQuery.data || !reviewQuery.data || !duplicatesQuery.data || !historyQuery.data) {
+  if (!status || failedSections.length || !health || !review || !duplicates || !historyQuery.data) {
     return (
       <div className="space-y-6">
         {viewHeader}
         {status && failedSections.length ? (
-          <ActionBanner tone="error" message={`The local API is connected. Overview could not load ${failedSections.join(", ")}. Use Refresh Overview to try again.`} />
-        ) : (
+          <ActionBanner tone="error" message={`The local API is connected. Overview could not load ${failedSections.join(", ")}. ${reviewOnly ? "Open History to retry." : "Use Refresh Overview to try again."}`} />
+        ) : !reviewOnly ? (
           <Panel className="p-8 text-center text-sm text-slate-400">Loading library data from local API…</Panel>
-        )}
+        ) : null}
       </div>
     );
   }
 
-  const health = healthQuery.data.data;
-  const review = reviewQuery.data.data;
-  const duplicates = duplicatesQuery.data.data;
   const history = historyQuery.data;
 
   const actionableReviewItems = review.items.filter(

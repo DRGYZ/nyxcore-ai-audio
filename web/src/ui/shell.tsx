@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, PropsWithChildren, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useReviewQuery, useStatusQuery } from "../lib/hooks";
-import { Chip, Icon } from "./components";
+import { useLibraryAnalysis, useRefreshLibrary, useReviewQuery, useStatusQuery } from "../lib/hooks";
+import { Button, Chip, Icon } from "./components";
 
 const navItems = [
   { to: "/", label: "Overview", icon: "dashboard" },
@@ -47,6 +47,36 @@ function SidebarLink({
         </span>
       ) : null}
     </NavLink>
+  );
+}
+
+function LibraryAnalysisStatus() {
+  const analysis = useLibraryAnalysis();
+  const refresh = useRefreshLibrary();
+  const error = refresh.error ?? analysis.error;
+  const date = analysis.data && new Date(analysis.data.analyzed_at).toLocaleString();
+
+  return (
+    <section aria-label="Library analysis" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-[3px] border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-primary">
+      <div className="min-w-0">
+        <p><strong>Review-only mode.</strong> Applying plans and reversing file changes are disabled.</p>
+        <p role="status" className="mt-1 text-xs text-primary-muted">
+          {refresh.isPending
+            ? (date ? "Refreshing library. Previous results remain available." : "Refreshing library…")
+            : date
+              ? `Analyzed ${date}. Use Refresh Library after changing files.`
+              : (error ? "Library analysis is unavailable." : "Analyzing library…")}
+        </p>
+        {error && !refresh.isPending ? (
+          <p role="alert" className="mt-1 break-words text-xs text-rose-300">
+            {error.message} {date ? "Showing the last successful analysis." : null}
+          </p>
+        ) : null}
+      </div>
+      <Button tone="secondary" disabled={refresh.isPending || analysis.isFetching} onClick={() => refresh.mutate()}>
+        {refresh.isPending ? "Refreshing Library…" : "Refresh Library"}
+      </Button>
+    </section>
   );
 }
 
@@ -304,11 +334,7 @@ export function AppShell({ children }: PropsWithChildren) {
           </header>
           <main className="flex-1 overflow-y-auto bg-background px-6 py-6 lg:px-8">
             <div className="mx-auto max-w-[1400px]">
-              {status?.review_only ? (
-                <p className="mb-4 rounded-[3px] border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-primary">
-                  <strong>Review-only mode.</strong> Browse findings, save triage decisions, and preview plans. Applying plans and reversing file changes are disabled.
-                </p>
-              ) : null}
+              {status?.review_only ? <LibraryAnalysisStatus /> : null}
               {children}
             </div>
           </main>

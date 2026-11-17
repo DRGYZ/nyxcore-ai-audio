@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_LABELS, HEALTH_BITRATE_BUCKET_ORDER } from "../../lib/contracts";
-import { useHealthQuery } from "../../lib/hooks";
+import { useHealthQuery, useStatusQuery } from "../../lib/hooks";
 import { ActionBanner, Button, Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, ProgressBar, formatNumber } from "../components";
 import { ApiUnavailableState } from "../feedback";
 
 export function HealthPage() {
   const navigate = useNavigate();
   const healthQuery = useHealthQuery();
+  const reviewOnly = useStatusQuery().data?.review_only === true;
   const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
-  if (healthQuery.isError) {
+  if (healthQuery.isError && !reviewOnly) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -31,9 +32,9 @@ export function HealthPage() {
           title="Library Health"
           description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
         />
-        <Panel className="p-8 text-center text-sm text-primary-muted">
-          Loading library health audit from local API…
-        </Panel>
+        {!reviewOnly ? (
+          <Panel className="p-8 text-center text-sm text-primary-muted">Loading library health audit from local API…</Panel>
+        ) : null}
       </div>
     );
   }
@@ -85,10 +86,12 @@ export function HealthPage() {
               <Icon name="download" className="text-sm" />
               Export JSON
             </Button>
-            <Button tone="secondary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
-              <Icon name="refresh" className={`text-sm ${healthQuery.isFetching ? "animate-spin" : ""}`} />
-              {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
-            </Button>
+            {!reviewOnly ? (
+              <Button tone="secondary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
+                <Icon name="refresh" className={`text-sm ${healthQuery.isFetching ? "animate-spin" : ""}`} />
+                {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -99,7 +102,7 @@ export function HealthPage() {
           label="Audio Files"
           value={formatNumber(report.overview.total_audio_files)}
           icon="library_music"
-          accent={<Chip tone="primary">Live</Chip>}
+          accent={<Chip tone="primary">{reviewOnly ? "Last analysis" : "Live"}</Chip>}
           meta={<p className="font-sans text-[11px] text-primary-subtle">{formatNumber(report.overview.total_folders_touched)} folders scanned</p>}
         />
         <MetricCard

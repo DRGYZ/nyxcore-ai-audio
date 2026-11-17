@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from nyxcore.config import NyxConfig
@@ -55,6 +56,8 @@ def build_review_pipeline(
     app_config: NyxConfig,
     review_state: ReviewStateStore,
     generation_mode: str,
+    reports: DuplicateHealthReports | None = None,
+    resolved_before: datetime | None = None,
     max_items: int | None = None,
     min_priority_band: str | None = None,
     include_types: set[str] | None = None,
@@ -64,7 +67,8 @@ def build_review_pipeline(
     include_resolved: bool = False,
     only_unresolved: bool = False,
 ) -> ReviewPipelineReports:
-    reports = build_duplicate_health_reports(music, records, app_config=app_config)
+    if reports is None:
+        reports = build_duplicate_health_reports(music, records, app_config=app_config)
     review_report = build_review_queue(
         records,
         health_report=reports.health_report,
@@ -79,6 +83,7 @@ def build_review_pipeline(
         include_types=include_types,
         exclude_types=exclude_types,
         review_state=review_state,
+        resolved_before=resolved_before,
         include_ignored=include_ignored,
         include_snoozed=include_snoozed,
         include_resolved=include_resolved,

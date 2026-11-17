@@ -126,6 +126,7 @@ def normalize_review_state(
     *,
     active_item_ids: set[str] | None = None,
     now: datetime | None = None,
+    resolved_before: datetime | None = None,
 ) -> bool:
     now = now or utc_now()
     changed = False
@@ -139,6 +140,13 @@ def normalize_review_state(
                 entry.updated_at = now_iso
                 changed = True
         if active_item_ids is not None and entry.status == "resolved" and entry.item_id in active_item_ids:
+            if resolved_before is not None:
+                try:
+                    updated_at = _parse_iso(entry.updated_at)
+                except ValueError:
+                    updated_at = None
+                if updated_at and updated_at.replace(tzinfo=updated_at.tzinfo or UTC) > resolved_before:
+                    continue
             entry.status = "seen"
             entry.updated_at = now_iso
             changed = True

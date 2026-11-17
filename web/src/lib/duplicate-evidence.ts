@@ -12,8 +12,12 @@ export function duplicateKind(itemType?: string): DuplicateKind | undefined {
 }
 
 export function sameDuplicateLibrary(left?: ApiMeta, right?: ApiMeta) {
-  return left?.mode === "live" && right?.mode === "live" && Boolean(left.music_path)
-    && left.music_path === right.music_path && left.active_profile === right.active_profile;
+  if (!left?.music_path || !right || left.mode !== right.mode
+      || left.music_path !== right.music_path || left.active_profile !== right.active_profile) {
+    return false;
+  }
+  return left.mode === "live" || (left.mode === "snapshot"
+    && Boolean(left.analysis_generation) && left.analysis_generation === right.analysis_generation);
 }
 
 function sameMembers(left: readonly unknown[], right: readonly unknown[]) {

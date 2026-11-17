@@ -25,6 +25,8 @@ py -3.12 -m venv .venv
 
 NyxCore prints its local URL and opens your browser when ready. Check **Active library** in Overview. In **Review Inbox**, choose the exact duplicate finding for **Blue Hour**, select **Generate Plan**, and inspect which copy the plan would keep.
 
+The first analysis can take time on a large library. Select **Refresh Library** after adding, removing, or editing files. Browsing uses the last successful analysis. A failed refresh leaves those results visible and lets you retry.
+
 To switch libraries or stop the service, press **Ctrl+C** in the launcher terminal. Restart with an existing library and a separate, non-overlapping workspace. Use a different workspace for each library.
 
 ```powershell

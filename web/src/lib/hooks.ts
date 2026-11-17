@@ -6,17 +6,26 @@ import {
   fetchDuplicates,
   fetchHealth,
   fetchHistory,
+  fetchLibraryReports,
   fetchPlaylists,
   fetchReview,
   fetchArchiveSearch,
   fetchStatus,
   generateReviewPlan,
   mutateReviewState,
+  refreshLibrary,
   refreshPlaylist,
   restoreHistoryBatch,
   undoHistoryBatch,
 } from "./api";
-import type { ReportEnvelope, ReviewReport } from "./types";
+import type { LibraryReports, ReportEnvelope, ReviewReport } from "./types";
+
+const libraryQuery = {
+  queryKey: ["library"],
+  queryFn: fetchLibraryReports,
+  staleTime: 30_000,
+  retry: false,
+};
 
 export function useCheckConnection() {
   const queryClient = useQueryClient();
@@ -31,6 +40,7 @@ export function useCheckConnection() {
         queryClient.invalidateQueries({ queryKey: ["review"] }),
         queryClient.invalidateQueries({ queryKey: ["duplicates"] }),
         queryClient.invalidateQueries({ queryKey: ["history"] }),
+        queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey }),
       ]);
     } finally {
       setChecking(false);
@@ -44,24 +54,65 @@ export function useStatusQuery() {
   return useQuery({ queryKey: ["status"], queryFn: fetchStatus, retry: 1 });
 }
 
+export function useLibraryAnalysis() {
+  const reviewOnly = useStatusQuery().data?.review_only === true;
+  return useQuery({ ...libraryQuery, enabled: reviewOnly });
+}
+
+export function useRefreshLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await refreshLibrary();
+      await queryClient.cancelQueries({ queryKey: libraryQuery.queryKey });
+      try {
+        await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey }, { throwOnError: true });
+      } catch {
+        throw new Error("The library was scanned, but the updated reports could not be loaded. Try Refresh Library again.");
+      }
+    },
+  });
+}
+
+function useLibraryReport<T>(
+  key: string,
+  legacyFetch: () => Promise<ReportEnvelope<T>>,
+  select: (library: LibraryReports) => ReportEnvelope<T>,
+  enabled = true,
+) {
+  const status = useStatusQuery();
+  const shared = status.data?.review_only === true;
+  const snapshot = useQuery({ ...libraryQuery, enabled: enabled && shared, select });
+  const individual = useQuery({
+    queryKey: [key], queryFn: legacyFetch, enabled: enabled && status.isFetched && !shared, retry: 1,
+  });
+  return shared ? snapshot : individual;
+}
+
+const selectHealth = ({ meta, health }: LibraryReports) => ({ meta, data: health });
+const selectReview = ({ meta, review }: LibraryReports) => ({ meta, data: review });
+const selectDuplicates = ({ meta, duplicates }: LibraryReports) => ({ meta, data: duplicates });
+
 export function useHealthQuery() {
-  return useQuery({ queryKey: ["health"], queryFn: fetchHealth, retry: 1 });
+  return useLibraryReport("health", fetchHealth, selectHealth);
 }
 
 export function useReviewQuery() {
-  return useQuery({ queryKey: ["review"], queryFn: fetchReview, retry: 1 });
+  return useLibraryReport("review", fetchReview, selectReview);
 }
 
 export function useDuplicatesQuery(enabled = true) {
-  return useQuery({ queryKey: ["duplicates"], queryFn: fetchDuplicates, enabled });
+  return useLibraryReport("duplicates", fetchDuplicates, selectDuplicates, enabled);
 }
 
 export function useArchiveSearchQuery(query: string) {
   const normalizedQuery = query.trim();
+  const reviewOnly = useStatusQuery().data?.review_only === true;
+  const generation = useLibraryAnalysis().data?.meta.analysis_generation;
   return useQuery({
-    queryKey: ["search", normalizedQuery],
+    queryKey: ["search", generation, normalizedQuery],
     queryFn: () => fetchArchiveSearch(normalizedQuery),
-    enabled: normalizedQuery.length >= 2,
+    enabled: normalizedQuery.length >= 2 && (!reviewOnly || Boolean(generation)),
   });
 }
 
@@ -124,6 +175,7 @@ export function useReviewStateMutation() {
       }
     },
     onSettled: (_data, error, variables) => {
+      queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
       // Keep a successful resolution visible until the next explicit or natural
       // refresh. That refresh is the scan boundary that may reactivate it.
       if (error || variables.action !== "resolved") {

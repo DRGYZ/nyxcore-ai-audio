@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useArchiveSearchQuery } from "../../lib/hooks";
+import { useArchiveSearchQuery, useStatusQuery } from "../../lib/hooks";
 import { ActionBanner, Button, Chip, EmptyState, Icon, PageHeader, Panel, PathBlock, formatBytes, formatNumber } from "../components";
 import { ApiUnavailableState } from "../feedback";
 
@@ -19,6 +19,7 @@ export function SearchPage() {
   const query = (searchParams.get("q") ?? "").trim();
   const [draft, setDraft] = useState(query);
   const searchQuery = useArchiveSearchQuery(query);
+  const reviewOnly = useStatusQuery().data?.review_only === true;
 
   useEffect(() => {
     setDraft(query);
@@ -60,7 +61,7 @@ export function SearchPage() {
           </label>
           <Button type="submit" tone="primary" disabled={draft.trim().length < 2 || searchQuery.isFetching}>
             <Icon name="manage_search" className="text-base" />
-            {searchQuery.isFetching ? "Scanning…" : "Search Library"}
+            {searchQuery.isFetching ? "Searching…" : "Search Library"}
           </Button>
         </form>
       </Panel>
@@ -68,12 +69,16 @@ export function SearchPage() {
       {!query ? (
         <EmptyState
           title="Search your local archive"
-          description="Enter at least two characters. NyxCore reads the current library metadata directly from disk."
+          description={reviewOnly
+            ? "Enter at least two characters to search the last library analysis."
+            : "Enter at least two characters to search the library metadata."}
         />
-      ) : searchQuery.isPending ? (
-        <ActionBanner tone="info" message={`Scanning the local library for “${query}”…`} />
+      ) : searchQuery.isLoading ? (
+        <ActionBanner tone="info" message={`Searching for “${query}”…`} />
       ) : searchQuery.isError ? (
-        <ApiUnavailableState contextLabel="Archive Search" />
+        reviewOnly
+          ? <ActionBanner tone="error" message="Search could not load. Try Refresh Library again." />
+          : <ApiUnavailableState contextLabel="Archive Search" />
       ) : response && response.items.length === 0 ? (
         <EmptyState
           title={`No matches for “${response.query}”`}

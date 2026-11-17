@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import nullcontext
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +29,7 @@ from nyxcore.incremental.service import ChangeSet, RefreshSummary
 from nyxcore.report_pipeline import build_duplicate_health_reports, build_duplicate_report, build_review_pipeline
 from nyxcore.review_queue.state import apply_review_action, load_review_state, save_review_state
 from nyxcore.search.service import search_tracks
+from nyxcore.webapi.analysis import LibrarySnapshot, ReviewOnlyAnalysis
 from nyxcore.saved_playlists.service import (
     SavedPlaylistDefinition,
     SavedPlaylistLatestResult,
@@ -45,6 +49,7 @@ from nyxcore.webapi.schemas import (
     HistoryMutationResponse,
     HistoryOperationResponse,
     HistoryResponse,
+    LibraryReportsResponse,
     PlaylistsResponse,
     PlaylistCreateRequest,
     PlaylistMutationResponse,
@@ -58,6 +63,8 @@ from nyxcore.webapi.schemas import (
     SearchResponse,
     SearchTrackResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _default_music_path() -> Path:
@@ -113,8 +120,16 @@ def _resolve_config(config_path: str | None, profile: str | None) -> NyxConfig:
     return load_config(candidate, profile=profile)
 
 
-def _meta(music_path: Path, out_path: Path, app_config: NyxConfig) -> ApiMetaResponse:
-    return ApiMetaResponse(music_path=str(music_path), out_path=str(out_path), active_profile=app_config.profile)
+def _meta(
+    music_path: Path, out_path: Path, app_config: NyxConfig, analysis: LibrarySnapshot | None = None,
+) -> ApiMetaResponse:
+    return ApiMetaResponse(
+        music_path=str(music_path),
+        out_path=str(out_path),
+        active_profile=app_config.profile,
+        mode="snapshot" if analysis else "live",
+        analysis_generation=analysis.generation if analysis else None,
+    )
 
 
 def _load_records(music_path: Path):
@@ -157,6 +172,7 @@ def _build_review_dependencies(
     out_path: Path,
     app_config: NyxConfig,
     *,
+    analysis: LibrarySnapshot | None = None,
     max_items: int | None = None,
     min_priority: str | None = None,
     include_ignored: bool = False,
@@ -164,14 +180,16 @@ def _build_review_dependencies(
     include_resolved: bool = False,
     only_unresolved: bool = False,
 ):
-    records = _load_records(music_path)
+    records = analysis.records if analysis else _load_records(music_path)
     review_state = load_review_state(out_path / "review_state.json")
     pipeline = build_review_pipeline(
         music_path,
         records,
         app_config=app_config,
         review_state=review_state,
-        generation_mode="live",
+        generation_mode="snapshot" if analysis else "live",
+        reports=analysis.reports if analysis else None,
+        resolved_before=analysis.started_at if analysis else None,
         max_items=max_items,
         min_priority_band=min_priority,
         include_ignored=include_ignored,
@@ -189,6 +207,8 @@ def create_app(
     review_only: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="NyxCore Web API", version=__version__)
+    analysis_store = ReviewOnlyAnalysis(_load_records) if review_only else None
+    review_state_lock = Lock() if review_only else nullcontext()
     if not review_only:
         app.add_middleware(
             CORSMiddleware,
@@ -217,6 +237,53 @@ def create_app(
                 status_code=403,
                 detail="This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled.",
             )
+
+    def load_analysis(music: Path, config: NyxConfig, *, refresh: bool = False) -> LibrarySnapshot | None:
+        if analysis_store is None:
+            return None
+        try:
+            return analysis_store.get(music, config, refresh=refresh)
+        except Exception as exc:
+            logger.exception("Could not analyze the configured library")
+            raise HTTPException(
+                status_code=503, detail="Library analysis failed. Check the library folder and try Refresh Library again.",
+            ) from exc
+
+    if review_only:
+        @app.get("/api/library", response_model=LibraryReportsResponse)
+        def library_reports(
+            music_path: str | None = Query(default=None),
+            out_path: str | None = Query(default=None),
+            profile: str | None = Query(default=None),
+            config_path: str | None = Query(default=None),
+        ) -> LibraryReportsResponse:
+            music = _resolve_music_path(music_path)
+            out = _resolve_out_path(out_path)
+            config = _resolve_config(config_path, profile)
+            analysis = load_analysis(music, config)
+            assert analysis is not None
+            _, duplicates, health, _, review = _build_review_dependencies(
+                music, out, config, analysis=analysis, include_snoozed=True, include_resolved=True,
+            )
+            return LibraryReportsResponse(
+                meta=_meta(music, out, config, analysis),
+                analyzed_at=analysis.analyzed_at,
+                health=health.to_dict(),
+                duplicates=duplicates.to_dict(),
+                review=review.to_dict(),
+            )
+
+        @app.post("/api/library/refresh", response_model=ApiMetaResponse)
+        def refresh_library(
+            music_path: str | None = Query(default=None),
+            out_path: str | None = Query(default=None),
+            profile: str | None = Query(default=None),
+            config_path: str | None = Query(default=None),
+        ) -> ApiMetaResponse:
+            music = _resolve_music_path(music_path)
+            out = _resolve_out_path(out_path)
+            config = _resolve_config(config_path, profile)
+            return _meta(music, out, config, load_analysis(music, config, refresh=True))
 
     @app.get("/api/status", response_model=ApiStatusResponse)
     def status(
@@ -249,10 +316,12 @@ def create_app(
         resolved_music = _resolve_music_path(music_path)
         resolved_out = _resolve_out_path(out_path)
         app_config = _resolve_config(config_path, profile)
-        records = _load_records(resolved_music)
-        report = build_duplicate_report(records, app_config=app_config)
+        analysis = load_analysis(resolved_music, app_config)
+        report = analysis.reports.duplicate_report if analysis else build_duplicate_report(
+            _load_records(resolved_music), app_config=app_config,
+        )
         return ApiReportEnvelope(
-            meta=_meta(resolved_music, resolved_out, app_config),
+            meta=_meta(resolved_music, resolved_out, app_config, analysis),
             data=report.to_dict(),
         )
 
@@ -268,7 +337,8 @@ def create_app(
         resolved_music = _resolve_music_path(music_path)
         resolved_out = _resolve_out_path(out_path)
         app_config = _resolve_config(config_path, profile)
-        records = _load_records(resolved_music)
+        analysis = load_analysis(resolved_music, app_config)
+        records = analysis.records if analysis else _load_records(resolved_music)
         total_matches, results = search_tracks(records, q, limit=limit)
         items = [
             SearchTrackResponse(
@@ -286,7 +356,7 @@ def create_app(
             for result in results
         ]
         return SearchResponse(
-            meta=_meta(resolved_music, resolved_out, app_config),
+            meta=_meta(resolved_music, resolved_out, app_config, analysis),
             query=q,
             total_matches=total_matches,
             returned_count=len(items),
@@ -303,10 +373,12 @@ def create_app(
         resolved_music = _resolve_music_path(music_path)
         resolved_out = _resolve_out_path(out_path)
         app_config = _resolve_config(config_path, profile)
-        records = _load_records(resolved_music)
-        report = build_duplicate_health_reports(resolved_music, records, app_config=app_config).health_report
+        analysis = load_analysis(resolved_music, app_config)
+        report = analysis.reports.health_report if analysis else build_duplicate_health_reports(
+            resolved_music, _load_records(resolved_music), app_config=app_config,
+        ).health_report
         return ApiReportEnvelope(
-            meta=_meta(resolved_music, resolved_out, app_config),
+            meta=_meta(resolved_music, resolved_out, app_config, analysis),
             data=report.to_dict(),
         )
 
@@ -326,10 +398,12 @@ def create_app(
         resolved_music = _resolve_music_path(music_path)
         resolved_out = _resolve_out_path(out_path)
         app_config = _resolve_config(config_path, profile)
+        analysis = load_analysis(resolved_music, app_config)
         _records, _duplicates_report, _health_report, _review_state, report = _build_review_dependencies(
             resolved_music,
             resolved_out,
             app_config,
+            analysis=analysis,
             max_items=max_items,
             min_priority=min_priority,
             include_ignored=include_ignored,
@@ -338,7 +412,7 @@ def create_app(
             only_unresolved=only_unresolved,
         )
         return ApiReportEnvelope(
-            meta=_meta(resolved_music, resolved_out, app_config),
+            meta=_meta(resolved_music, resolved_out, app_config, analysis),
             data=report.to_dict(),
         )
 
@@ -347,24 +421,30 @@ def create_app(
         resolved_music = _resolve_music_path(request.music_path)
         resolved_out = _resolve_out_path(request.out_path)
         app_config = _resolve_config(request.config_path, request.profile)
-        _records, _duplicates_report, _health_report, review_state, review_report = _build_review_dependencies(
-            resolved_music, resolved_out, app_config
-        )
-        item_type_by_id = {item.item_id: item.item_type for item in review_report.items}
-        summary_by_id = {item.item_id: item.summary for item in review_report.items}
-        missing = sorted(item_id for item_id in request.item_ids if item_id not in item_type_by_id)
-        if missing:
-            raise HTTPException(status_code=404, detail=f"Review item(s) not found: {', '.join(missing)}")
-        apply_review_action(
-            review_state,
-            item_ids=request.item_ids,
-            status=request.action,
-            days=request.days,
-            item_type_by_id=item_type_by_id,
-            summary_by_id=summary_by_id,
-        )
-        review_state_path = resolved_out / "review_state.json"
-        save_review_state(review_state_path, review_state)
+        analysis = load_analysis(resolved_music, app_config)
+        with review_state_lock:
+            _records, _duplicates_report, _health_report, review_state, review_report = _build_review_dependencies(
+                resolved_music, resolved_out, app_config,
+                analysis=analysis,
+                include_resolved=analysis is not None,
+                include_ignored=analysis is not None,
+                include_snoozed=analysis is not None,
+            )
+            item_type_by_id = {item.item_id: item.item_type for item in review_report.items}
+            summary_by_id = {item.item_id: item.summary for item in review_report.items}
+            missing = sorted(item_id for item_id in request.item_ids if item_id not in item_type_by_id)
+            if missing:
+                raise HTTPException(status_code=404, detail=f"Review item(s) not found: {', '.join(missing)}")
+            apply_review_action(
+                review_state,
+                item_ids=request.item_ids,
+                status=request.action,
+                days=request.days,
+                item_type_by_id=item_type_by_id,
+                summary_by_id=summary_by_id,
+            )
+            review_state_path = resolved_out / "review_state.json"
+            save_review_state(review_state_path, review_state)
         return ReviewStateMutationResponse(
             updated_item_ids=list(request.item_ids),
             status=request.action,
@@ -376,8 +456,9 @@ def create_app(
         resolved_music = _resolve_music_path(request.music_path)
         resolved_out = _resolve_out_path(request.out_path)
         app_config = _resolve_config(request.config_path, request.profile)
+        analysis = load_analysis(resolved_music, app_config)
         records, duplicates_report, health_report, review_state, review_report = _build_review_dependencies(
-            resolved_music, resolved_out, app_config
+            resolved_music, resolved_out, app_config, analysis=analysis,
         )
         del duplicates_report, health_report, review_state
         plan_report = build_action_plan_report(
@@ -386,7 +467,7 @@ def create_app(
             review_report,
             source_review_item_ids=list(request.item_ids),
         )
-        return ApiReportEnvelope(meta=_meta(resolved_music, resolved_out, app_config), data=plan_report.to_dict())
+        return ApiReportEnvelope(meta=_meta(resolved_music, resolved_out, app_config, analysis), data=plan_report.to_dict())
 
     @app.post("/api/review/plan/apply", response_model=ReviewPlanApplyResponse)
     def apply_review_plan(request: ReviewPlanApplyRequest) -> ReviewPlanApplyResponse:

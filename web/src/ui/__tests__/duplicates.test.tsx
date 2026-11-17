@@ -70,6 +70,7 @@ describe("Duplicate comparison", () => {
     reviewItems = [wrongFinding, ...matchingFindings];
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const path = new URL(url, "http://localhost").pathname;
+      if (path === "/api/status") return Response.json({ status: "ok", review_only: false });
       if (path === "/api/duplicates") return Response.json({ meta, data: report });
       if (path === "/api/review") return Response.json({ meta, data: { items: reviewItems } });
       throw new Error("Unexpected request to " + path);

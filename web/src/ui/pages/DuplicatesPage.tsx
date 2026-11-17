@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { matchesDuplicateFinding, sameDuplicateLibrary } from "../../lib/duplicate-evidence";
-import { useDuplicatesQuery, useReviewQuery } from "../../lib/hooks";
+import { useDuplicatesQuery, useReviewQuery, useStatusQuery } from "../../lib/hooks";
 import { Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, formatBytes, formatNumber } from "../components";
 import { DuplicateComparison } from "../duplicates/DuplicateComparison";
 import { ApiUnavailableState } from "../feedback";
@@ -14,17 +14,18 @@ const tabs = [
 export function DuplicatesPage() {
   const navigate = useNavigate();
   const duplicatesQuery = useDuplicatesQuery();
+  const reviewOnly = useStatusQuery().data?.review_only === true;
   const reviewQuery = useReviewQuery();
   const [activeTab, setActiveTab] = useState<"exact" | "likely">("exact");
   const header = <PageHeader eyebrow="Duplicate Detection" title="Duplicates" description="Compare copies, inspect match evidence, and decide what to keep." />;
 
-  if (duplicatesQuery.isError || !duplicatesQuery.data) {
+  if (!duplicatesQuery.data || (duplicatesQuery.isError && !reviewOnly)) {
     return (
       <div className="space-y-6">
         {header}
-        {duplicatesQuery.isError ? <ApiUnavailableState contextLabel="Duplicates" /> : (
+        {!reviewOnly && (duplicatesQuery.isError ? <ApiUnavailableState contextLabel="Duplicates" /> : (
           <Panel className="p-8 text-center text-sm text-primary-muted">Loading duplicate findings from local API…</Panel>
-        )}
+        ))}
       </div>
     );
   }
@@ -32,7 +33,7 @@ export function DuplicatesPage() {
   const report = duplicatesQuery.data.data;
   const root = duplicatesQuery.data.meta.music_path;
   const review = reviewQuery.data;
-  const reviewItems = !reviewQuery.isError && review && sameDuplicateLibrary(duplicatesQuery.data.meta, review.meta)
+  const reviewItems = (reviewOnly || !reviewQuery.isError) && review && sameDuplicateLibrary(duplicatesQuery.data.meta, review.meta)
     ? review.data.items : [];
   const additionalBytes = report.exact_duplicates.reduce((sum, group) => {
     if (!group.files.some((file) => file.path === group.preferred.path)) return sum;

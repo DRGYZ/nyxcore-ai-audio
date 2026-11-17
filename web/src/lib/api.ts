@@ -1,9 +1,11 @@
 import type {
   ActionPlanReport,
+  ApiMeta,
   DuplicateReport,
   HealthReport,
   HistoryMutationResponse,
   HistoryResponse,
+  LibraryReports,
   PlaylistMutationResponse,
   PlaylistsResponse,
   ReportEnvelope,
@@ -19,27 +21,12 @@ const API_BASE_URL = import.meta.env.PROD
   ? "/api"
   : (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api");
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     try {
       const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) {
+      if (typeof payload.detail === "string") {
         detail = payload.detail;
       }
     } catch {
@@ -48,6 +35,26 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     throw new Error(detail);
   }
   return response.json() as Promise<T>;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  return readJson<T>(await fetch(`${API_BASE_URL}${path}`));
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  return readJson<T>(await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+}
+
+export function fetchLibraryReports() {
+  return getJson<LibraryReports>("/library");
+}
+
+export function refreshLibrary() {
+  return postJson<ApiMeta>("/library/refresh", {});
 }
 
 export function fetchStatus() {

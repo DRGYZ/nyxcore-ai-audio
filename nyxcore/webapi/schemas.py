@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 ApiStatus = Literal["ok"]
-ApiMode = Literal["live"]
+ApiMode = Literal["live", "snapshot"]
 ReviewStateAction = Literal["seen", "snoozed", "ignored", "resolved"]
 OperationExecutionStatus = Literal["ok", "error", "skipped"]
 PlanExecutionStatus = Literal["ok", "partial_failure", "skipped"]
@@ -32,11 +33,20 @@ class ApiMetaResponse(BaseModel):
     out_path: str
     active_profile: str
     mode: ApiMode = "live"
+    analysis_generation: str | None = None
 
 
 class ApiReportEnvelope(BaseModel):
     meta: ApiMetaResponse
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class LibraryReportsResponse(BaseModel):
+    meta: ApiMetaResponse
+    analyzed_at: datetime
+    health: dict[str, Any]
+    duplicates: dict[str, Any]
+    review: dict[str, Any]
 
 
 class SearchTrackResponse(BaseModel):

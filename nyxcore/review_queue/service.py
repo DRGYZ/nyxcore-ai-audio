@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import hashlib
 import json
 import os
@@ -236,6 +238,7 @@ class ReviewQueueBuilder:
         include_types: set[str] | None = None,
         exclude_types: set[str] | None = None,
         review_state: ReviewStateStore | None = None,
+        resolved_before: datetime | None = None,
         include_ignored: bool = False,
         include_snoozed: bool = False,
         include_resolved: bool = False,
@@ -264,7 +267,9 @@ class ReviewQueueBuilder:
             state_store,
             canonical_item_ids_by_alias=_signature_alias_map(items, state_store),
         )
-        normalize_review_state(state_store, active_item_ids={item.item_id for item in items})
+        normalize_review_state(
+            state_store, active_item_ids={item.item_id for item in items}, resolved_before=resolved_before,
+        )
         for item in items:
             entry = state_store.items.get(item.item_id)
             if entry is not None:
@@ -614,6 +619,7 @@ def build_review_queue(
     include_types: set[str] | None = None,
     exclude_types: set[str] | None = None,
     review_state: ReviewStateStore | None = None,
+    resolved_before: datetime | None = None,
     include_ignored: bool = False,
     include_snoozed: bool = False,
     include_resolved: bool = False,
@@ -641,6 +647,7 @@ def build_review_queue(
         include_types=include_types,
         exclude_types=exclude_types,
         review_state=review_state,
+        resolved_before=resolved_before,
         include_ignored=include_ignored,
         include_snoozed=include_snoozed,
         include_resolved=include_resolved,

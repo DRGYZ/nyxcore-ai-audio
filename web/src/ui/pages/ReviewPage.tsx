@@ -43,6 +43,7 @@ const REVIEW_STATUS_FILTERS = [
 type PlanPreview = {
   report: ActionPlanReport;
   root?: string;
+  generation?: string | null;
   duplicate?: { kind: DuplicateKind; itemId: string; meta?: ApiMeta };
 };
 
@@ -107,15 +108,25 @@ export function ReviewPage() {
   });
 
   const reviewMeta = reviewQuery.data?.meta;
+  useEffect(() => {
+    if (plan?.generation && reviewMeta?.analysis_generation && plan.generation !== reviewMeta.analysis_generation) {
+      setPlan(null);
+      setConfirmApply(false);
+      setSelectedOperationIds(new Set());
+      setBanner({ tone: "info", message: "The library was refreshed. Generate a new preview from the latest findings." });
+    }
+  }, [plan?.generation, reviewMeta?.analysis_generation]);
   const selectedKind = duplicateKind(selected?.item_type);
-  const duplicateQuery = useDuplicatesQuery(!reviewQuery.isError && Boolean(selectedKind || plan?.duplicate));
+  const duplicateQuery = useDuplicatesQuery((reviewOnly || !reviewQuery.isError) && Boolean(selectedKind || plan?.duplicate));
 
   function evidenceFor(item: ReviewItem | undefined, kind: DuplicateKind): DuplicateEvidence {
-    if (!duplicateQuery.isError && (duplicateQuery.isPending || duplicateQuery.isFetching || reviewQuery.isFetching)) {
+    if (!duplicateQuery.isError && (
+      duplicateQuery.isPending || (!reviewOnly && (duplicateQuery.isFetching || reviewQuery.isFetching))
+    )) {
       return { kind, status: "loading" };
     }
     const duplicates = duplicateQuery.data;
-    if (item && !duplicateQuery.isError && duplicates && sameDuplicateLibrary(reviewMeta, duplicates.meta)) {
+    if (item && (reviewOnly || !duplicateQuery.isError) && duplicates && sameDuplicateLibrary(reviewMeta, duplicates.meta)) {
       const group = findDuplicateGroup(kind, item, duplicates.data);
       if (group) return { kind, status: "matched", group, root: duplicates.meta.music_path };
     }
@@ -167,7 +178,7 @@ export function ReviewPage() {
     </div>
   ) : null;
 
-  if (reviewQuery.isError) {
+  if (reviewQuery.isError && !reviewOnly) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -190,9 +201,9 @@ export function ReviewPage() {
           description={description}
         />
         {outcome}
-        <Panel className="p-8 text-center text-sm text-slate-400">
-          Loading review findings from local API…
-        </Panel>
+        {!reviewOnly ? (
+          <Panel className="p-8 text-center text-sm text-slate-400">Loading review findings from local API…</Panel>
+        ) : null}
       </div>
     );
   }
@@ -232,6 +243,7 @@ export function ReviewPage() {
       setPlan({
         report: response.data,
         root: response.meta?.music_path ?? reviewMeta?.music_path,
+        generation: response.meta?.analysis_generation,
         duplicate: selectedKind ? { kind: selectedKind, itemId: selected.item_id, meta: response.meta } : undefined,
       });
       setSelectedOperationIds(new Set());
@@ -275,12 +287,12 @@ export function ReviewPage() {
           </span>
         }
         description={description}
-        actions={
+        actions={!reviewOnly ? (
           <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
             <Icon name="refresh" className={`text-base ${reviewQuery.isFetching || checking ? "animate-spin" : ""}`} />
             {reviewQuery.isFetching || checking ? "Refreshing…" : "Refresh Inbox"}
           </Button>
-        }
+        ) : undefined}
       />
       {banner ? <ActionBanner tone={banner.tone} message={banner.message} /> : null}
       {outcome}

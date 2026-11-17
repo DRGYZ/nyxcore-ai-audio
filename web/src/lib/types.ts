@@ -1,7 +1,7 @@
 export type PriorityBand = "high" | "medium" | "low";
 export type ReviewStatus = "new" | "seen" | "snoozed" | "ignored" | "resolved";
 export type ReviewStateAction = Exclude<ReviewStatus, "new">;
-export type ReportMode = "live" | "mock";
+export type ReportMode = "live" | "snapshot" | "mock";
 export type OperationExecutionStatus = "ok" | "error" | "skipped";
 export type PlanExecutionStatus = "ok" | "partial_failure" | "skipped";
 export type UndoExecutionStatus = "pending" | "ok" | "error" | "not_supported";
@@ -15,6 +15,7 @@ export interface ApiMeta {
   out_path: string;
   active_profile: string;
   mode: ReportMode;
+  analysis_generation?: string | null;
 }
 
 export interface StatusResponse {
@@ -32,6 +33,14 @@ export interface StatusResponse {
 export interface ReportEnvelope<T> {
   meta: ApiMeta;
   data: T;
+}
+
+export interface LibraryReports {
+  meta: ApiMeta;
+  analyzed_at: string;
+  health: HealthReport;
+  duplicates: DuplicateReport;
+  review: ReviewReport;
 }
 
 export interface SearchTrack {
