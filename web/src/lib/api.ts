@@ -17,6 +17,7 @@ import type {
   StatusResponse,
 } from "./types";
 import type { DraftSet, MetadataIssue, MetadataPlan, MetadataProposal, MetadataTrack, PlanInput } from "./metadata";
+import type { CoverChoice, LookupQuery, LookupResult, MusicSource, SelectedCover } from "./enrichment";
 
 const API_BASE_URL = import.meta.env.PROD
   ? "/api"
@@ -62,6 +63,19 @@ export function refreshLibrary() {
 
 export function fetchMetadataTrack(path: string) {
   return getJson<MetadataTrack>(`/metadata/track?${new URLSearchParams({ path })}`);
+}
+
+export function findMusicInfo(input: LookupQuery) {
+  return postJson<LookupResult>("/metadata/lookup", input);
+}
+
+export function findFrontCovers(source: MusicSource) {
+  return postJson<{ covers: CoverChoice[] }>("/metadata/covers", source);
+}
+
+export function selectFrontCover(source: MusicSource, choice: CoverChoice) {
+  const { id, release_id, extension, token } = choice;
+  return postJson<SelectedCover>("/metadata/cover-select", { source, choice: { id, release_id, extension, token } });
 }
 
 export function fetchMetadataIssue(issue: MetadataIssue, offset: number) {

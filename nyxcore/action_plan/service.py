@@ -22,7 +22,7 @@ from nyxcore.rename.rules import deterministic_cleanup
 from nyxcore.rename.service import build_rename_result
 from nyxcore.review_queue.service import ReviewQueueItem, ReviewQueueReport
 from nyxcore.review_queue.state import ReviewStateStore, apply_review_action
-from nyxcore.tagging.writer import backup_file, plan_backup_path, verify_written_tags, write_tags
+from nyxcore.tagging.writer import ArtworkEdit, backup_file, plan_backup_path, verify_written_artwork, verify_written_tags, write_tags
 
 if TYPE_CHECKING:
     from nyxcore.action_plan.ledger import OperationBatch
@@ -738,6 +738,7 @@ def execute_authorized_action_plan(
     ledger_path: Path,
     backup_dir: Path | None = None,
     workspace_root: Path | None = None,
+    artwork_changes: dict[str, ArtworkEdit] | None = None,
 ) -> tuple[ActionPlanReport, list[AppliedPlanResult], "OperationBatch"]:
     """Execute a server-authorized plan using the existing lock and journal."""
 
@@ -818,6 +819,7 @@ def execute_authorized_action_plan(
             library_root=root,
             backup_roots=backup_roots,
             source_identities=source_identities,
+            artwork_changes=artwork_changes,
         )
         finalize_operation_batch(batch, results)
         save_operation_ledger(ledger_path, ledger)
@@ -837,6 +839,7 @@ def apply_action_plan_report(
     library_root: Path | None = None,
     backup_roots: tuple[Path, ...] | None = None,
     source_identities: dict[str, FileIdentity] | None = None,
+    artwork_changes: dict[str, ArtworkEdit] | None = None,
 ) -> list[AppliedPlanResult]:
     results: list[AppliedPlanResult] = []
     now = datetime.now(tz=UTC)
@@ -1057,6 +1060,9 @@ def apply_action_plan_report(
                             raise RuntimeError("backup differs from the reviewed fingerprint")
                         if verify_source(operation) != (source, expected, identity):
                             raise RuntimeError("source changed after the backup was made")
+                        artwork = (artwork_changes or {}).get(operation.operation_id)
+                        if operation.values.get("front_cover") != (artwork.digest if artwork else None):
+                            raise RuntimeError("The verified artwork does not match the authorized operation.")
                         write_attempted = True
                         write_tags(
                             source,
@@ -1065,12 +1071,15 @@ def apply_action_plan_report(
                             album=operation.values.get("album"),
                             fields=list(operation.fields),
                             preserve_id3=bool(source_identities),
+                            **({"artwork": artwork} if artwork is not None else {}),
                         )
                         new_snapshot = file_snapshot(source)
                         if new_snapshot is None:
                             raise RuntimeError("metadata write left no regular file at the source path")
                         if source_identities:
                             verify_written_tags(source, operation.values)
+                            if artwork is not None:
+                                verify_written_artwork(source, artwork)
                             if file_snapshot(source) != new_snapshot:
                                 raise RuntimeError("source changed while verifying the written metadata")
                         applied_hash = new_snapshot[1]

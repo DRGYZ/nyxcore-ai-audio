@@ -4,11 +4,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { applyMetadataPlan, previewMetadataPlan } from "../../lib/api";
 import { pathFilename } from "../../lib/library-path";
+import { musicBrainzLink } from "../../lib/enrichment";
 import { FIELD_LABELS, METADATA_FIELDS, tagValidation } from "../../lib/metadata";
 import type { MetadataPlan, MetadataProposal, PlanInput } from "../../lib/metadata";
 import type { ReviewPlanApplyResponse } from "../../lib/types";
 import { ActionBanner, Button, Chip, PageHeader, Panel, PathBlock } from "../components";
 import { MetadataEditButton, TAG_INPUT, useMetadataDrafts, useSaveMetadataDrafts } from "../metadata/MetadataEditor";
+import { MusicSourceLink } from "../metadata/MusicInfo";
 
 type Preview = { input: PlanInput; plan: MetadataPlan; revision: string };
 type Outcome = { response: ReviewPlanApplyResponse; cleanupError?: string };
@@ -56,6 +58,7 @@ export function MetadataPage() {
     if (batchError || !batchValue.trim() || !selected.length || stale) return;
     return replaceDrafts(entries.map((entry) => deselected.has(entry.path) ? entry : {
       ...entry, values: { ...entry.values, [batchField]: batchValue.trim() },
+      source_fields: entry.source_fields?.filter((field) => field !== batchField),
     }));
   }
 
@@ -97,7 +100,7 @@ export function MetadataPage() {
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Library Repair" title="Staged metadata"
-        description="Review a batch of replacements before writing tags. Each selected file counts as one operation." />
+        description="Review tag and front-cover replacements before applying. Each selected file counts as one operation." />
       {drafts.error && <ActionBanner tone="error" message={drafts.error.message} />}
       {drafts.isLoading && <p role="status" className="text-sm text-primary-muted">Loading workspace drafts…</p>}
       {data && entries.length === 0 && <Panel className="space-y-3 p-5">
@@ -130,6 +133,7 @@ export function MetadataPage() {
                     <span className="[overflow-wrap:anywhere]">{pathFilename(entry.path)}</span>
                   </label>
                   <PathBlock value={entry.path} />
+                  {entry.source && <MusicSourceLink source={entry.source} />}
                   <dl className="space-y-0.5 text-xs [overflow-wrap:anywhere]">
                     {METADATA_FIELDS.filter((field) => entry.values[field] !== undefined).map((field) => (
                       <div className="flex gap-2" key={field}>
@@ -137,6 +141,7 @@ export function MetadataPage() {
                       </div>
                     ))}
                   </dl>
+                  {entry.artwork && <Chip tone="accent">{entry.artwork.replace_existing ? "Replace front cover" : "Add front cover"}</Chip>}
                   {entry.generation !== data.generation && <Chip tone="warning">Stale · reopen and stage again</Chip>}
                 </div>
                 <div className="flex items-start gap-2">
@@ -179,21 +184,39 @@ export function MetadataPage() {
           {preview.plan.review_only ? (
             <ActionBanner tone="info" message="Preview only. This launcher cannot apply edits or undo file changes." />
           ) : (
-            <p className="text-sm text-primary-muted">Applying writes the tag replacements below to the original files and saves full backups to the workspace.</p>
+            <p className="text-sm text-primary-muted">Applying writes the listed changes to the original files and saves full backups to the workspace.</p>
           )}
           <ol className="divide-y divide-white/10 border-y border-white/10">
             {preview.plan.files.map((file) => (
               <li key={file.path} className="space-y-2 py-3">
                 <PathBlock value={file.path} />
+                {file.source && <MusicSourceLink source={file.source} />}
                 <dl className="grid min-w-0 gap-2 text-xs [overflow-wrap:anywhere]">
                   {METADATA_FIELDS.filter((field) => file.changes[field] !== undefined).map((field) => (
                     <div key={field} className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)]">
                       <dt className="font-semibold text-primary">{FIELD_LABELS[field]}</dt>
                       <dd className="text-primary-muted"><span className="text-primary-subtle">Before · </span>{file.before[field].join(" · ") || "Missing"}</dd>
-                      <dd className="text-accent"><span className="text-primary-subtle">After · </span>{file.changes[field]}</dd>
+                      <dd className="text-accent">
+                        <span className="text-primary-subtle">After · </span>{file.changes[field]}
+                        {file.source_fields?.includes(field) && <span className="block text-primary-muted">MusicBrainz</span>}
+                      </dd>
                     </div>
                   ))}
                 </dl>
+                {file.artwork && (
+                  <div className="grid gap-2 border-t border-white/10 pt-2 text-xs sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="text-primary-muted">Before · {file.artwork.before_present ? "Existing front cover" : "No front cover"}</p>
+                      {file.artwork.before && <img className="size-20 rounded-[2px] object-contain" src={file.artwork.before} alt="Existing embedded front cover" />}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-accent">After · {file.artwork.before_present ? "Replace front cover" : "Embed front cover"}</p>
+                      {file.artwork.after && <img className="size-20 rounded-[2px] object-contain" src={file.artwork.after} alt="Approved new front cover" />}
+                      <a className="inline-block text-accent underline" target="_blank" rel="noreferrer"
+                        href={musicBrainzLink("release", file.artwork.release_id)}>Artwork source release</a>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ol>
@@ -203,7 +226,7 @@ export function MetadataPage() {
             <label className="flex items-start gap-2 text-sm text-primary">
               <input type="checkbox" className="mt-1 accent-accent" checked={confirmed} disabled={busy || previewStale}
                 onChange={(event) => setConfirmed(event.target.checked)} />
-              <span>I approve the listed tag replacements on these {preview.plan.files.length} files.</span>
+              <span>I approve the listed changes on these {preview.plan.files.length} files.</span>
             </label>
             <Button type="button" tone="danger" disabled={!confirmed || busy || previewStale} onClick={() => void applyPreview()}>
               {apply.isPending ? "Applying metadata…" : "Apply approved metadata"}

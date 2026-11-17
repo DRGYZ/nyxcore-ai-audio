@@ -26,14 +26,25 @@ export type MetadataTrack = {
   swap: boolean;
   generation: string;
   inspection: string;
+  duration_ms?: number | null;
+  cover_present?: boolean;
+  artwork_supported?: boolean;
 };
 
-export type MetadataProposal = Pick<MetadataTrack, "path" | "generation" | "inspection"> & { values: TagValues };
+export type MetadataProposal = Pick<MetadataTrack, "path" | "generation" | "inspection"> & {
+  values: TagValues;
+  source?: MusicSource;
+  source_fields?: MetadataField[];
+  artwork?: ArtworkReference;
+};
 export type DraftSet = { entries: MetadataProposal[]; generation: string; revision: string };
 export type PlanInput = { entries: MetadataProposal[] };
 export type MetadataPlan = {
   preview: string;
-  files: Array<{ path: string; before: EmbeddedTags; changes: TagValues }>;
+  files: Array<{
+    path: string; before: EmbeddedTags; changes: TagValues;
+    source?: Omit<MusicSource, "token">; source_fields?: MetadataField[]; artwork?: ArtworkPreview;
+  }>;
   review_only: boolean;
 };
 export const METADATA_DRAFTS_KEY = ["metadata", "drafts"] as const;
@@ -45,3 +56,4 @@ export function tagValidation(value: string) {
   if (value.trim().length > 512 || /[\p{Cc}\p{Cs}]/u.test(value)) return "Use up to 512 characters without control characters.";
   return null;
 }
+import type { ArtworkPreview, ArtworkReference, MusicSource } from "./enrichment";

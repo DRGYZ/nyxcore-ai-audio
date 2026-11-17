@@ -19,7 +19,7 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3, ID3NoHeaderError
 from mutagen.mp3 import EasyMP3
 from mutagen.easymp4 import EasyMP4
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nyxcore.action_plan.service import (
     MAX_AUTOMATIC_PLAN_OPERATIONS,
@@ -35,8 +35,11 @@ from nyxcore.core.audio_files import SUPPORTED_AUDIO_EXTENSIONS
 from nyxcore.core.filesystem import FileIdentity, file_snapshot
 from nyxcore.core.text import normalize_match_text
 from nyxcore.core.track import TrackRecord
+from nyxcore.enrichment import Providers, WorkspaceCache
 from nyxcore.health.service import is_placeholder, is_suspicious_swap
 from nyxcore.normalize.rules import SEPARATOR_PATTERN, cleaned_filename_stem, collapse_ws, parse_artist_title_from_filename
+from nyxcore.tagging.writer import ArtworkEdit, front_covers
+from nyxcore.webapi.enrichment import ArtworkReference, Enrichment, Source, thumbnail
 from nyxcore.webapi.schemas import ReviewPlanApplyResponse
 
 Tag = Literal["title", "artist", "album"]
@@ -54,7 +57,24 @@ class MetadataProposal(BaseModel):
     path: TrackPath
     generation: str = Field(pattern=r"^[0-9a-f]{32}$")
     inspection: Proof
-    values: dict[Tag, TagText] = Field(min_length=1, max_length=3)
+    values: dict[Tag, TagText] = Field(max_length=3)
+    source: Source | None = None
+    source_fields: list[Tag] | None = Field(None, max_length=3)
+    artwork: ArtworkReference | None = None
+
+    @model_validator(mode="after")
+    def validate_proposal(self):
+        if not self.values and not self.artwork:
+            raise ValueError("Choose at least one tag change or front cover.")
+        if self.artwork and not self.source:
+            raise ValueError("Artwork must identify its selected MusicBrainz release.")
+        if self.source_fields:
+            if self.source is None or len(set(self.source_fields)) != len(self.source_fields):
+                raise ValueError("Provider fields must identify their selected MusicBrainz source.")
+            suggested = self.source.tag_values()
+            if any(field not in self.values or self.values[field] != suggested[field] for field in self.source_fields):
+                raise ValueError("A MusicBrainz-suggested field must match its source. Label overrides as manual edits.")
+        return self
 
     @field_validator("values")
     @classmethod
@@ -94,6 +114,8 @@ class Inspection:
     readable: bool
     write_blocker: str | None
     snapshot: tuple[FileIdentity, str]
+    duration_ms: int | None
+    covers: list[bytes] | None
 
 
 def _reparse_point(path: Path) -> bool:
@@ -123,7 +145,8 @@ def _track_path(root: Path, value: str) -> Path:
 
 
 def _write_blocker(path: Path, audio: object) -> str | None:
-    if not isinstance(audio, (EasyMP3, FLAC, EasyMP4)) or path.suffix.lower() not in {".mp3", ".flac", ".m4a"}:
+    supported_type = {".mp3": EasyMP3, ".flac": FLAC, ".m4a": EasyMP4}.get(path.suffix.lower())
+    if supported_type is None or not isinstance(audio, supported_type):
         return "Writing tags is available for compatible MP3, FLAC, and M4A files."
     if path.stat().st_nlink != 1:
         return "This file has multiple hard links. Use a separate copy before editing."
@@ -146,6 +169,8 @@ def _inspect(root: Path, value: str) -> Inspection:
             raise ValueError("Choose a regular audio file.")
         tags = {field: [] for field in FIELDS}
         readable = False
+        covers = None
+        duration = None
         blocker = "Embedded metadata could not be read. Check the file before editing."
         try:
             audio = MutagenFile(path, easy=True)
@@ -158,11 +183,16 @@ def _inspect(root: Path, value: str) -> Inspection:
             if audio is not None:
                 blocker = _write_blocker(path, audio)
                 readable = True
+                seconds = getattr(getattr(audio, "info", None), "length", None)
+                if seconds and 0 < seconds <= 24 * 3600:
+                    duration = max(1, round(seconds * 1000))
+                if blocker is None:
+                    covers = front_covers(path)
         except (MutagenError, KeyError, OSError, ValueError):
             pass
         if _track_path(root, value) != path or file_snapshot(path) != before:
             raise ValueError("The file changed during inspection. Reopen it and try again.")
-        return Inspection(path, tags, readable, blocker, before)
+        return Inspection(path, tags, readable, blocker, before, duration, covers)
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(409, "The file is missing, unreadable, or changed. Refresh the library and inspect it again.") from exc
 
@@ -236,6 +266,9 @@ def install_metadata_routes(
         payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hmac.new(key, payload, hashlib.sha256).hexdigest()
 
+    enrichment = Enrichment(Providers(WorkspaceCache(workspace)), proof)
+    enrichment.mount(app)
+
     def inspection_proof(item: Inspection, version: str) -> str:
         return proof("inspection", str(item.path), item.snapshot, version)
 
@@ -258,10 +291,10 @@ def install_metadata_routes(
             raise HTTPException(409, "The metadata draft file cannot be read. Check metadata_drafts.json in the workspace.") from exc
 
     def draft_response(drafts: Drafts) -> dict:
-        data = drafts.model_dump()
+        data = drafts.model_dump(exclude_none=True)
         return {**data, "revision": proof("drafts", str(workspace()), data), "generation": generation()}
 
-    def inspect_proposal(entry: MetadataProposal, version: str) -> tuple[Inspection, dict[str, str]]:
+    def inspect_proposal(entry: MetadataProposal, version: str) -> tuple[Inspection, dict[str, str], ArtworkEdit | None]:
         if entry.generation != version:
             raise HTTPException(409, "Library analysis changed. Reopen the staged track and stage it again.")
         inspected = _inspect(library(), entry.path)
@@ -270,28 +303,57 @@ def install_metadata_routes(
         if inspected.write_blocker:
             raise HTTPException(409, f"Metadata writing is unavailable for {inspected.path.name}. {inspected.write_blocker}")
         changes = {field: value for field, value in entry.values.items() if inspected.tags[field] != [value]}
-        if not changes:
+        if entry.source:
+            enrichment.check_source(entry.source)
+        artwork = None
+        if entry.artwork:
+            if inspected.covers is None or len(inspected.covers) > 1:
+                raise HTTPException(409, "This tag layout does not support safe front-cover editing.")
+            if inspected.covers and not entry.artwork.replace_existing:
+                raise HTTPException(409, "Explicitly approve replacing this track’s existing front cover.")
+            assert entry.source is not None
+            artwork = enrichment.cached_artwork(entry.source, entry.artwork)
+        if not changes and artwork is None:
             raise HTTPException(409, f"No metadata changes for {inspected.path.name}.")
-        return inspected, changes
+        return inspected, changes, artwork
 
-    def propose(entries: list[MetadataProposal]) -> tuple[ActionPlanReport, dict[str, FileIdentity], list[dict]]:
+    def propose(entries: list[MetadataProposal], *, preview: bool) -> tuple[
+        ActionPlanReport, dict[str, FileIdentity], list[dict], dict[str, ArtworkEdit]
+    ]:
         version = generation()
         operations = []
         identities = {}
         comparisons = []
         paths = set()
+        artwork_edits = {}
         for entry in entries:
-            item, changes = inspect_proposal(entry, version)
+            item, changes, artwork = inspect_proposal(entry, version)
             if item.path in paths or item.snapshot[0] in identities.values():
                 raise HTTPException(409, "A batch can include a physical file only once.")
             paths.add(item.path)
-            operation_id = "metadata-" + proof("operation", str(item.path), item.snapshot, changes)[:24]
+            operation_values = {**changes, "front_cover": artwork.digest} if artwork else changes
+            operation_id = "metadata-" + proof("operation", str(item.path), item.snapshot, operation_values)[:24]
             identities[operation_id] = item.snapshot[0]
+            if artwork:
+                artwork_edits[operation_id] = artwork
             operations.append(ActionPlanOperation(
                 operation_id=operation_id, operation_type="write_metadata", path=str(item.path),
-                fields=list(changes), values=changes, apply_supported=True, expected_hash=item.snapshot[1],
+                fields=list(operation_values), values=operation_values, apply_supported=True, expected_hash=item.snapshot[1],
             ))
-            comparisons.append({"path": str(item.path), "before": item.tags, "changes": changes})
+            if preview:
+                comparison = {"path": str(item.path), "before": item.tags, "changes": changes}
+                if entry.source:
+                    comparison["source"] = entry.source.model_dump(exclude={"token"})
+                    comparison["source_fields"] = [field for field in entry.source_fields or [] if field in changes]
+                if artwork:
+                    comparison["artwork"] = {
+                        "before_present": bool(item.covers),
+                        "before": thumbnail(item.covers[0]) if item.covers else None,
+                        "after": thumbnail(artwork.data),
+                        "release_id": entry.artwork.release_id,
+                        "digest": artwork.digest,
+                    }
+                comparisons.append(comparison)
         if generation() != version:
             raise HTTPException(409, "Library analysis changed during planning. Inspect the staged tracks again.")
         plan = ActionPlan(
@@ -301,7 +363,7 @@ def install_metadata_routes(
             reasons=["User-approved tag replacements"], notes=[], apply_supported=True, resolves_review_items=False,
         )
         report = ActionPlanReport(datetime.now(UTC).isoformat(), [], [plan], [], ActionPlanSummary(0, 1, 0, 1))
-        return report, identities, comparisons
+        return report, identities, comparisons, artwork_edits
 
     @app.get("/api/metadata/issues")
     def metadata_issues(issue: Issue, offset: int = Query(0, ge=0)) -> dict:
@@ -317,6 +379,8 @@ def install_metadata_routes(
         return {"path": str(item.path), "tags": item.tags, "supported": item.write_blocker is None,
                 "readable": item.readable, "write_blocker": item.write_blocker, "issues": issues,
                 "suggestions": suggestions, "swap": swap, "generation": version,
+                "duration_ms": item.duration_ms, "cover_present": bool(item.covers),
+                "artwork_supported": item.covers is not None and len(item.covers) <= 1,
                 "inspection": inspection_proof(item, version)}
 
     @app.get("/api/metadata/drafts")
@@ -339,7 +403,7 @@ def install_metadata_routes(
                 if previous.get(entry.path) != entry:
                     inspect_proposal(entry, response["generation"])
             updated = Drafts(entries=request.entries)
-            data = updated.model_dump_json(indent=2)
+            data = updated.model_dump_json(indent=2, exclude_none=True)
             if len(data.encode()) > MAX_DRAFT_BYTES:
                 raise HTTPException(413, "The staged edits exceed the workspace draft limit.")
             try:
@@ -350,7 +414,7 @@ def install_metadata_routes(
 
     @app.post("/api/metadata/plan")
     def metadata_plan(selection: ProposalSelection) -> dict:
-        _, _, comparisons = propose(selection.entries)
+        _, _, comparisons, _ = propose(selection.entries, preview=True)
         return {"preview": proof("preview", str(library()), selection.model_dump()), "files": comparisons,
                 "review_only": review_only}
 
@@ -362,14 +426,18 @@ def install_metadata_routes(
         if not hmac.compare_digest(request.preview, expected):
             raise HTTPException(409, "The approved preview is stale or changed. Generate a new preview.")
 
+        artwork_changes: dict[str, ArtworkEdit] = {}
+
         def authorize() -> tuple[ActionPlanReport, dict[str, FileIdentity]]:
-            report, identities, _ = propose(request.entries)
+            report, identities, _, verified = propose(request.entries, preview=False)
+            artwork_changes.update(verified)
             return report, identities
 
         try:
             _, results, batch = execute_authorized_action_plan(
                 root, authorize, review_state_path=out / "review_state.json",
                 ledger_path=out / "review_history.json", backup_dir=out / "metadata_backups", workspace_root=out,
+                artwork_changes=artwork_changes,
             )
         except (ValueError, OSError) as exc:
             raise HTTPException(409, str(exc)) from exc
