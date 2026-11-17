@@ -16,6 +16,7 @@ import type {
   SearchResponse,
   StatusResponse,
 } from "./types";
+import type { DraftSet, MetadataIssue, MetadataPlan, MetadataProposal, MetadataTrack, PlanInput } from "./metadata";
 
 const API_BASE_URL = import.meta.env.PROD
   ? "/api"
@@ -25,9 +26,11 @@ async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     try {
-      const payload = (await response.json()) as { detail?: string };
+      const payload = (await response.json()) as { detail?: string | { msg: string }[] };
       if (typeof payload.detail === "string") {
         detail = payload.detail;
+      } else if (Array.isArray(payload.detail) && payload.detail.length) {
+        detail = payload.detail[0].msg;
       }
     } catch {
       // ignore
@@ -57,12 +60,36 @@ export function refreshLibrary() {
   return postJson<ApiMeta>("/library/refresh", {});
 }
 
+export function fetchMetadataTrack(path: string) {
+  return getJson<MetadataTrack>(`/metadata/track?${new URLSearchParams({ path })}`);
+}
+
+export function fetchMetadataIssue(issue: MetadataIssue, offset: number) {
+  return getJson<{ paths: string[]; total: number }>(`/metadata/issues?${new URLSearchParams({ issue, offset: String(offset) })}`);
+}
+
+export function fetchMetadataDrafts() {
+  return getJson<DraftSet>("/metadata/drafts");
+}
+
+export function saveMetadataDrafts(revision: string, entries: MetadataProposal[]) {
+  return postJson<DraftSet>("/metadata/drafts", { revision, entries });
+}
+
+export function previewMetadataPlan(input: PlanInput) {
+  return postJson<MetadataPlan>("/metadata/plan", input);
+}
+
+export function applyMetadataPlan(input: PlanInput & { preview: string; confirm: true }) {
+  return postJson<ReviewPlanApplyResponse>("/metadata/plan/apply", input);
+}
+
 export function fetchStatus() {
   return getJson<StatusResponse>("/status");
 }
 
-export function fetchHealth() {
-  return getJson<ReportEnvelope<HealthReport>>("/health");
+export function fetchHealth(refresh = false) {
+  return getJson<ReportEnvelope<HealthReport>>(refresh ? "/health?refresh=true" : "/health");
 }
 
 export function fetchReview() {

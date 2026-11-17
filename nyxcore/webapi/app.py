@@ -5,6 +5,7 @@ import os
 from contextlib import nullcontext
 from pathlib import Path
 from threading import Lock
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,7 @@ from nyxcore.report_pipeline import build_duplicate_health_reports, build_duplic
 from nyxcore.review_queue.state import apply_review_action, load_review_state, save_review_state
 from nyxcore.search.service import search_tracks
 from nyxcore.webapi.analysis import LibrarySnapshot, ReviewOnlyAnalysis
+from nyxcore.webapi.metadata import install_metadata_routes
 from nyxcore.saved_playlists.service import (
     SavedPlaylistDefinition,
     SavedPlaylistLatestResult,
@@ -208,6 +210,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="NyxCore Web API", version=__version__)
     analysis_store = ReviewOnlyAnalysis(_load_records) if review_only else None
+    metadata_generation = uuid4().hex
     review_state_lock = Lock() if review_only else nullcontext()
     if not review_only:
         app.add_middleware(
@@ -248,6 +251,41 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Library analysis failed. Check the library folder and try Refresh Library again.",
             ) from exc
+
+    def metadata_library() -> Path:
+        if music_root is None and not os.environ.get("NYXCORE_WEB_MUSIC_DIR"):
+            raise HTTPException(409, "Set NYXCORE_WEB_MUSIC_DIR to the library you want to inspect.")
+        return _resolve_music_path(None).resolve()
+
+    def metadata_workspace() -> Path:
+        out = _resolve_out_path(None).resolve()
+        library = metadata_library()
+        if _is_within(out, library) or _is_within(library, out):
+            raise HTTPException(409, "Choose a separate metadata workspace outside the configured library.")
+        return out
+
+    def current_metadata_generation() -> str:
+        if review_only:
+            analysis = load_analysis(metadata_library(), _resolve_config(None, None))
+            assert analysis is not None
+            return analysis.generation
+        return metadata_generation
+
+    def invalidate_metadata_generation() -> None:
+        nonlocal metadata_generation
+        metadata_generation = uuid4().hex
+
+    def metadata_records():
+        root = metadata_library()
+        analysis = load_analysis(root, _resolve_config(None, None))
+        return analysis.records if analysis else _load_records(root)
+
+    install_metadata_routes(
+        app, library=metadata_library, workspace=metadata_workspace,
+        settings=lambda: _resolve_config(None, None).health, generation=current_metadata_generation,
+        records=metadata_records, require_mutations=require_audio_mutations,
+        invalidate=invalidate_metadata_generation, review_only=review_only,
+    )
 
     if review_only:
         @app.get("/api/library", response_model=LibraryReportsResponse)
@@ -369,6 +407,7 @@ def create_app(
         out_path: str | None = Query(default=None),
         profile: str | None = Query(default=None),
         config_path: str | None = Query(default=None),
+        refresh: bool = Query(default=False),
     ) -> ApiReportEnvelope:
         resolved_music = _resolve_music_path(music_path)
         resolved_out = _resolve_out_path(out_path)
@@ -377,6 +416,8 @@ def create_app(
         report = analysis.reports.health_report if analysis else build_duplicate_health_reports(
             resolved_music, _load_records(resolved_music), app_config=app_config,
         ).health_report
+        if refresh and not review_only:
+            invalidate_metadata_generation()
         return ApiReportEnvelope(
             meta=_meta(resolved_music, resolved_out, app_config, analysis),
             data=report.to_dict(),
@@ -505,6 +546,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         resolved_review_item_ids = sorted({item_id for result in results for item_id in result.resolved_review_item_ids})
+        invalidate_metadata_generation()
         return ReviewPlanApplyResponse(
             result_count=len(results),
             resolved_review_item_ids=resolved_review_item_ids,
@@ -671,6 +713,8 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if changed:
+            invalidate_metadata_generation()
         review_state = load_review_state(review_state_path)
         reactivated_review_item_ids = sorted(
             item_id for item_id, entry in review_state.items.items() if entry.status == "seen" and item_id in batch.source_review_item_ids

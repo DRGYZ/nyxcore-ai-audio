@@ -1,15 +1,20 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_LABELS, HEALTH_BITRATE_BUCKET_ORDER } from "../../lib/contracts";
-import { useHealthQuery, useStatusQuery } from "../../lib/hooks";
+import { useHealthQuery, useRefreshHealthAudit, useStatusQuery } from "../../lib/hooks";
+import { ISSUE_LABELS, type MetadataIssue } from "../../lib/metadata";
 import { ActionBanner, Button, Chip, EmptyState, Icon, MetricCard, PageHeader, Panel, ProgressBar, formatNumber } from "../components";
 import { ApiUnavailableState } from "../feedback";
+import { MetadataDraftLink } from "../metadata/MetadataEditor";
+import { MetadataIssueList } from "../metadata/MetadataIssueList";
 
 export function HealthPage() {
   const navigate = useNavigate();
   const healthQuery = useHealthQuery();
+  const refreshAudit = useRefreshHealthAudit();
   const reviewOnly = useStatusQuery().data?.review_only === true;
   const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [issue, setIssue] = useState<MetadataIssue | null>(null);
 
   if (healthQuery.isError && !reviewOnly) {
     return (
@@ -50,15 +55,22 @@ export function HealthPage() {
     : (report.artwork.without_artwork / report.overview.total_audio_files) * 100;
   const topIssueCategories = report.priorities.top_issue_categories ?? [];
   const topFolders = report.priorities.top_problematic_folders ?? [];
+  const metadataIssues: [MetadataIssue, number][] = [
+    ["missing_title", report.metadata.missing_title.count],
+    ["missing_artist", report.metadata.missing_artist.count],
+    ["missing_album", report.metadata.missing_album.count],
+    ["placeholder_metadata", report.metadata.placeholder_metadata.count],
+    ["suspicious_swaps", report.metadata.suspicious_title_artist_swaps.count],
+  ];
 
   async function handleRefresh() {
     setBanner(null);
-    const result = await healthQuery.refetch();
-    setBanner(
-      result.error
-        ? { tone: "error", message: "Health refresh failed. Local API may be offline." }
-        : { tone: "success", message: "Health audit refreshed from the current library." },
-    );
+    try {
+      await refreshAudit.mutateAsync();
+      setBanner({ tone: "success", message: "Health audit refreshed from the current library." });
+    } catch {
+      setBanner({ tone: "error", message: "Health refresh failed. Local API may be offline." });
+    }
   }
 
   function handleExport() {
@@ -87,9 +99,9 @@ export function HealthPage() {
               Export JSON
             </Button>
             {!reviewOnly ? (
-              <Button tone="secondary" onClick={() => void handleRefresh()} disabled={healthQuery.isFetching}>
-                <Icon name="refresh" className={`text-sm ${healthQuery.isFetching ? "animate-spin" : ""}`} />
-                {healthQuery.isFetching ? "Refreshing…" : "Refresh Audit"}
+              <Button tone="secondary" onClick={() => void handleRefresh()} disabled={refreshAudit.isPending}>
+                <Icon name="refresh" className={`text-sm ${refreshAudit.isPending ? "animate-spin" : ""}`} />
+                {refreshAudit.isPending ? "Refreshing…" : "Refresh Audit"}
               </Button>
             ) : null}
           </>
@@ -183,20 +195,18 @@ export function HealthPage() {
                 <Icon name="grid_view" className="text-base text-accent" />
                 Metadata Issues
               </h3>
+              <div className="mb-3"><MetadataDraftLink /></div>
               <div className="divide-y divide-white/[0.05] rounded-[3px] border border-white/[0.06] bg-surface-low/50">
-                {[
-                  ["Missing Title", report.metadata.missing_title.count],
-                  ["Missing Artist", report.metadata.missing_artist.count],
-                  ["Missing Album", report.metadata.missing_album.count],
-                  ["Placeholder Metadata", report.metadata.placeholder_metadata.count],
-                  ["Suspicious Swaps", report.metadata.suspicious_title_artist_swaps.count],
-                ].map(([label, count]) => (
-                  <div key={label} className="flex items-center justify-between px-3.5 py-2.5 font-sans text-xs">
-                    <span className="text-primary-subtle">{label}</span>
-                    <span className="font-mono font-medium text-primary">{formatNumber(Number(count))}</span>
-                  </div>
+                {metadataIssues.map(([category, count]) => (
+                  <button type="button" key={category} aria-expanded={issue === category} disabled={!count}
+                    onClick={() => setIssue(issue === category ? null : category)}
+                    className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-xs text-primary hover:bg-surface-mid focus-visible:outline-accent disabled:text-primary-muted">
+                    <span>{ISSUE_LABELS[category]}</span>
+                    <span className="font-mono">{formatNumber(count)}</span>
+                  </button>
                 ))}
               </div>
+              {issue && <MetadataIssueList key={issue} issue={issue} />}
               {topFolders.length > 0 ? (
                 <p className="mt-3 font-sans text-[11px] text-primary-subtle">
                   Concentrated in: <span className="font-mono text-accent">{topFolders[0].folder}</span>

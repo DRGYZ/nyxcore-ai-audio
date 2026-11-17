@@ -168,7 +168,11 @@ To switch libraries, press **Ctrl+C** in the launcher terminal and restart with 
 .\.venv\Scripts\python.exe -m nyxcore.launch --music 'D:\Music Library' --out 'C:\NyxCore\my-library-reports'
 ```
 
-The launcher binds only to `127.0.0.1` and runs in **review-only mode** for every library. Search, findings, plan previews, and history inspection are available. Triage decisions and saved playlists may write local state to the workspace. The API refuses apply, restore, and undo requests. Mutations remain experimental.
+The launcher binds only to `127.0.0.1` and runs in **review-only mode** for every library. Search, findings, plan previews, and history inspection are available. Triage decisions, saved playlists, and staged metadata proposals may write local state to the workspace. The API refuses apply, restore, and undo requests. Mutations remain experimental.
+
+Open a track from a metadata issue in Library Health, a metadata finding in Review Inbox, or an Archive Search result. Inspect the embedded values, then stage replacements for title, artist, or album. Filename suggestions are guesses, and NyxCore leaves missing album suggestions unavailable. Open **Review staged metadata** to select up to 50 files, set a shared artist or album, and generate a before-and-after preview. Staged proposals persist in `metadata_drafts.json` in the workspace. After a library refresh or server restart, reopen stale drafts and stage them against the current tags.
+
+Only the development workflow below can apply metadata repairs. Configure an explicit disposable library root and a separate workspace. The editor supports writes to readable MP3, FLAC, and M4A files. Clearing tags is unavailable. Every applied file has a full backup in the workspace. Use **History** to reverse verified edits and inspect any operation that needs recovery.
 
 - If the port is occupied, append `--port 8001` or choose another free port. Leave the existing service running.
 - If the browser does not open, use the printed URL. Add `--no-browser` to open it yourself.

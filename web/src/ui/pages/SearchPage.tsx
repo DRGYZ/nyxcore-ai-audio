@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useArchiveSearchQuery, useStatusQuery } from "../../lib/hooks";
 import { ActionBanner, Button, Chip, EmptyState, Icon, PageHeader, Panel, PathBlock, formatBytes, formatNumber } from "../components";
 import { ApiUnavailableState } from "../feedback";
+import { MetadataDraftLink, MetadataEditButton } from "../metadata/MetadataEditor";
 
 function formatDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Unknown duration";
@@ -41,6 +42,7 @@ export function SearchPage() {
         eyebrow="Read-only Lookup"
         title="Archive Search"
         description="Find tracks by filename, title, artist, album, album artist, genre, or folder without modifying audio files."
+        actions={<MetadataDraftLink />}
       />
 
       <Panel className="p-4">
@@ -133,6 +135,7 @@ export function SearchPage() {
                     {track.has_cover_art ? "Artwork embedded" : "No artwork"}
                   </span>
                 </div>
+                <div className="mt-3"><MetadataEditButton path={track.path} /></div>
               </div>
             ))}
           </div>

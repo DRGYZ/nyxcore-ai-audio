@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 
 from mutagen import File as MutagenFile
+from mutagen.id3 import ID3, ID3NoHeaderError, TALB, TIT2, TPE1
+from mutagen.mp3 import EasyMP3
 
 
 class TagWriteError(RuntimeError):
@@ -77,8 +79,23 @@ def write_tags(
     artist: str | None,
     album: str | None,
     fields: list[str],
+    *,
+    preserve_id3: bool = False,
 ) -> None:
     audio = _load_mutagen_writer(path)
+    values = {"title": title, "artist": artist, "album": album}
+    if preserve_id3 and isinstance(audio, EasyMP3):
+        # Keep the existing ID3 revision and leave frames outside these fields alone.
+        try:
+            tags = ID3(path, translate=False)
+        except ID3NoHeaderError:
+            tags = ID3()
+        for field, frame in (("title", TIT2), ("artist", TPE1), ("album", TALB)):
+            value = values[field]
+            if field in fields and value and value.upper() != "UNKNOWN":
+                tags.setall(frame.__name__, [frame(encoding=1, text=[value])])
+        tags.save(path, v2_version=3 if tags.version[1] == 3 else 4)
+        return
 
     if "title" in fields and title and title.upper() != "UNKNOWN":
         audio["title"] = [title]
@@ -88,6 +105,15 @@ def write_tags(
         audio["album"] = [album]
 
     audio.save()
+
+
+def verify_written_tags(path: Path, values: dict[str, str | None]) -> None:
+    audio = MutagenFile(path, easy=True)
+    if audio is None or audio.tags is None:
+        raise TagWriteError("The file could not be read after writing its metadata.")
+    for field, value in values.items():
+        if audio.tags.get(field) != [value]:
+            raise TagWriteError(f"The written {field} did not match the approved value.")
 
 
 def write_basic_tags(path: Path, *, title: str | None, artist: str | None, album: str | None) -> None:

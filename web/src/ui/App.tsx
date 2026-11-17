@@ -3,6 +3,8 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { HealthPage } from "./pages/HealthPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { MetadataPage } from "./pages/MetadataPage";
+import { MetadataEditor } from "./metadata/MetadataEditor";
 import { PlaylistsPage } from "./pages/PlaylistsPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SearchPage } from "./pages/SearchPage";
@@ -19,7 +21,9 @@ export function App() {
         <Route path="/duplicates" element={<DuplicatesPage />} />
         <Route path="/health" element={<HealthPage />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/metadata" element={<MetadataPage />} />
       </Routes>
+      <MetadataEditor />
     </AppShell>
   );
 }

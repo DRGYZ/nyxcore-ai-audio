@@ -142,13 +142,14 @@ export function ActionBanner({
   message,
   action,
 }: {
-  tone?: "info" | "success" | "error";
+  tone?: "info" | "success" | "warning" | "error";
   message: string;
   action?: ReactNode;
 }) {
   const styles = {
     info: "border-l-2 border-l-accent border-white/[0.07] bg-surface-low text-primary",
     success: "border-l-2 border-l-emerald-400 border-white/[0.07] bg-surface-low text-primary",
+    warning: "border-l-2 border-l-amber-400 border-white/[0.07] bg-surface-low text-primary",
     error: "border-l-2 border-l-rose-400 border-white/[0.07] bg-surface-low text-primary",
   };
   return (
