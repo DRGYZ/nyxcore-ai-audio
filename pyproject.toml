@@ -29,9 +29,16 @@ web = [
   "uvicorn>=0.30.0",
   "Pillow>=12.3.0",
 ]
+desktop = [
+  "nyxcore[web]",
+  "pywebview==6.2.1; sys_platform == 'win32'",
+]
 dev = [
   "pytest>=8.0.0",
 ]
+
+[project.gui-scripts]
+nyxcore-desktop = "nyxcore.desktop:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -42,4 +49,4 @@ build-backend = "setuptools.build_meta"
 include = ["nyxcore*"]
 
 [tool.setuptools.package-data]
-nyxcore = ["resources/*.yaml"]
+nyxcore = ["resources/*.yaml", "resources/*.ico"]

@@ -51,6 +51,12 @@ it("builds on request, pages and filters files, and points to the existing edito
 
 it("shows only safe destinations in the expandable tree and handles expiration", async () => {
   const user = userEvent.setup();
+  const unchanged: OrganizationProposal = {
+    path: "/music/Artist/Album/Cataloged.flac", source: "Artist/Album/Cataloged.flac",
+    status: "unchanged", inspectable: true,
+    reasons: ["The track is already at its proposed destination."],
+    destination: ["Artist", "Album", "Cataloged.flac"],
+  };
   let expired = false;
   vi.stubGlobal("fetch", vi.fn(async (input: string, settings?: RequestInit) => {
     if (settings?.method === "POST") return Response.json({
@@ -58,7 +64,7 @@ it("shows only safe destinations in the expandable tree and handles expiration",
     });
     if (expired) return Response.json({ detail: "This preview is no longer current. Build a new preview." }, { status: 409 });
     const folderView = new URL(input).searchParams.get("view") === "folders";
-    return Response.json({ rows: folderView ? rows.slice(0, 1) : rows, total: folderView ? 1 : 3, page_size: 50 });
+    return Response.json({ rows: folderView ? [rows[0], unchanged] : rows, total: folderView ? 2 : 3, page_size: 50 });
   }));
   renderWithProviders(<OrganizationPage />);
   await user.click(screen.getByRole("button", { name: "Build preview" }));
@@ -68,6 +74,9 @@ it("shows only safe destinations in the expandable tree and handles expiration",
   expect(within(tree).getByText("Artist")).toBeVisible();
   expect(within(tree).getByText("Album")).toBeVisible();
   expect(within(tree).getByText("Glass (Live).flac")).toBeVisible();
+  expect(within(tree).getByText("Cataloged.flac")).toBeVisible();
+  expect(within(tree).getByText("Ready")).toBeVisible();
+  expect(within(tree).getByText("Unchanged")).toBeVisible();
   expect(within(tree).queryByText("Occupied.flac")).not.toBeInTheDocument();
   expired = true;
   await user.selectOptions(screen.getByRole("combobox", { name: "Show status" }), "ready");

@@ -78,6 +78,17 @@ describe("Overview first run", () => {
     expect(screen.queryByText("NYXCORE_WEB_MUSIC_DIR")).toBeNull();
   });
 
+  it("offers Metadata navigation and desktop-specific library instructions in the desktop window", async () => {
+    reviewOnly = true;
+    const user = userEvent.setup();
+    renderWithProviders(<AppShell desktop><DashboardPage desktop /></AppShell>);
+    expect(screen.getByRole("link", { name: "Metadata" })).toHaveAttribute("href", "/metadata");
+    expect(await screen.findByText("Local API Connected")).toBeVisible();
+    await user.click(screen.getByText("Inspect a different library"));
+    expect(screen.getByText("nyxcore-desktop.exe")).toBeVisible();
+    expect(screen.queryByText("Ctrl+C")).not.toBeInTheDocument();
+  });
+
   it("keeps the configured library visible when only History fails and refreshes on retry", async () => {
     historyStatus = 500;
     const user = userEvent.setup();

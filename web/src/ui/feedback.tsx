@@ -38,13 +38,13 @@ export function ApiUnavailableState({
   return (
     <Panel className="min-w-0 p-5 sm:p-8">
       <div className="flex max-w-3xl flex-col gap-5">
-        <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-[3px] border border-amber-500/30 bg-amber-500/10 text-amber-400">
+        <div className="flex items-center gap-3.5">
+          <div className="flex size-10 items-center justify-center rounded-xl border border-[#e9b44c]/30 bg-[#e9b44c]/12 text-[#f2c86b]">
             <Icon name="cloud_off" className="text-xl" />
           </div>
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-400">Local Connection</p>
-            <h2 className="font-display text-xl font-bold text-primary">
+            <p className="font-sans text-xs font-medium text-[#f2c86b]">Local Connection</p>
+            <h2 className="font-display text-xl font-semibold text-primary">
               Local API is not connected {contextLabel ? `• ${contextLabel}` : ""}
             </h2>
           </div>
@@ -64,9 +64,9 @@ export function ApiUnavailableState({
             ) : <li>
               <p><strong className="text-primary">Start the backend with the synthetic library.</strong> Run the commands from the repository root with your NyxCore Python environment active. The generator needs FFmpeg and can be skipped if the demo already exists.</p>
               {DEMO_COMMANDS.map(({ shell, command }) => (
-                <details key={shell} className="mt-2 min-w-0 rounded-[3px] border border-white/[0.08] bg-surface-low/60 p-3">
+                <details key={shell} className="mt-2 min-w-0 rounded-lg border border-white/[0.08] bg-surface-low/80 p-3">
                   <summary className="cursor-pointer font-medium text-accent focus-visible:outline-accent">{shell} commands</summary>
-                  <pre className="mt-2 select-all whitespace-pre-wrap rounded-[3px] bg-surface p-2.5 font-mono text-xs text-primary [overflow-wrap:anywhere]"><code>{[
+                  <pre className="mt-2 select-all overflow-x-auto whitespace-pre-wrap rounded-lg bg-surface p-3 font-mono text-xs text-primary [overflow-wrap:anywhere]"><code>{[
                     ...command, "python -m uvicorn nyxcore.webapi.app:app --host 127.0.0.1 --port 8000",
                   ].join("\n")}</code></pre>
                 </details>
@@ -99,20 +99,20 @@ export function QueryNotice({
 }) {
   if (loading) {
     return (
-      <div className="rounded-[3px] border border-white/[0.07] bg-surface-low px-4 py-2.5 font-sans text-xs text-primary-muted">
+      <div className="rounded-lg border border-white/[0.08] bg-surface-low px-4 py-2.5 font-sans text-xs text-primary-muted">
         Loading library data from local API…
       </div>
     );
   }
   if (error || usingMock) {
     return (
-      <div className="rounded-[3px] border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 font-sans text-xs text-amber-300">
+      <div className="rounded-lg border border-[#e9b44c]/25 bg-[#e9b44c]/12 px-4 py-2.5 font-sans text-xs text-[#f2c86b]">
         Local API unavailable. Connect the backend to inspect live library data.
       </div>
     );
   }
   return (
-    <div className="rounded-[3px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-2.5 font-sans text-xs text-emerald-300">
+    <div className="rounded-lg border border-[#52b788]/25 bg-[#52b788]/12 px-4 py-2.5 font-sans text-xs text-[#88dcb3]">
       Live API connected. Data and review state are current.
     </div>
   );
@@ -147,17 +147,17 @@ export function ActionBanner({
   action?: ReactNode;
 }) {
   const styles = {
-    info: "border-l-2 border-l-accent border-white/[0.07] bg-surface-low text-primary",
-    success: "border-l-2 border-l-emerald-400 border-white/[0.07] bg-surface-low text-primary",
-    warning: "border-l-2 border-l-amber-400 border-white/[0.07] bg-surface-low text-primary",
-    error: "border-l-2 border-l-rose-400 border-white/[0.07] bg-surface-low text-primary",
+    info: "border-l-2 border-l-accent border-white/[0.08] bg-surface-mid/90 text-primary",
+    success: "border-l-2 border-l-[#52b788] border-white/[0.08] bg-surface-mid/90 text-primary",
+    warning: "border-l-2 border-l-[#e9b44c] border-white/[0.08] bg-surface-mid/90 text-primary",
+    error: "border-l-2 border-l-[#e06d53] border-white/[0.08] bg-surface-mid/90 text-primary",
   };
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
       aria-live={tone === "error" ? "assertive" : "polite"}
       aria-atomic="true"
-      className={`flex flex-col gap-3 rounded-[3px] border px-4 py-3 text-xs md:text-sm md:flex-row md:items-center md:justify-between ${styles[tone]}`}
+      className={`flex flex-col gap-3 rounded-lg border px-4 py-3 text-xs md:flex-row md:items-center md:justify-between md:text-sm ${styles[tone]}`}
     >
       <span>{message}</span>
       {action ? <div className="shrink-0">{action}</div> : null}
@@ -175,10 +175,13 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <Panel className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-6 py-12 text-center">
-      <p className="font-display text-base font-bold text-primary">{title}</p>
-      <p className="mx-auto mt-1.5 max-w-xl font-sans text-xs leading-relaxed text-primary-muted">{description}</p>
-      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
+    <Panel className="border border-white/[0.07] bg-surface-low/60 px-6 py-12 text-center">
+      <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full border border-white/[0.08] bg-surface-mid text-accent">
+        <Icon name="album" className="text-xl" />
+      </div>
+      <p className="font-display text-base font-semibold text-primary">{title}</p>
+      <p className="mx-auto mt-1.5 max-w-xl font-sans text-sm leading-relaxed text-primary-muted">{description}</p>
+      {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
     </Panel>
   );
 }
@@ -213,7 +216,6 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
 
-    // Record currently active element for defensive focus restoration
     previousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
 
     const previousOverflow = document.body.style.overflow;
@@ -270,7 +272,6 @@ export function Modal({
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
-      // Defensive focus restoration to trigger element if it still exists
       if (previousFocusRef.current && document.contains(previousFocusRef.current)) {
         try {
           previousFocusRef.current.focus();
@@ -285,26 +286,26 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 py-4 backdrop-blur-sm sm:py-8"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 px-4 py-4 sm:py-8"
       role="presentation"
       onMouseDown={dismissible ? onClose : undefined}
     >
       <div
         ref={dialogRef}
-        className="flex max-h-full w-full min-w-0 max-w-4xl flex-col rounded-[4px] border border-white/[0.1] bg-surface shadow-2xl"
+        className="flex max-h-full w-full min-w-0 max-w-4xl flex-col overflow-hidden rounded-xl border border-white/[0.12] bg-surface shadow-soft"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={subtitle ? subtitleId : undefined}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between border-b border-white/[0.07] bg-surface-low/80 px-4 py-4 sm:px-6">
+        <div className="flex shrink-0 items-start justify-between border-b border-white/[0.08] bg-surface-low/90 px-5 py-4 sm:px-6">
           <div className="min-w-0">
-            <h3 id={titleId} className="font-display text-lg font-bold text-primary">
+            <h3 id={titleId} className="font-display text-lg font-semibold text-primary">
               {title}
             </h3>
             {subtitle ? (
-              <p id={subtitleId} className="mt-1 min-w-0 break-words [overflow-wrap:anywhere] font-mono text-xs text-primary-subtle">
+              <p id={subtitleId} className="mt-1 min-w-0 break-words [overflow-wrap:anywhere] font-sans text-xs text-primary-muted">
                 {subtitle}
               </p>
             ) : null}
@@ -315,14 +316,14 @@ export function Modal({
             aria-label="Close dialog"
             onClick={dismissible ? onClose : undefined}
             aria-disabled={!dismissible}
-            className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="rounded-lg p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <Icon name="close" />
           </button>
         </div>
-        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
         {footer ? (
-          <div className="flex shrink-0 flex-wrap justify-end gap-2.5 border-t border-white/[0.07] bg-surface-low/80 px-4 py-3.5 sm:px-6">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2.5 border-t border-white/[0.08] bg-surface-low/90 px-5 py-3.5 sm:px-6">
             {footer}
           </div>
         ) : null}

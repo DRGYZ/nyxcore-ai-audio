@@ -189,11 +189,7 @@ export function ReviewPage() {
   if (reviewQuery.isError && !reviewOnly) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          eyebrow="Review Findings"
-          title="Review Inbox"
-          description={description}
-        />
+        <PageHeader eyebrow="Review Findings" title="Review Inbox" description={description} />
         {outcome}
         <ApiUnavailableState contextLabel="Review Inbox" />
       </div>
@@ -203,14 +199,10 @@ export function ReviewPage() {
   if (reviewQuery.isLoading || !report) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          eyebrow="Review Findings"
-          title="Review Inbox"
-          description={description}
-        />
+        <PageHeader eyebrow="Review Findings" title="Review Inbox" description={description} />
         {outcome}
         {!reviewOnly ? (
-          <Panel className="p-8 text-center text-sm text-slate-400">Loading review findings from local API…</Panel>
+          <Panel className="p-8 text-center text-sm text-primary-muted">Loading review findings from local API…</Panel>
         ) : null}
       </div>
     );
@@ -265,9 +257,7 @@ export function ReviewPage() {
     if (reviewOnly || !confirmApply || !selection?.plans.length || applyPlanMutation.isPending) return;
     setApplyError(null);
     try {
-      const response = await applyPlanMutation.mutateAsync({
-        plan_report: selection,
-      });
+      const response = await applyPlanMutation.mutateAsync({ plan_report: selection });
       setConfirmApply(false);
       setPlan(null);
       setSelectedOperationIds(new Set());
@@ -288,12 +278,8 @@ export function ReviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={`AUDIT STAGE 01 — ${report.items.length} FINDINGS RECORDED`}
-        title={
-          <span>
-            Review Inbox <span className="font-editorial text-xl font-normal italic text-primary-subtle">precision triage</span>
-          </span>
-        }
+        eyebrow={`Triage Queue · ${report.items.length} findings`}
+        title="Review Inbox"
         description={description}
         actions={!reviewOnly ? (
           <Button tone="secondary" onClick={() => void handleRefreshInbox()} disabled={reviewQuery.isFetching || busy}>
@@ -308,35 +294,27 @@ export function ReviewPage() {
       <SplitScreen
         main={
           <div className="space-y-4">
-            <Panel className="flex flex-wrap items-center gap-3.5 px-4 py-2.5">
+            <Panel className="flex flex-wrap items-center gap-3.5 px-4 py-3">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Priority</span>
+                <span className="font-sans text-xs font-medium text-primary-subtle">Priority</span>
                 <div className="flex flex-wrap gap-1">
                   <button type="button" aria-pressed={priority === "all"} onClick={() => setPriority("all")}>
-                    <Chip tone="neutral" active={priority === "all"}>
-                      All
-                    </Chip>
+                    <Chip tone="neutral" active={priority === "all"}>All</Chip>
                   </button>
                   <button type="button" aria-pressed={priority === "high"} onClick={() => setPriority("high")}>
-                    <Chip tone="danger" active={priority === "high"}>
-                      High ({highCount})
-                    </Chip>
+                    <Chip tone="danger" active={priority === "high"}>High ({highCount})</Chip>
                   </button>
                   <button type="button" aria-pressed={priority === "medium"} onClick={() => setPriority("medium")}>
-                    <Chip tone="warning" active={priority === "medium"}>
-                      Med ({mediumCount})
-                    </Chip>
+                    <Chip tone="warning" active={priority === "medium"}>Med ({mediumCount})</Chip>
                   </button>
                   <button type="button" aria-pressed={priority === "low"} onClick={() => setPriority("low")}>
-                    <Chip tone="neutral" active={priority === "low"}>
-                      Low ({lowCount})
-                    </Chip>
+                    <Chip tone="neutral" active={priority === "low"}>Low ({lowCount})</Chip>
                   </button>
                 </div>
               </div>
-              <div className="hidden h-3.5 w-px bg-white/[0.08] lg:block" />
+              <div className="hidden h-4 w-px bg-white/[0.08] lg:block" />
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Status</span>
+                <span className="font-sans text-xs font-medium text-primary-subtle">Status</span>
                 <div className="flex flex-wrap gap-1">
                   {REVIEW_STATUS_FILTERS.map(({ value, label }) => (
                     <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}>
@@ -350,24 +328,22 @@ export function ReviewPage() {
                   ))}
                 </div>
               </div>
-              <div className="hidden h-3.5 w-px bg-white/[0.08] lg:block" />
+              <div className="hidden h-4 w-px bg-white/[0.08] lg:block" />
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Type</span>
+                <span className="font-sans text-xs font-medium text-primary-subtle">Type</span>
                 <select
                   aria-label="Filter findings by type"
-                  className="rounded-[3px] border border-white/[0.08] bg-surface px-2 py-1 font-sans text-xs text-primary outline-none focus:border-accent/50"
+                  className="rounded-lg border border-white/[0.12] bg-surface-low px-2.5 py-1.5 font-sans text-xs text-primary outline-none focus:border-accent/60"
                   value={itemType}
                   onChange={(event) => setItemType(event.target.value)}
                 >
                   <option value="all">All Types</option>
                   {[...new Set(report.items.map((item) => item.item_type))].map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
+                    <option key={value} value={value}>{value}</option>
                   ))}
                 </select>
               </div>
-              <div className="ml-auto font-mono text-[10px] text-primary-subtle">
+              <div className="ml-auto font-mono text-xs text-primary-subtle">
                 {filtered.length} / {report.items.length} findings
               </div>
             </Panel>
@@ -399,17 +375,17 @@ export function ReviewPage() {
             ) : (
               <Panel className="overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-left">
-                    <thead className="border-b border-white/[0.07] bg-surface-low/80">
-                      <tr className="font-sans text-[11px] font-medium text-primary-subtle">
-                        <th className="px-4 py-2.5 w-24">Priority</th>
-                        <th className="px-4 py-2.5">Finding Descriptor</th>
-                        <th className="px-4 py-2.5 w-24">Score</th>
-                        <th className="px-4 py-2.5 w-28">State</th>
-                        <th className="px-4 py-2.5 text-right w-12" />
+                  <table className="w-full min-w-[700px] text-left">
+                    <thead className="border-b border-white/[0.08] bg-surface-low/85">
+                      <tr className="font-sans text-xs font-medium text-primary-subtle">
+                        <th className="w-24 px-4 py-3">Priority</th>
+                        <th className="px-4 py-3">Finding</th>
+                        <th className="w-24 px-4 py-3">Score</th>
+                        <th className="w-28 px-4 py-3">State</th>
+                        <th className="w-12 px-4 py-3 text-right" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/[0.04]">
+                    <tbody className="divide-y divide-white/[0.05]">
                       {visibleFindings.map((item) => {
                         const active = selected?.item_id === item.item_id;
                         const kind = duplicateKind(item.item_type);
@@ -420,37 +396,35 @@ export function ReviewPage() {
                             key={item.item_id}
                             className={`transition-colors ${
                               active
-                                ? "border-l-2 border-l-accent bg-surface-high"
-                                : "border-l-2 border-l-transparent hover:bg-white/[0.02]"
+                                ? "border-l-2 border-l-accent bg-accent/[0.08]"
+                                : "border-l-2 border-l-transparent hover:bg-white/[0.03]"
                             }`}
                           >
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3.5">
                               <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3.5">
                               <button
                                 type="button"
                                 id={`finding-row-trigger-${item.item_id}`}
                                 onClick={() => handleSelectFinding(item.item_id)}
                                 aria-label={`Inspect finding: ${item.summary}, Priority ${item.priority_band}, Score ${item.priority_score.toFixed(0)}`}
-                                className="group flex w-full flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-[2px]"
+                                className="group flex w-full flex-col rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                               >
                                 <div className="flex items-center gap-2">
-                                  <span className={`font-sans text-xs transition-colors group-hover:text-accent ${active ? "font-medium text-primary" : "text-primary/90"}`}>
+                                  <span className={`font-sans text-xs transition-colors group-hover:text-accent ${active ? "font-semibold text-primary" : "font-medium text-primary/95"}`}>
                                     {item.summary}
                                   </span>
-                                  <span className="rounded-[2px] border border-white/[0.05] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[9px] text-primary-subtle/80">
+                                  <span className="rounded-md border border-white/[0.07] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-primary-subtle">
                                     {item.item_type}
                                   </span>
                                 </div>
                                 {reason ? (
-                                  <p className="mt-0.5 truncate font-editorial text-[11px] italic text-primary-subtle">
-                                    {reason}
-                                  </p>
+                                  <p className="mt-1 truncate text-xs text-primary-subtle">{reason}</p>
                                 ) : null}
                               </button>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3.5">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-xs font-semibold text-primary">{item.priority_score.toFixed(0)}</span>
                                 <div className="hidden w-12 sm:block">
@@ -458,16 +432,16 @@ export function ReviewPage() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3.5">
                               <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
                             </td>
-                            <td className="px-4 py-3 text-right">
+                            <td className="px-4 py-3.5 text-right">
                               <button
                                 type="button"
                                 tabIndex={-1}
                                 aria-label={`Open details for ${item.summary}`}
                                 onClick={() => handleSelectFinding(item.item_id)}
-                                className={`inline-flex p-0.5 rounded-[2px] transition-colors ${active ? "text-accent" : "text-primary-subtle/60 hover:text-primary"}`}
+                                className={`inline-flex rounded p-1 transition-colors ${active ? "text-accent" : "text-primary-subtle hover:text-primary"}`}
                               >
                                 <Icon name="chevron_right" className="text-base" />
                               </button>
@@ -478,7 +452,7 @@ export function ReviewPage() {
                     </tbody>
                   </table>
                 </div>
-                <div className="flex items-center justify-between border-t border-white/[0.05] bg-surface-low/40 px-4 py-2 font-mono text-[10px] text-primary-subtle">
+                <div className="flex items-center justify-between border-t border-white/[0.07] bg-surface-low/60 px-4 py-2.5 text-xs text-primary-subtle">
                   <span>{report.items.length} total findings</span>
                   <span>Sorted by Priority Score (Descending)</span>
                 </div>
@@ -505,24 +479,23 @@ export function ReviewPage() {
         }
       />
 
-      {/* Responsive Inspector Overlay for < xl (tablet & mobile) */}
       {mobileInspectorOpen && selected ? (
         <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-sm xl:hidden"
+          className="fixed inset-0 z-50 flex justify-end bg-black/75 xl:hidden"
           role={metadataEditorOpen ? undefined : "dialog"}
           aria-modal={metadataEditorOpen ? undefined : true}
           aria-label={`Finding Inspector: ${selected.summary}`}
           onMouseDown={handleCloseMobileInspector}
         >
           <div
-            className="flex h-full w-full max-w-lg flex-col border-l border-white/[0.1] bg-surface shadow-2xl overflow-hidden"
+            className="flex h-full w-full max-w-lg flex-col overflow-hidden border-l border-white/[0.12] bg-surface shadow-soft"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/[0.07] bg-surface-low/80 px-4 py-3">
+            <div className="flex items-center justify-between border-b border-white/[0.08] bg-surface-low/90 px-4 py-3">
               <button
                 type="button"
                 onClick={handleCloseMobileInspector}
-                className="flex items-center gap-1.5 rounded-[2px] px-2 py-1 font-sans text-xs text-primary-muted transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-xs font-medium text-primary-muted transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 aria-label="Back to finding list"
               >
                 <Icon name="arrow_back" className="text-base" />

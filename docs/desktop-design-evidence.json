@@ -1,0 +1,570 @@
+{
+  "date": "2026-11-18",
+  "branch": "codex/desktop01-creative-redesign",
+  "base_commit": "8304155b5de83e8846e33ac591e96ff50c8a0768",
+  "environment": {
+    "os": "Windows 11 Pro",
+    "build": 26300,
+    "webview2": "157.0.4341.46",
+    "display_dpi": 96,
+    "node": "22.19.0"
+  },
+  "tests": {
+    "frontend": {
+      "files": 11,
+      "passed": 67
+    },
+    "focused_backend_launcher": {
+      "passed": 15
+    },
+    "typescript_and_production_build": "passed",
+    "vite_entry_and_module_transform": "HTTP 200"
+  },
+  "safety": {
+    "reviewOnly": true,
+    "organizationApply": false,
+    "blocked": [
+      {
+        "url": "/api/review/plan/apply",
+        "status": 403,
+        "detail": {
+          "detail": "This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled."
+        }
+      },
+      {
+        "url": "/api/history/acceptance-completed/restore",
+        "status": 403,
+        "detail": {
+          "detail": "This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled."
+        }
+      },
+      {
+        "url": "/api/history/acceptance-completed/undo",
+        "status": 403,
+        "detail": {
+          "detail": "This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled."
+        }
+      },
+      {
+        "url": "/api/metadata/plan/apply",
+        "status": 403,
+        "detail": {
+          "detail": "This NyxCore server is in review-only mode. Applying plans, restoring and undoing are disabled."
+        }
+      },
+      {
+        "url": "/api/organization/preview/fbccf225-3bce-4040-8cf4-6d628728086e/review",
+        "status": 403,
+        "detail": {
+          "detail": "Organization apply requires an explicitly configured disposable development library."
+        }
+      },
+      {
+        "url": "/api/organization/preview/fbccf225-3bce-4040-8cf4-6d628728086e/apply",
+        "status": 403,
+        "detail": {
+          "detail": "Organization apply requires an explicitly configured disposable development library."
+        }
+      }
+    ]
+  },
+  "library_integrity": {
+    "demo": {
+      "files": 9,
+      "paths_and_sha256_unchanged": true
+    },
+    "fixture": {
+      "files": 71,
+      "paths_and_sha256_unchanged": true
+    }
+  },
+  "protected_refs": {
+    "main": "4b806bd209c9e653392114c47407bf8745e349d6",
+    "tag": "4922bdf05599f2b07b8221f83a79754b5aa2edf1"
+  },
+  "native_flow_checks": {
+    "modalFocusTrap": true,
+    "modalRestoresFocus": true,
+    "folderKeyboardToggle": true,
+    "organizationPagination": true,
+    "organizationCounts": {
+      "ready": 58,
+      "needs_review": 6,
+      "collision": 4,
+      "unchanged": 1
+    },
+    "organizationApplyEnabled": false,
+    "reviewFilterAndPlan": true,
+    "metadataPreview": true,
+    "healthIssueEditor": true,
+    "headerFocus": {
+      "label": "Submit archive search",
+      "shadow": "rgb(255, 255, 255) 0px 0px 0px 0px, rgb(224, 159, 90) 0px 0px 0px 2px, rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+    }
+  },
+  "native_export": {
+    "before": {
+      "successMessage": 1,
+      "downloadFailure": "canceled"
+    },
+    "final_disabled": true,
+    "browser_explanation_visible": true
+  },
+  "browser_checks": {
+    "browserExportEnabled": true,
+    "exportedTracks": 69,
+    "emptySearch": true,
+    "pageErrors": [],
+    "overflow": false
+  },
+  "live_provider_check": {
+    "lookup": true,
+    "recording_and_release_selection": true,
+    "release_no_cover_state": true,
+    "release_group_cover_selection": true,
+    "real_thumbnails_decoded": true,
+    "provider_selection_applied_to_audio": false
+  },
+  "layout_checks": {
+    "layouts-1424": [
+      {
+        "name": "Overview",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Archive Search",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Duplicates",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Health",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Review Inbox 11",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Metadata",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Organization",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "History",
+        "width": 1424,
+        "height": 861,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      }
+    ],
+    "layouts-1264": [
+      {
+        "name": "Overview",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Archive Search",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Duplicates",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Health",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Review Inbox 11",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Metadata",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Organization",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "History",
+        "width": 1264,
+        "height": 761,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      }
+    ],
+    "layouts-824": [
+      {
+        "name": "Overview",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Archive Search",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Duplicates",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Health",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Review Inbox 11",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Metadata",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Organization",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "History",
+        "width": 824,
+        "height": 581,
+        "dpr": 1,
+        "documentOverflow": false,
+        "mainOverflow": false
+      }
+    ],
+    "layouts-949": [
+      {
+        "name": "Overview",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Archive Search",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Duplicates",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Health",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Review Inbox 11",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Metadata",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "Library Organization",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      },
+      {
+        "name": "History",
+        "width": 949,
+        "height": 574,
+        "dpr": 1.5,
+        "documentOverflow": false,
+        "mainOverflow": false
+      }
+    ]
+  },
+  "performance": {
+    "historical_reference": {
+      "window_seconds": 0.58,
+      "usable_seconds": 1.43,
+      "navigation_ms": [
+        74,
+        124
+      ]
+    },
+    "integration_runs": [
+      {
+        "window_shown_seconds": 0.5,
+        "overview_usable_seconds": 1.109
+      },
+      {
+        "window_shown_seconds": 0.468,
+        "overview_usable_seconds": 1.093
+      },
+      {
+        "window_shown_seconds": 0.485,
+        "overview_usable_seconds": 1.125
+      }
+    ],
+    "initial_run": {
+      "window_seconds": 0.672,
+      "usable_seconds": 3.25,
+      "engine_seconds": 2.922
+    },
+    "contemporary_baseline": {
+      "window_seconds": 0.531,
+      "usable_seconds": 1.234
+    },
+    "normal_gui": {
+      "window_seconds": 0.469,
+      "document_loaded_seconds": 1.0
+    },
+    "navigation_samples": [
+      {
+        "name": "Archive Search",
+        "round": 0,
+        "ms": 51
+      },
+      {
+        "name": "Duplicates",
+        "round": 0,
+        "ms": 38
+      },
+      {
+        "name": "Library Health",
+        "round": 0,
+        "ms": 45
+      },
+      {
+        "name": "Metadata",
+        "round": 0,
+        "ms": 33
+      },
+      {
+        "name": "Library Organization",
+        "round": 0,
+        "ms": 34
+      },
+      {
+        "name": "History",
+        "round": 0,
+        "ms": 38
+      },
+      {
+        "name": "Overview",
+        "round": 0,
+        "ms": 39
+      },
+      {
+        "name": "Archive Search",
+        "round": 1,
+        "ms": 33
+      },
+      {
+        "name": "Duplicates",
+        "round": 1,
+        "ms": 33
+      },
+      {
+        "name": "Library Health",
+        "round": 1,
+        "ms": 33
+      },
+      {
+        "name": "Metadata",
+        "round": 1,
+        "ms": 33
+      },
+      {
+        "name": "Library Organization",
+        "round": 1,
+        "ms": 29
+      },
+      {
+        "name": "History",
+        "round": 1,
+        "ms": 32
+      },
+      {
+        "name": "Overview",
+        "round": 1,
+        "ms": 34
+      },
+      {
+        "name": "Archive Search",
+        "round": 2,
+        "ms": 33
+      },
+      {
+        "name": "Duplicates",
+        "round": 2,
+        "ms": 33
+      },
+      {
+        "name": "Library Health",
+        "round": 2,
+        "ms": 39
+      },
+      {
+        "name": "Metadata",
+        "round": 2,
+        "ms": 28
+      },
+      {
+        "name": "Library Organization",
+        "round": 2,
+        "ms": 28
+      },
+      {
+        "name": "History",
+        "round": 2,
+        "ms": 33
+      },
+      {
+        "name": "Overview",
+        "round": 2,
+        "ms": 39
+      }
+    ],
+    "navigation_median_ms": 33,
+    "historical_instrumentation_comparable": false
+  },
+  "native_captures": [
+    "01-overview-default.jpg",
+    "01b-overview-1440x900.jpg",
+    "02-archive-search.jpg",
+    "03-duplicates-expanded-1440x900.jpg",
+    "04-metadata-editor-1440x900.jpg",
+    "04b-musicbrainz-real-cover-preview.jpg",
+    "04c-metadata-plan-native.jpg",
+    "05-organization-populated-tree-1440x900.jpg",
+    "05b-organization-conflicts-1440x900.jpg",
+    "06-history-recovery-1440x900.jpg",
+    "07-compact-metadata-840x620.jpg",
+    "07b-compact-overview-840x620.jpg",
+    "08-webview-content-150percent.jpg",
+    "09-health-native-export.jpg",
+    "10-review-inbox-native.jpg"
+  ],
+  "true_windows_150_percent_dpi_verified": false,
+  "content_150_percent_verified": true,
+  "runtime_dependency_note": "Local ignored virtual environment borrows the preserved Desktop 01 dependency directory.",
+  "shutdown": {
+    "normal_gui_clean": true,
+    "backend_listener_released": true,
+    "normal_gui_window_closed": true
+  },
+  "preservation": {
+    "desktop01_worktree_clean": true,
+    "desktop01_head": "8304155b5de83e8846e33ac591e96ff50c8a0768",
+    "isolated_screenshot_deletions_retained": 13
+  }
+}

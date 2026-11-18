@@ -56,7 +56,7 @@ export function HistoryPage() {
 
   const header = (
     <PageHeader
-      eyebrow="Ledger Operations"
+      eyebrow="Operation Ledger"
       title="Operation History"
       description="Inspect recorded batches, recovery states, and reversal outcomes."
       actions={response && !historyQuery.isError ? (
@@ -123,17 +123,17 @@ export function HistoryPage() {
       <SplitScreen
         main={
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-2 border-b border-white/[0.07] pb-3">
+            <div className="inline-flex flex-wrap gap-1.5 rounded-xl border border-white/[0.08] bg-surface p-1.5">
               {HISTORY_FILTERS.map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"
                   aria-pressed={historyFilter === value}
                   onClick={() => setHistoryFilter(value)}
-                  className={`rounded-[3px] px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
+                  className={`rounded-lg px-3.5 py-1.5 font-sans text-xs font-medium transition-colors ${
                     historyFilter === value
-                      ? "bg-white/[0.08] text-accent shadow-sm ring-1 ring-accent/30"
-                      : "text-primary-subtle hover:bg-white/[0.03] hover:text-primary"
+                      ? "bg-accent/15 text-primary shadow-[inset_0_1px_0_rgba(255,248,235,0.08)]"
+                      : "text-primary-muted hover:bg-white/[0.04] hover:text-primary"
                   }`}
                 >
                   {label}
@@ -152,12 +152,12 @@ export function HistoryPage() {
               <Panel className="overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left sm:min-w-[680px]">
-                    <thead className="border-b border-white/[0.07] bg-surface-low/80">
-                      <tr className="font-sans text-[11px] font-medium text-primary-subtle">
-                        <th className="px-2.5 py-3 sm:px-5">Timestamp & ID</th>
+                    <thead className="border-b border-white/[0.08] bg-surface-low/85">
+                      <tr className="font-sans text-xs font-medium text-primary-subtle">
+                        <th className="px-3 py-3 sm:px-5">Timestamp &amp; ID</th>
                         <th className="hidden px-5 py-3 sm:table-cell">Operation Details</th>
-                        <th className="px-2.5 py-3 sm:px-5">State</th>
-                        <th className="px-2.5 py-3 text-right sm:px-5">Actions</th>
+                        <th className="px-3 py-3 sm:px-5">State</th>
+                        <th className="px-3 py-3 text-right sm:px-5">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.05]">
@@ -169,26 +169,26 @@ export function HistoryPage() {
                             key={item.batch_id}
                             className={`transition-colors ${
                               active
-                                ? "border-l-2 border-l-accent bg-surface-raised"
-                                : "hover:bg-surface-raised/50"
+                                ? "border-l-2 border-l-accent bg-accent/[0.08]"
+                                : "hover:bg-white/[0.03]"
                             }`}
                           >
-                            <td className="px-2.5 py-3.5 sm:px-5">
+                            <td className="px-3 py-3.5 sm:px-5">
                               <button
                                 type="button"
                                 id={`history-batch-trigger-${item.batch_id}`}
                                 onClick={() => selectById(item.batch_id)}
                                 aria-label={`Inspect batch ${item.batch_id}, recorded ${formatDate(item.applied_at)}`}
-                                className="flex flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-[2px] group"
+                                className="group flex flex-col rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                               >
-                                <span className="font-sans text-xs font-medium text-primary group-hover:text-accent transition-colors">{formatDate(item.applied_at)}</span>
-                                <span className="[overflow-wrap:anywhere] font-mono text-[10px] text-primary-subtle">{item.batch_id}</span>
+                                <span className="font-sans text-xs font-medium text-primary transition-colors group-hover:text-accent">{formatDate(item.applied_at)}</span>
+                                <span className="[overflow-wrap:anywhere] font-mono text-[11px] text-primary-subtle">{item.batch_id}</span>
                               </button>
                             </td>
                             <td className="hidden px-5 py-3.5 sm:table-cell">
-                              <div className="flex items-center gap-2.5">
-                                <div className="flex size-7 shrink-0 items-center justify-center rounded-[2px] border border-white/[0.08] bg-surface text-accent">
-                                  <Icon name="database" className="text-sm" />
+                              <div className="flex items-center gap-3">
+                                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-surface-low text-accent">
+                                  <Icon name="receipt_long" className="text-[16px]" />
                                 </div>
                                 <div className="min-w-0">
                                   <span className="block truncate font-sans text-xs font-medium text-primary">{item.action_types.join(", ")}</span>
@@ -198,18 +198,16 @@ export function HistoryPage() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-2.5 py-3.5 sm:px-5">
+                            <td className="px-3 py-3.5 sm:px-5">
                               <Chip tone={state.tone}>{state.label}</Chip>
                             </td>
-                            <td className="px-2.5 py-3.5 text-right sm:px-5">
+                            <td className="px-3 py-3.5 text-right sm:px-5">
                               <Button
                                 tone="secondary"
                                 id={`reverse-button-${item.batch_id}`}
-                                className="px-2 py-1 text-xs sm:px-3"
+                                className="px-2.5 py-1 text-xs sm:px-3"
                                 disabled={reviewOnly || !canReverseHistoryBatch(item) || busy}
-                                onClick={() => {
-                                  setConfirmBatchId(item.batch_id);
-                                }}
+                                onClick={() => setConfirmBatchId(item.batch_id)}
                               >
                                 Reverse
                               </Button>
@@ -234,32 +232,32 @@ export function HistoryPage() {
               onReverse={() => selected && canReverseHistoryBatch(selected) && setConfirmBatchId(selected.batch_id)}
             />
             <Panel className="p-5">
-              <h3 className="mb-4 flex items-center gap-2 border-b border-white/[0.07] pb-3 font-display text-sm font-semibold tracking-wide text-primary">
+              <h3 className="mb-4 flex items-center gap-2 border-b border-white/[0.08] pb-3 font-display text-sm font-semibold text-primary">
                 <Icon name="analytics" className="text-base text-accent" />
                 Session Statistics
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Total Ops</span>
-                  <p className="mt-1 font-display text-xl font-bold tracking-tight text-primary">
+                <div className="rounded-xl border border-white/[0.07] bg-surface-low/75 p-3">
+                  <span className="font-sans text-xs text-primary-subtle">Total Ops</span>
+                  <p className="mt-1 font-display text-xl font-semibold text-primary">
                     {response.items.reduce((sum, item) => sum + item.affected_count, 0)}
                   </p>
                 </div>
-                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reversible</span>
-                  <p className="mt-1 font-display text-xl font-bold tracking-tight text-accent">
+                <div className="rounded-xl border border-white/[0.07] bg-surface-low/75 p-3">
+                  <span className="font-sans text-xs text-primary-subtle">Reversible</span>
+                  <p className="mt-1 font-display text-xl font-semibold text-accent">
                     {response.items.filter(canReverseHistoryBatch).length}
                   </p>
                 </div>
-                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Reactivated</span>
-                  <p className="mt-1 font-display text-xl font-bold tracking-tight text-amber-400">
+                <div className="rounded-xl border border-white/[0.07] bg-surface-low/75 p-3">
+                  <span className="font-sans text-xs text-primary-subtle">Reactivated</span>
+                  <p className="mt-1 font-display text-xl font-semibold text-[#f2c86b]">
                     {mutationResult?.reactivated_review_item_ids.length ?? 0}
                   </p>
                 </div>
-                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Batches</span>
-                  <p className="mt-1 font-display text-xl font-bold tracking-tight text-primary">
+                <div className="rounded-xl border border-white/[0.07] bg-surface-low/75 p-3">
+                  <span className="font-sans text-xs text-primary-subtle">Batches</span>
+                  <p className="mt-1 font-display text-xl font-semibold text-primary">
                     {response.items.length}
                   </p>
                 </div>
@@ -281,7 +279,7 @@ export function HistoryPage() {
             </Button>
             <Button
               tone="primary"
-            disabled={reviewOnly || busy || !confirmBatch || !canReverseHistoryBatch(confirmBatch)}
+              disabled={reviewOnly || busy || !confirmBatch || !canReverseHistoryBatch(confirmBatch)}
               onClick={() => {
                 if (!busy && confirmBatch && canReverseHistoryBatch(confirmBatch)) {
                   void handleReverse(confirmBatch.batch_id);
@@ -293,7 +291,7 @@ export function HistoryPage() {
           </>
         }
       >
-        <div className="space-y-3 text-xs leading-relaxed text-slate-300">
+        <div className="space-y-3 text-xs leading-relaxed text-primary-muted">
           <p>This action uses the persisted operation ledger and recorded original paths to safely reverse the selected batch.</p>
           <p>If a target path is occupied or a file has moved outside NyxCore, the operation halts safely and reports the conflict without overwriting.</p>
         </div>

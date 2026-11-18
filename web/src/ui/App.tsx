@@ -11,16 +11,16 @@ import { ReviewPage } from "./pages/ReviewPage";
 import { SearchPage } from "./pages/SearchPage";
 import { AppShell } from "./shell";
 
-export function App() {
+export function App({ desktop = false }: { desktop?: boolean }) {
   return (
-    <AppShell>
+    <AppShell desktop={desktop}>
       <Routes>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={<DashboardPage desktop={desktop} />} />
         <Route path="/review" element={<ReviewPage />} />
         <Route path="/playlists" element={<PlaylistsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/duplicates" element={<DuplicatesPage />} />
-        <Route path="/health" element={<HealthPage />} />
+        <Route path="/health" element={<HealthPage desktop={desktop} />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/metadata" element={<MetadataPage />} />
         <Route path="/organization" element={<OrganizationPage />} />

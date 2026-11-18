@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { reviewPriorityTone, reviewStatusLabel, reviewStatusTone } from "../../lib/review-presenter";
 import { duplicateKind, type DuplicateEvidence } from "../../lib/duplicate-evidence";
 import type { ReviewItem } from "../../lib/types";
-import { Button, Chip, Drawer, Icon, LabeledValue, Panel, PathBlock, ProgressBar, formatBytes } from "../components";
+import { Button, Chip, Drawer, Icon, LabeledValue, PathBlock, ProgressBar, formatBytes } from "../components";
 import { formatDuplicateScore } from "../duplicates/DuplicateComparison";
 import { DuplicateDecisionEvidence } from "./DuplicateDecisionEvidence";
 import { MetadataDraftLink, MetadataEditButton } from "../metadata/MetadataEditor";
@@ -51,7 +52,7 @@ export function ReviewDetailPanel({
             type="button"
             aria-label="Close inspector"
             onClick={onClose}
-            className="rounded-[2px] p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="rounded-lg p-1.5 text-primary-muted hover:bg-surface-mid hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <Icon name="close" />
           </button>
@@ -74,7 +75,7 @@ export function ReviewDetailPanel({
       }
     >
       {!item ? (
-        <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/50 px-4 py-8 font-sans text-xs text-primary-subtle text-center">
+        <div className="rounded-xl border border-white/[0.08] bg-surface-low/60 px-4 py-8 text-center font-sans text-xs text-primary-subtle">
           Select a review finding from the stream to inspect details and plan actions.
         </div>
       ) : (
@@ -85,37 +86,37 @@ export function ReviewDetailPanel({
                 <Chip tone={reviewPriorityTone(item.priority_band)}>{item.priority_band}</Chip>
                 <Chip tone={reviewStatusTone(item.review_status)}>{reviewStatusLabel(item.review_status)}</Chip>
               </div>
-              <span className="font-mono text-[10px] text-primary-subtle truncate max-w-[140px]">{item.item_type}</span>
+              <span className="max-w-[160px] truncate font-mono text-[11px] text-primary-subtle">{item.item_type}</span>
             </div>
-            <h3 className="font-display text-base font-bold text-primary leading-snug">{item.summary}</h3>
+            <h3 className="font-display text-base font-semibold leading-snug text-primary">{item.summary}</h3>
             {!kind && item.reason_summary ? (
-              <p className="font-editorial text-xs italic text-primary-muted leading-relaxed">{item.reason_summary}</p>
+              <p className="text-xs leading-relaxed text-primary-muted">{item.reason_summary}</p>
             ) : null}
           </div>
 
-          <div className="space-y-1.5 rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-            <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">
+          <div className="space-y-2 rounded-xl border border-white/[0.08] bg-surface-low/75 p-3.5">
+            <div className="flex justify-between font-sans text-xs text-primary-subtle">
               <span>Priority Score</span>
-              <span className="font-bold text-primary">{item.priority_score} / 100</span>
+              <span className="font-mono font-semibold text-primary">{item.priority_score} / 100</span>
             </div>
             <ProgressBar value={item.priority_score} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">{kind === "exact" ? "Size of other copies" : "Reclaimable"}</p>
-              <p className="mt-1 font-display text-base font-bold text-primary">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-white/[0.08] bg-surface-low/75 p-3.5">
+              <p className="font-sans text-[11px] font-medium text-primary-subtle">{kind === "exact" ? "Size of other copies" : "Reclaimable"}</p>
+              <p className="mt-1 font-display text-base font-semibold text-primary">
                 {kind === "likely" || item.reclaimable_bytes == null ? "Unavailable" : formatBytes(item.reclaimable_bytes)}
               </p>
               {kind === "exact" && item.reclaimable_bytes != null ? (
                 <p className="mt-1 text-xs text-primary-muted">Quarantine keeps files on disk.</p>
               ) : null}
             </div>
-            <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">
+            <div className="rounded-xl border border-white/[0.08] bg-surface-low/75 p-3.5">
+              <p className="font-sans text-[11px] font-medium text-primary-subtle">
                 {kind === "exact" ? "Match type" : kind === "likely" ? "Lowest reported pair score" : "Confidence"}
               </p>
-              <p className="mt-1 font-display text-lg font-bold tracking-tight text-accent">
+              <p className="mt-1 font-display text-base font-semibold tracking-tight text-accent">
                 {kind === "exact" ? "Byte identity" : item.confidence == null ? "Unavailable"
                   : kind === "likely" ? formatDuplicateScore(item.confidence) : Math.round(item.confidence * 100) + "%"}
               </p>
@@ -125,15 +126,15 @@ export function ReviewDetailPanel({
 
           {duplicateEvidence ? <DuplicateDecisionEvidence key={item.item_id} evidence={duplicateEvidence} /> : null}
 
-          <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/40 px-3.5 py-2.5 font-sans text-xs text-primary-muted leading-relaxed" role="note">
-            <p className="font-medium text-accent/90 mb-0.5">Resolution Behavior</p>
+          <div className="rounded-xl border border-white/[0.08] bg-surface-low/60 px-3.5 py-3 font-sans text-xs leading-relaxed text-primary-muted" role="note">
+            <p className="mb-0.5 font-medium text-accent">Resolution Behavior</p>
             <p className="text-[11px] text-primary-subtle">
-              Executing <span className="text-primary font-medium">Resolve Until Refresh</span> hides this finding without modifying files. If the next library refresh still detects it, NyxCore returns it as Seen.
+              Executing <span className="font-medium text-primary">Resolve Until Refresh</span> hides this finding without modifying files. If the next library refresh still detects it, NyxCore returns it as Seen.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary-subtle">Triage State</p>
+          <div className="space-y-2.5">
+            <p className="font-sans text-xs font-medium text-primary-subtle">Triage State</p>
             <div className="grid grid-cols-2 gap-2">
               <Button tone="secondary" disabled={usingMock || busy} onClick={onMarkSeen}>
                 Mark Seen
@@ -157,38 +158,42 @@ export function ReviewDetailPanel({
             />
           ) : null}
 
-          {!detailedEvidence ? <LabeledValue
-            label={`Affected Files (${affectedPaths.length})`}
-            value={
-              affectedPaths.length > 0 ? (
-                <div className="space-y-1.5">
-                  {editable && <MetadataDraftLink />}
-                  {displayedAffectedPaths.map((path) => (
-                    <div key={path} className="space-y-1.5">
-                      <PathBlock value={path} />
-                      {editable && <MetadataEditButton path={path} />}
-                    </div>
-                  ))}
-                  {editable && affectedPaths.length > AFFECTED_PATH_PREVIEW_LIMIT ? (
-                    <nav aria-label="Metadata finding files" className="flex flex-wrap items-center gap-2 text-xs text-primary-muted">
-                      <Button type="button" disabled={page === 0} onClick={() => setPaging({ item: item.item_id, page: page - 1 })}>Previous</Button>
-                      <span>{start + 1}–{start + displayedAffectedPaths.length} of {affectedPaths.length}</span>
-                      <Button type="button" disabled={start + displayedAffectedPaths.length >= affectedPaths.length}
-                        onClick={() => setPaging({ item: item.item_id, page: page + 1 })}>Next</Button>
-                    </nav>
-                  ) : remainingAffectedPathCount > 0 ? (
-                    <p className="px-1 font-sans text-[11px] text-primary-subtle">
-                      {remainingAffectedPathCount} more paths. Generate a plan to inspect full operations.
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="rounded-[3px] border border-white/[0.06] bg-surface-low px-3 py-2 font-sans text-xs text-primary-subtle">No affected paths attached.</div>
-              )
-            }
-          /> : null}
+          {!detailedEvidence ? (
+            <LabeledValue
+              label={`Affected Files (${affectedPaths.length})`}
+              value={
+                affectedPaths.length > 0 ? (
+                  <div className="space-y-2">
+                    {editable && <MetadataDraftLink />}
+                    {displayedAffectedPaths.map((path) => (
+                      <div key={path} className="space-y-1.5">
+                        <PathBlock value={path} />
+                        {editable && <MetadataEditButton path={path} />}
+                      </div>
+                    ))}
+                    {editable && affectedPaths.length > AFFECTED_PATH_PREVIEW_LIMIT ? (
+                      <nav aria-label="Metadata finding files" className="flex flex-wrap items-center gap-2 text-xs text-primary-muted">
+                        <Button type="button" disabled={page === 0} onClick={() => setPaging({ item: item.item_id, page: page - 1 })}>Previous</Button>
+                        <span>{start + 1}–{start + displayedAffectedPaths.length} of {affectedPaths.length}</span>
+                        <Button type="button" disabled={start + displayedAffectedPaths.length >= affectedPaths.length}
+                          onClick={() => setPaging({ item: item.item_id, page: page + 1 })}>Next</Button>
+                      </nav>
+                    ) : remainingAffectedPathCount > 0 ? (
+                      <p className="px-1 font-sans text-[11px] text-primary-subtle">
+                        {remainingAffectedPathCount} more paths. Generate a plan to inspect full operations.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-white/[0.08] bg-surface-low px-3 py-2 font-sans text-xs text-primary-subtle">
+                    No affected paths attached.
+                  </div>
+                )
+              }
+            />
+          ) : null}
 
-          <p className="pt-2 text-center font-editorial text-xs italic text-primary-subtle/80">
+          <p className="pt-1 text-center font-sans text-[11px] text-primary-subtle">
             NyxCore records mutation intent in the local ledger before execution.
           </p>
         </>
@@ -196,4 +201,3 @@ export function ReviewDetailPanel({
     </Drawer>
   );
 }
-import { useState } from "react";
