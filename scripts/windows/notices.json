@@ -1,0 +1,74 @@
+{
+  "CPython/OpenSSL.txt": {
+    "url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.8/LICENSE.txt",
+    "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+  },
+  "CPython/libffi.txt": {
+    "url": "https://raw.githubusercontent.com/libffi/libffi/v3.4.8/LICENSE",
+    "sha256": "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195"
+  },
+  "CPython/SQLite.txt": {
+    "url": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260901/LICENSE.sqlite.txt",
+    "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+  },
+  "CPython/liblzma.txt": {
+    "url": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260901/LICENSE.liblzma.txt",
+    "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+  },
+  "CPython/libmpdec.txt": {
+    "url": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260901/LICENSE.mpdecimal.txt",
+    "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+  },
+  "CPython/Expat.txt": {
+    "url": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_3/expat/COPYING",
+    "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+  },
+  "CPython/zlib.txt": {
+    "url": "https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE",
+    "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+  },
+  "LibYAML/LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/yaml/libyaml/0.2.5/License",
+    "sha256": "c40112449f254b9753045925248313e9270efa36d226b22d82d4cc6c43c57f29"
+  },
+  "python/proxy-tools/LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/jtushman/proxy_tools/db43f1e35d4f90a65c5a4d56d9e9af88212ec6e6/LICENSE.txt",
+    "sha256": "a428fb8a2e762af3eb0a6edbbb88e9b42ccfee80fd9b423958bcacf9b9abbfe4"
+  },
+  "pydantic-core-crates/r-efi-5.2.0/README.md": {
+    "url": "https://raw.githubusercontent.com/r-efi/r-efi/db87f6c8c6346d66750b5bda6befebafa0dc0c4c/README.md",
+    "sha256": "420f65fec3ba2e89d49da51b222d2881d26959037a7b7d3794143db4bd4627b1"
+  },
+  "pydantic-core-crates/r-efi-5.2.0/AUTHORS": {
+    "url": "https://raw.githubusercontent.com/r-efi/r-efi/db87f6c8c6346d66750b5bda6befebafa0dc0c4c/AUTHORS",
+    "sha256": "c42285aa32440c3b5358fd4805b817cd8d6e1795111d2e4c547530be41896b2d"
+  },
+  "pydantic-core-crates/r-efi-5.2.0/LICENSE-APACHE": {
+    "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "pydantic-core-crates/wit-bindgen-rt-0.39.0/LICENSE-APACHE": {
+    "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-APACHE",
+    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  },
+  "pydantic-core-crates/wit-bindgen-rt-0.39.0/LICENSE-Apache-2.0_WITH_LLVM-exception": {
+    "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-Apache-2.0_WITH_LLVM-exception",
+    "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+  },
+  "pydantic-core-crates/wit-bindgen-rt-0.39.0/LICENSE-MIT": {
+    "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+  },
+  "Rust/LICENSE-APACHE": {
+    "url": "https://raw.githubusercontent.com/rust-lang/rust/58cf8f9c35b355199727627d07ae34a4e2846d67/LICENSE-APACHE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+  },
+  "Rust/LICENSE-MIT": {
+    "url": "https://raw.githubusercontent.com/rust-lang/rust/58cf8f9c35b355199727627d07ae34a4e2846d67/LICENSE-MIT",
+    "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+  },
+  "Rust/COPYRIGHT": {
+    "url": "https://raw.githubusercontent.com/rust-lang/rust/58cf8f9c35b355199727627d07ae34a4e2846d67/COPYRIGHT",
+    "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+  }
+}

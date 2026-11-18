@@ -9,6 +9,8 @@ web/*.js
 web/*.d.ts
 web/*.tsbuildinfo
 /dist/preview/
+/dist/windows-rc/
+/dist/windows-rc-tools/
 
 tests/_runtime_*/
 tests/tmp*/

@@ -1,5 +1,7 @@
 import json
+import sys
 from time import monotonic, sleep
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -7,6 +9,18 @@ import pytest
 
 from nyxcore import desktop, launch
 from nyxcore.desktop_library import DesktopLibraries, LibraryChoice
+
+
+def test_missing_webview2_points_to_microsoft_evergreen_installer(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError()
+
+    monkeypatch.setitem(sys.modules, "winreg", SimpleNamespace(
+        HKEY_LOCAL_MACHINE=1, HKEY_CURRENT_USER=2, KEY_WOW64_32KEY=0x0200,
+        KEY_READ=0x20019, OpenKey=unavailable,
+    ))
+    with pytest.raises(RuntimeError, match=r"https://developer\.microsoft\.com/microsoft-edge/webview2/#download"):
+        desktop.require_webview2()
 
 
 def test_desktop_backend_serves_only_the_review_app_and_releases_the_port(tmp_path, monkeypatch):

@@ -16,7 +16,7 @@ from tempfile import TemporaryDirectory
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_PATHS = ("nyxcore", "pyproject.toml", "README.md", "INSTALL_PREVIEW.md", "web", "demo/create_demo_library.py")
+SOURCE_PATHS = ("nyxcore", "pyproject.toml", "README.md", "LICENSE", "INSTALL_PREVIEW.md", "web", "demo/create_demo_library.py")
 
 
 def tool(name: str) -> str:
@@ -123,6 +123,7 @@ def build_preview(destination: Path) -> tuple[Path, str]:
 
         files = {
             "README.md": stage / "README.md",
+            "LICENSE": stage / "LICENSE",
             "INSTALL_PREVIEW.md": stage / "INSTALL_PREVIEW.md",
             "pyproject.toml": stage / "pyproject.toml",
             "nyxcore/resources/default.yaml": stage / "nyxcore/resources/default.yaml",
