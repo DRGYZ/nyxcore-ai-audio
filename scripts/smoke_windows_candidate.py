@@ -18,8 +18,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from zipfile import ZipFile
 
-import pefile
-
 from windows.notices import digest
 
 MARKER = b'<meta name="nyxcore-desktop" content="1">'
@@ -43,16 +41,48 @@ def verify_zip(path: Path) -> None:
                     f"Invalid archive member {name}.")
 
 
-def verify_source(package: Path, provenance: dict) -> None:
+def verify_pair(
+    package: Path, binary: ZipFile, provenance: dict, *,
+    expected_commit: str | None = None, approved_license_sha256: str | None = None,
+) -> None:
+    if expected_commit:
+        require(provenance["source_state"] == "commit" and provenance["source_commit"] == expected_commit,
+                "The binary was not built from the expected commit.")
+
     companion = provenance["source_companion"]
+    require(companion["file"] == f"{package.stem}-source.zip", "Unexpected source companion filename.")
     source = package.with_name(companion["file"])
     verify_zip(source)
     require(digest(source) == companion["sha256"], "The source companion belongs to another binary build.")
+
+    license_sha256 = provenance.get("first_party_license_sha256")
+    if approved_license_sha256 is not None:
+        require(expected_commit is not None and license_sha256 == approved_license_sha256,
+                "The archive pair must include the approved first-party LICENSE from the expected commit.")
+
     with ZipFile(source) as archive:
         root = source.stem + "/"
         manifest = json.loads(archive.read(root + "PREVIEW_BUILD.json"))
-        require(manifest["source_commit"] == provenance["source_commit"], "Source commit mismatch.")
+        require(manifest["binary_archive"] == package.name, "The source companion names a different binary ZIP.")
+        for field in ("source_commit", "source_state", "base_commit", "source_files_sha256", "first_party_license_sha256"):
+            require(manifest.get(field) == provenance.get(field), f"Binary and source provenance differ at {field}.")
         recorded = json.loads(archive.read(root + "SOURCE_FILES.json"))
+        inventory_sha256 = hashlib.sha256(json.dumps(recorded, sort_keys=True).encode("utf-8")).hexdigest()
+        require(inventory_sha256 == provenance["source_files_sha256"], "Source file inventory digest mismatch.")
+        require(recorded.get("LICENSE") == license_sha256, "First-party license is inconsistent with the source inventory.")
+        for zip_file, name in (
+            (binary, package.stem + "/LICENSE"),
+            (archive, root + "LICENSE"),
+            (archive, root + "project/LICENSE"),
+        ):
+            entries = zip_file.namelist().count(name)
+            if license_sha256 is None:
+                require(entries == 0, f"License is present without provenance: {name}.")
+            else:
+                require(entries == 1, f"Expected exactly one first-party license at {name}.")
+                contents = zip_file.read(name)
+                require(bool(contents.strip()) and hashlib.sha256(contents).hexdigest() == license_sha256,
+                        f"First-party license checksum mismatch at {name}.")
         for name, expected in recorded.items():
             member = archive.read(root + "project/" + name)
             require(hashlib.sha256(member).hexdigest() == expected, f"Source snapshot differs at {name}.")
@@ -106,6 +136,8 @@ def hash_files(root: Path) -> dict[str, str]:
 
 
 def smoke_executable(app: Path, sandbox: Path, display: int) -> dict:
+    import pefile
+
     exe = app / "NyxCore.exe"
     with pefile.PE(str(exe), fast_load=True) as pe:
         require(pe.FILE_HEADER.Machine == 0x8664 and pe.OPTIONAL_HEADER.Subsystem == 2, "Expected a windowed x64 executable.")
@@ -185,21 +217,32 @@ def main() -> int:
     parser.add_argument("package", type=Path)
     parser.add_argument("--display", type=int, default=1)
     parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--verify-only", action="store_true", help="Verify the archive pair without launching the app.")
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--approved-license-sha256")
     args = parser.parse_args()
+    approved_license = args.approved_license_sha256
+    if approved_license is not None and (not args.expected_commit or not re.fullmatch(r"[0-9a-fA-F]{64}", approved_license)):
+        parser.error("--approved-license-sha256 requires a SHA-256 digest and --expected-commit.")
     package = args.package.resolve()
     verify_zip(package)
     with TemporaryDirectory(prefix="NyxCore release 音楽 ", ignore_cleanup_errors=True) as directory, ZipFile(package) as archive:
         sandbox = Path(directory)
         root = package.stem + "/"
         provenance = json.loads(archive.read(root + "PREVIEW_BUILD.json"))
-        verify_source(package, provenance)
+        verify_pair(package, archive, provenance, expected_commit=args.expected_commit,
+                    approved_license_sha256=approved_license.lower() if approved_license is not None else None)
+        if args.verify_only:
+            print("Verified the binary and source archive pair.")
+            return 0
         names = archive.namelist()
         for name in names:
             require(not any(part.lower() in {"node_modules", ".venv", "tests"} for part in PurePosixPath(name).parts)
                     and not re.search(r"/(?:pythonw?|node|npm|ffmpeg)\.exe$", name, re.I), f"Development payload in {name}.")
         archive.extractall(sandbox)
         result = smoke_executable(sandbox / package.stem, sandbox, args.display)
-    receipt = {"source_commit": provenance["source_commit"], "zip_sha256": digest(package), **result}
+    receipt = {"source_commit": provenance["source_commit"], "zip_sha256": digest(package),
+               "first_party_license_sha256": provenance.get("first_party_license_sha256"), **result}
     report = json.dumps(receipt, indent=2)
     if args.receipt:
         args.receipt.write_text(report + "\n", encoding="utf-8")

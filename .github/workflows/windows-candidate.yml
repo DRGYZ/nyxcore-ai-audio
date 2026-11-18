@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - .github/workflows/windows-candidate.yml
+      - LICENSE
       - scripts/windows/**
       - scripts/*windows_candidate.py
       - nyxcore/**
@@ -17,6 +18,11 @@ on:
       - INSTALL_WINDOWS.md
       - docs/WINDOWS_DISTRIBUTION.md
   workflow_dispatch:
+    inputs:
+      upload_archives:
+        description: Upload the Windows ZIPs after distribution clearance
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -55,7 +61,7 @@ jobs:
         run: .\.venv\Scripts\python.exe scripts/build_windows_candidate.py
 
       - name: Smoke-test the extracted windowed executable
-        run: .\.venv\Scripts\python.exe scripts/smoke_windows_candidate.py dist/windows-rc/NyxCore-Windows-x64.zip --receipt dist/windows-rc/WINDOWS_SMOKE.json
+        run: .\.venv\Scripts\python.exe scripts/smoke_windows_candidate.py dist/windows-rc/NyxCore-Windows-x64.zip --expected-commit $env:GITHUB_SHA --receipt dist/windows-rc/WINDOWS_SMOKE.json
 
       - name: Upload validation receipt and checksums
         uses: actions/upload-artifact@v7
@@ -67,14 +73,31 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Verify the approved archive pair for upload
+        id: verify_public_pair
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_archives
+        env:
+          APPROVED_LICENSE_SHA256: ${{ vars.NYXCORE_WINDOWS_RC_APPROVED_LICENSE_SHA256 }}
+          REDISTRIBUTION_CLEARED: ${{ vars.NYXCORE_WINDOWS_RC_UPLOAD }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:REDISTRIBUTION_CLEARED -cne 'true') {
+            throw 'Archive upload requires a manual run on main and independent redistribution and acceptance clearance.'
+          }
+          if ($env:APPROVED_LICENSE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'Configure the SHA-256 of the approved first-party LICENSE before uploading the ZIPs.'
+          }
+          .\.venv\Scripts\python.exe scripts/smoke_windows_candidate.py dist/windows-rc/NyxCore-Windows-x64.zip --verify-only --expected-commit $env:GITHUB_SHA --approved-license-sha256 $env:APPROVED_LICENSE_SHA256
+
       - name: Upload the approved binary and source pair
-        if: vars.NYXCORE_WINDOWS_RC_UPLOAD == 'true' && hashFiles('LICENSE') != ''
+        if: steps.verify_public_pair.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: NyxCore-Windows-x64-${{ github.sha }}
           path: |
-            dist/windows-rc/*.zip
-            dist/windows-rc/*.zip.sha256
+            dist/windows-rc/NyxCore-Windows-x64.zip
+            dist/windows-rc/NyxCore-Windows-x64-source.zip
+            dist/windows-rc/NyxCore-Windows-x64.zip.sha256
+            dist/windows-rc/NyxCore-Windows-x64-source.zip.sha256
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

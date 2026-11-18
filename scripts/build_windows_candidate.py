@@ -16,8 +16,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
-import imageio_ffmpeg
-
 from build_preview import ROOT, demo_files, frontend_files, frontend_licenses, output, tool, write_archive
 from windows.notices import collect_notices, digest, save_json
 
@@ -32,7 +30,9 @@ SOURCE_PATHS = (
 
 def stage_project(git: str, stage: Path, commit: str, working_tree: bool) -> dict[str, Path]:
     if working_tree:
-        paths = output(git, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *SOURCE_PATHS)
+        paths = output(
+            git, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *SOURCE_PATHS, "LICENSE", cwd=ROOT,
+        )
         for name in sorted(set(paths.decode("utf-8").split("\0")) - {""}):
             source = ROOT / name
             if source.is_file():
@@ -40,13 +40,17 @@ def stage_project(git: str, stage: Path, commit: str, working_tree: bool) -> dic
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
     else:
-        archive = output(git, "archive", "--format=zip", commit, *SOURCE_PATHS)
+        license_entry = output(git, "ls-tree", "--name-only", commit, "--", "LICENSE", cwd=ROOT)
+        paths = (*SOURCE_PATHS, "LICENSE") if license_entry.strip() == b"LICENSE" else SOURCE_PATHS
+        archive = output(git, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=zip", commit, *paths, cwd=ROOT)
         with ZipFile(io.BytesIO(archive)) as snapshot:
             snapshot.extractall(stage)
     return {path.relative_to(stage).as_posix(): path for path in stage.rglob("*") if path.is_file()}
 
 
 def prepare_assets(stage: Path, npm: str) -> tuple[list[str], dict[str, Path], str]:
+    import imageio_ffmpeg
+
     assets_environment = os.environ.copy()
     assets_environment.pop("NODE_ENV", None)
     tools = stage / "_tools"
@@ -96,7 +100,8 @@ def build(destination: Path, working_tree: bool) -> tuple[Path, Path]:
             "npm_lock_sha256": digest(web / "package-lock.json"),
             "requirements_sha256": digest(sources["scripts/windows/requirements.txt"]),
             "frontend_files": frontend,
-            "distribution_status": "internal release candidate; first-party license approval pending",
+            "distribution_status": "internal release candidate",
+            "first_party_license_sha256": source_hashes.get("LICENSE"),
         }
         resources = stage / "_desktop_payload"
         files = {
@@ -124,6 +129,8 @@ def build(destination: Path, working_tree: bool) -> tuple[Path, Path]:
             "WINDOWS_DEPENDENCIES.json": inventory_path,
             "WINDOWS_DISTRIBUTION.md": sources["docs/WINDOWS_DISTRIBUTION.md"],
         }
+        if "LICENSE" in sources:
+            common["LICENSE"] = sources["LICENSE"]
         write_archive(source_zip, {
             **{f"project/{name}": path for name, path in sources.items()},
             **dependency_sources,
