@@ -19,6 +19,8 @@ def test_remembered_library_keeps_the_same_workspace(tmp_path, monkeypatch):
         folder.mkdir(parents=True)
     (demo / "nyxcore_demo_manifest.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(launch, "SOURCE_ROOT", tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     libraries = DesktopLibraries(state)
 
     assert libraries.remembered() is None
@@ -33,6 +35,7 @@ def test_remembered_library_keeps_the_same_workspace(tmp_path, monkeypatch):
     }
     reopened = DesktopLibraries(state)
     assert reopened.resolve(reopened.remembered()) == first
+    assert reopened.resolve(LibraryChoice(Path("~") / music.name)) == first
     assert review.read_text(encoding="utf-8") == "staged"
     assert reopened.resolve(LibraryChoice(other)).workspace != first.workspace
     assert reopened.resolve(LibraryChoice(music, tmp_path / "Manual output")).workspace == tmp_path / "Manual output"

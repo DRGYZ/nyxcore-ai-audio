@@ -58,7 +58,7 @@ class DesktopLibraries:
             elif choice.music is None:
                 workspace = self.state / "demo-workspace"
             else:
-                canonical = os.path.normcase(str(choice.music.resolve()))
+                canonical = os.path.normcase(str(choice.music.expanduser().resolve()))
                 identity = hashlib.sha256(os.fsencode(canonical)).hexdigest()
                 workspace = self.state / "libraries" / identity
             music, workspace = resolve_library_workspace(choice.music, workspace)
