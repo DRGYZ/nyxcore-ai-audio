@@ -249,6 +249,11 @@ def create_app(
             return None
         try:
             return analysis_store.get(music, config, refresh=refresh)
+        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+            logger.warning("Configured library is unavailable: %s", exc)
+            raise HTTPException(
+                status_code=503, detail="This music folder is unavailable. Reconnect its drive, check permissions, or choose another folder.",
+            ) from exc
         except Exception as exc:
             logger.exception("Could not analyze the configured library")
             raise HTTPException(
@@ -309,6 +314,13 @@ def create_app(
                                 enabled=organization_enabled, invalidate=invalidate_metadata_generation)
 
     if review_only:
+        def desktop_health_report() -> dict | None:
+            music = _resolve_music_path(None)
+            snapshot = analysis_store.peek(music, _resolve_config(None, None))
+            return snapshot.reports.health_report.to_dict() if snapshot else None
+
+        app.state.desktop_health_report = desktop_health_report
+
         @app.get("/api/library", response_model=LibraryReportsResponse)
         def library_reports(
             music_path: str | None = Query(default=None),

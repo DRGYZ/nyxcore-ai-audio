@@ -3,6 +3,7 @@ import type { FormEvent, PropsWithChildren, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useLibraryAnalysis, useRefreshLibrary, useReviewQuery, useStatusQuery } from "../lib/hooks";
 import { Button, Chip, Icon } from "./components";
+import { ChangeLibraryButton } from "./DesktopLibrary";
 
 type NavItem = {
   to: string;
@@ -65,11 +66,11 @@ function SidebarLink({
         <>
           <Icon
             name={icon}
-            className={`text-[18px] transition-colors ${
+            className={`shrink-0 text-[18px] transition-colors ${
               isActive ? "text-accent" : "text-primary-subtle group-hover:text-primary-muted"
             }`}
           />
-          <span className="truncate">{label}</span>
+          <span className="min-w-0 leading-snug">{label}</span>
           {badge ? (
             <span className="ml-auto rounded-full bg-accent/20 px-2 py-0.5 font-sans text-[11px] font-semibold text-accent">
               {badge}
@@ -86,6 +87,14 @@ function LibraryAnalysisStatus() {
   const refresh = useRefreshLibrary();
   const error = refresh.error ?? analysis.error;
   const date = analysis.data && new Date(analysis.data.analyzed_at).toLocaleString();
+  const empty = analysis.data?.health.overview.total_audio_files === 0;
+  const status = refresh.isPending
+    ? (date ? "Refreshing library. Showing results from the previous analysis." : "Retrying library analysis…")
+    : error
+      ? (date ? `Results are stale. Last successful analysis: ${date}.` : "Library analysis could not finish.")
+      : date
+        ? (empty ? "Analysis complete. No supported audio was found in this folder." : `Analysis complete · ${date}`)
+        : "Analyzing library… You can keep navigating while NyxCore checks the selected folder.";
 
   return (
     <section
@@ -102,28 +111,24 @@ function LibraryAnalysisStatus() {
             <span className="text-primary-muted">Applying plans and reversing file changes are disabled.</span>
           </p>
           <p role="status" className="mt-0.5 text-xs text-primary-subtle">
-            {refresh.isPending
-              ? (date ? "Refreshing library. Previous results remain available." : "Refreshing library…")
-              : date
-                ? `Analyzed ${date}. Use Refresh Library after changing files.`
-                : (error ? "Library analysis is unavailable." : "Analyzing library…")}
+            {status}
           </p>
           {error && !refresh.isPending ? (
             <p role="alert" className="mt-1 break-words text-xs text-[#f59f8a]">
-              {error.message} {date ? "Showing the last successful analysis." : null}
+              {error.message}
             </p>
           ) : null}
         </div>
       </div>
       <Button tone="secondary" disabled={refresh.isPending || analysis.isFetching} onClick={() => refresh.mutate()}>
-        <Icon name="refresh" className={`text-[16px] ${refresh.isPending ? "animate-spin" : ""}`} />
-        {refresh.isPending ? "Refreshing Library…" : "Refresh Library"}
+        <Icon name="refresh" className="text-[16px]" />
+        {refresh.isPending ? "Refreshing Library…" : error ? "Retry Analysis" : "Refresh Library"}
       </Button>
     </section>
   );
 }
 
-export function AppShell({ children, desktop = false }: PropsWithChildren<{ desktop?: boolean }>) {
+export function AppShell({ children, desktop = false, demo = false }: PropsWithChildren<{ desktop?: boolean; demo?: boolean }>) {
   const location = useLocation();
   const navigate = useNavigate();
   const statusQuery = useStatusQuery();
@@ -197,7 +202,7 @@ export function AppShell({ children, desktop = false }: PropsWithChildren<{ desk
   const visibleNavItems = navItems.filter((item) => desktop || !item.desktopOnly);
   const collectionItems = visibleNavItems.filter((item) => item.group === "collection");
   const curationItems = visibleNavItems.filter((item) => item.group === "curation");
-  const libraryFolderName = status?.music_path?.split(/[\\/]/).filter(Boolean).pop() ?? "Local session";
+  const libraryFolderName = demo ? "Synthetic demo" : status?.music_path?.split(/[\\/]/).filter(Boolean).pop() ?? "Local session";
 
   return (
     <div className={`bg-background text-primary ${desktop ? "flex h-screen flex-col overflow-hidden" : "min-h-screen"}`}>
@@ -316,13 +321,14 @@ export function AppShell({ children, desktop = false }: PropsWithChildren<{ desk
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
                 <span className={`size-1.5 rounded-full ${isConnected ? "bg-[#52b788]" : "bg-[#e9b44c]"}`} />
                 <span className="font-sans text-xs text-primary-subtle">
-                  {isConnected ? "Local library ready" : isConnecting ? "Connecting" : "Disconnected"}
+                  {isConnected ? (demo ? "Synthetic sample content" : "Local engine connected") : isConnecting ? "Connecting" : "Disconnected"}
                 </span>
               </div>
             </div>
 
             <div className="flex shrink-0 items-center gap-2.5">
-              <form className="relative hidden md:block" role="search" onSubmit={handleSearchSubmit}>
+              {desktop && <ChangeLibraryButton />}
+              <form className={`relative hidden ${desktop ? "lg:block" : "md:block"}`} role="search" onSubmit={handleSearchSubmit}>
                 <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-primary-subtle" />
                 <input
                   aria-label="Search archive"

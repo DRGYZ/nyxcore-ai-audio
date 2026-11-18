@@ -13,10 +13,13 @@ from contextlib import contextmanager
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from secrets import token_urlsafe
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from time import monotonic
 from urllib.parse import urlsplit
+
+from nyxcore.desktop_library import DesktopLibraries, LibraryChoice, LibrarySession
 
 
 HOST = "127.0.0.1"
@@ -102,13 +105,12 @@ class DesktopBackend:
             LOG.warning("The local engine is still completing an active request.")
 
 
-def create_desktop_app(music_path: Path | None, workspace: Path):
-    from nyxcore.launch import SOURCE_ROOT, check_workspace, create_local_app, resolve_library_workspace
+def create_desktop_app(session: LibrarySession):
+    from nyxcore.launch import SOURCE_ROOT, create_local_app
 
-    music, out = resolve_library_workspace(music_path, workspace)
-    app = create_local_app(frontend_dir=SOURCE_ROOT / "web/dist", music_root=music, workspace_root=out)
-    check_workspace(out)
-    return app
+    return create_local_app(
+        frontend_dir=SOURCE_ROOT / "web/dist", music_root=session.music, workspace_root=session.workspace, desktop=True,
+    )
 
 
 @contextmanager
@@ -182,7 +184,10 @@ def require_webview2() -> None:
     raise RuntimeError("Microsoft Edge WebView2 Runtime is required. Install or repair it, then reopen NyxCore.")
 
 
-def run_window(music: Path | None, workspace: Path, display: int, started_at: float) -> int:
+def run_window(
+    music: Path | None, workspace: Path | None, display: int, started_at: float, *,
+    demo: bool = False, state: Path | None = None,
+) -> int:
     require_webview2()
     # Set per-monitor DPI awareness before pywebview/WinForms create window handles.
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -203,7 +208,11 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     webview.settings["ALLOW_FILE_URLS"] = False
     webview.settings["ALLOW_DOWNLOADS"] = False
-    backend = DesktopBackend(lambda: create_desktop_app(music, workspace))
+    libraries = DesktopLibraries(state if state is not None else desktop_state())
+    window_key = token_urlsafe(32)
+    lifetime_lock = Lock()
+    closing = Event()
+    engines: set[DesktopBackend] = set()
     renderer_ready = Event()
     renderer_failed = Event()
     launch_failed = Event()
@@ -213,8 +222,114 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
         min_size=MIN_SIZE, background_color=BACKGROUND, text_select=True,
     )
 
+    def native_dialog(kind, *, directory="", filename="", file_types=()):
+        from System import Action
+
+        result = []
+
+        def show():
+            result.extend(window.create_file_dialog(
+                kind, directory=directory, save_filename=filename, file_types=file_types,
+            ) or ())
+
+        window.native.Invoke(Action(show))
+        return Path(result[0]) if result else None
+
+    def choose_folder(start: Path | None):
+        return native_dialog(webview.FileDialog.FOLDER, directory=str(start or Path.home()))
+
+    def choose_export(filename: str):
+        return native_dialog(
+            webview.FileDialog.SAVE, directory=str(Path.home()), filename=filename,
+            file_types=("JSON report (*.json)",),
+        )
+
+    def build_application(owner, session, issue=None, retry_choice=None):
+        from fastapi import FastAPI
+        from nyxcore.desktop_controls import install_desktop_controls
+        from nyxcore.launch import SOURCE_ROOT, mount_local_frontend
+
+        if session:
+            app = create_desktop_app(session)
+        else:
+            app = mount_local_frontend(
+                FastAPI(docs_url=None, redoc_url=None, openapi_url=None), SOURCE_ROOT / "web/dist", desktop=True,
+            )
+        install_desktop_controls(
+            app, libraries=libraries, session=session, issue=issue, retry_choice=retry_choice,
+            window_key=window_key, origin=lambda: owner.origin, choose_folder=choose_folder,
+            choose_export=choose_export, activate=activate_library,
+        )
+        return app
+
+    def activate_library(session: LibrarySession, remember: bool) -> str:
+        nonlocal backend
+        from nyxcore.launch import check_workspace
+
+        check_workspace(session.workspace)
+        candidate = DesktopBackend(lambda: build_application(candidate, session))
+        with lifetime_lock:
+            if closing.is_set():
+                raise RuntimeError("NyxCore is closing.")
+            engines.add(candidate)
+            candidate.start()
+        try:
+            deadline = monotonic() + STARTUP_TIMEOUT
+            while not candidate.ready():
+                if candidate.finished.is_set():
+                    raise RuntimeError(str(candidate.error or "Could not start the selected library."))
+                if closing.wait(0.025) or monotonic() >= deadline:
+                    raise RuntimeError("Could not start the selected library. Try opening it again.")
+            with lifetime_lock:
+                if closing.is_set():
+                    raise RuntimeError("NyxCore is closing.")
+                if remember:
+                    libraries.remember(session)
+                previous = backend
+                backend = candidate
+                # Uvicorn drains the open control response before closing the old listener.
+                previous.stop()
+                engines.difference_update(engine for engine in engines.copy() if engine.finished.is_set())
+            assert candidate.origin is not None
+            return candidate.origin
+        except BaseException:
+            candidate.close()
+            raise
+
+    def initial_application():
+        from nyxcore.launch import check_workspace
+
+        choice = None
+        try:
+            choice = LibraryChoice(music, workspace) if music is not None or demo or workspace is not None else libraries.remembered()
+            session = libraries.resolve(choice) if choice is not None else None
+            if session:
+                check_workspace(session.workspace)
+        except (ValueError, OSError) as exc:
+            return build_application(initial_backend, None, str(exc), choice)
+        return build_application(initial_backend, session)
+
+    initial_backend = DesktopBackend(initial_application)
+    backend = initial_backend
+    engines.add(initial_backend)
+
+    def stop_engines():
+        with lifetime_lock:
+            closing.set()
+            for engine in engines:
+                engine.stop()
+
     def guard_navigation(_, args):
         args.Cancel = not local_navigation(str(args.Uri), backend.origin)
+
+    def authenticate_window_request(sender, args):
+        from nyxcore.desktop_controls import CONTROL_PATH, WINDOW_HEADER
+
+        request = args.Request
+        origin = backend.origin
+        if origin and str(request.Uri).startswith(origin + CONTROL_PATH):
+            if local_navigation(str(sender.Source), origin) and str(sender.Source) != "about:blank":
+                request.Headers.SetHeader(WINDOW_HEADER, window_key)
 
     def open_reference(_, args):
         args.Handled = True
@@ -244,6 +359,10 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
             core.NavigationStarting += guard_navigation
             core.FrameNavigationStarting += guard_navigation
             core.NavigationCompleted += navigation_completed
+            from Microsoft.Web.WebView2.Core import CoreWebView2WebResourceContext
+
+            core.AddWebResourceRequestedFilter("http://127.0.0.1:*/api/desktop/*", CoreWebView2WebResourceContext.All)
+            core.WebResourceRequested += authenticate_window_request
             core.Settings.AreHostObjectsAllowed = False
             core.Settings.IsWebMessageEnabled = False
             renderer_ready.set()
@@ -274,7 +393,7 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
         while not backend.stopping.wait(0.025) and not renderer_failed.is_set():
             if renderer_ready.is_set() and backend.ready():
                 LOG.info("Local engine ready at %s after %.3fs", backend.origin, monotonic() - started_at)
-                window.load_url(f"{backend.origin}/?desktop=1")
+                window.load_url(f"{backend.origin}/")
                 return
             if (backend.finished.is_set() and status_surface is not None) or monotonic() >= deadline:
                 launch_failed.set()
@@ -292,9 +411,9 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
                 return
 
     window.events.before_show += configure_native
-    window.events.closed += backend.stop
+    window.events.closed += stop_engines
     window.events.shown += lambda: LOG.info("Window shown after %.3fs", monotonic() - started_at)
-    backend.start()
+    initial_backend.start()
     try:
         with TemporaryDirectory(prefix="nyxcore-webview2-") as profile:
             webview.start(
@@ -302,26 +421,30 @@ def run_window(music: Path | None, workspace: Path, display: int, started_at: fl
                 private_mode=True, storage_path=profile, icon=str(RESOURCES / "desktop.ico"),
             )
     finally:
-        backend.close()
+        stop_engines()
+        for engine in engines:
+            engine.close()
     LOG.info("Desktop closed")
     return int(renderer_failed.is_set() or launch_failed.is_set())
 
 
+def desktop_state() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "NyxCore" / "Desktop"
+
+
 def main(argv: list[str] | None = None) -> int:
     started_at = monotonic()
-    parser = argparse.ArgumentParser(description="Open the NyxCore review-only desktop prototype.")
+    parser = argparse.ArgumentParser(description="Open the NyxCore review-only desktop app.")
     library = parser.add_mutually_exclusive_group()
-    library.add_argument("--demo", action="store_true", help="Use the synthetic demo library (default)")
+    library.add_argument("--demo", action="store_true", help="Open the synthetic demo library for this launch")
     library.add_argument("--music", type=Path, help="Existing library to inspect")
-    parser.add_argument("--out", type=Path, help="Separate workspace, required with --music")
+    parser.add_argument("--out", type=Path, help="Override the workspace for --music or the demo")
     parser.add_argument("--display", type=int, default=1, help="Display number, with the primary display first")
     args = parser.parse_args(argv)
-    if args.music is not None and args.out is None:
-        parser.error("--music requires a separate --out workspace")
     if sys.platform != "win32":
         parser.error("The desktop prototype requires Windows and Microsoft Edge WebView2.")
 
-    state = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "NyxCore" / "Desktop"
+    state = desktop_state()
     try:
         state.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(state / "desktop.log", maxBytes=256_000, backupCount=2, encoding="utf-8")
@@ -331,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
                 LOG.info("NyxCore Desktop is already running.")
                 return 0
             LOG.info("Desktop starting [pid=%d]", os.getpid())
-            return run_window(args.music, args.out or state / "demo-workspace", args.display, started_at)
+            return run_window(args.music, args.out, args.display, started_at, demo=args.demo, state=state)
     except Exception as exc:
         LOG.exception("NyxCore Desktop could not start")
         if args.display == 1:

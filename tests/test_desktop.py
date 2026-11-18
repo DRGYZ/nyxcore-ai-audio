@@ -6,18 +6,21 @@ from urllib.request import Request, urlopen
 import pytest
 
 from nyxcore import desktop, launch
+from nyxcore.desktop_library import DesktopLibraries, LibraryChoice
 
 
 def test_desktop_backend_serves_only_the_review_app_and_releases_the_port(tmp_path, monkeypatch):
     frontend = tmp_path / "web/dist"
     (frontend / "assets").mkdir(parents=True)
-    (frontend / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    (frontend / "index.html").write_text('<head><script src="/assets/app.js"></script></head>', encoding="utf-8")
     (frontend / "assets/app.js").write_text("", encoding="utf-8")
     music, workspace = tmp_path / "music", tmp_path / "workspace"
     music.mkdir()
     monkeypatch.setattr(launch, "SOURCE_ROOT", tmp_path)
     monkeypatch.setenv("NYXCORE_WEB_ORGANIZATION_DISPOSABLE_ROOT", str(music))
-    backend = desktop.DesktopBackend(lambda: desktop.create_desktop_app(music, workspace))
+    libraries = DesktopLibraries(tmp_path / "state")
+    session = libraries.resolve(LibraryChoice(music, workspace))
+    backend = desktop.DesktopBackend(lambda: desktop.create_desktop_app(session))
     backend.start()
     try:
         deadline = monotonic() + 5
@@ -29,6 +32,7 @@ def test_desktop_backend_serves_only_the_review_app_and_releases_the_port(tmp_pa
             assert json.load(response)["review_only"] is True
         with urlopen(backend.origin + "/organization", timeout=2) as response:
             assert response.status == 200
+            assert b'<meta name="nyxcore-desktop" content="1">' in response.read()
         for path, body in (("/api/review/plan/apply", {"plan_report": {}}), ("/api/history/test/undo", {})):
             request = Request(
                 backend.origin + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"},
@@ -43,13 +47,18 @@ def test_desktop_backend_serves_only_the_review_app_and_releases_the_port(tmp_pa
         urlopen(backend.origin + "/api/status", timeout=2)
 
 
-def test_desktop_backend_reports_startup_failure_without_a_listener(tmp_path):
-    backend = desktop.DesktopBackend(lambda: desktop.create_desktop_app(tmp_path / "missing", tmp_path / "out"))
+def test_desktop_backend_reports_startup_failure_without_a_listener(tmp_path, monkeypatch):
+    libraries = DesktopLibraries(tmp_path / "state")
+    music = tmp_path / "music"
+    music.mkdir()
+    session = libraries.resolve(LibraryChoice(music, tmp_path / "out"))
+    monkeypatch.setattr(launch, "SOURCE_ROOT", tmp_path)
+    backend = desktop.DesktopBackend(lambda: desktop.create_desktop_app(session))
     backend.start()
     try:
         assert backend.finished.wait(5)
         assert not backend.ready() and backend.origin is None
-        assert "Music directory does not exist" in str(backend.error)
+        assert "Frontend build is missing" in str(backend.error)
     finally:
         backend.close()
     assert not (tmp_path / "out").exists()

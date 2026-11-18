@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HEALTH_BITRATE_BUCKET_ORDER, HEALTH_BITRATE_BUCKET_LABELS } from "../../lib/contracts";
 import { useHealthQuery, useRefreshHealthAudit, useStatusQuery } from "../../lib/hooks";
+import { desktopAction } from "../../lib/api";
 import { ISSUE_LABELS, type MetadataIssue } from "../../lib/metadata";
 import { ActionBanner, Button, Chip, EmptyState, Icon, PageHeader, Panel, ProgressBar, formatNumber } from "../components";
 import { ApiUnavailableState } from "../feedback";
@@ -15,6 +16,8 @@ export function HealthPage({ desktop = false }: { desktop?: boolean }) {
   const reviewOnly = useStatusQuery().data?.review_only === true;
   const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [issue, setIssue] = useState<MetadataIssue | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportPending = useRef(false);
 
   if (healthQuery.isError && !reviewOnly) {
     return (
@@ -73,8 +76,23 @@ export function HealthPage({ desktop = false }: { desktop?: boolean }) {
     }
   }
 
-  function handleExport() {
-    if (desktop) return;
+  async function handleExport() {
+    if (desktop) {
+      if (exportPending.current) return;
+      exportPending.current = true;
+      setExporting(true);
+      setBanner(null);
+      try {
+        const result = await desktopAction<{ path: string | null }>("export-health");
+        if (result.path) setBanner({ tone: "success", message: `Health report saved to ${result.path}` });
+      } catch (error) {
+        setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not save the Health report." });
+      } finally {
+        exportPending.current = false;
+        setExporting(false);
+      }
+      return;
+    }
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -95,13 +113,10 @@ export function HealthPage({ desktop = false }: { desktop?: boolean }) {
         description="Inspect format quality, metadata completeness, artwork coverage, and unreadable files across your music library."
         actions={
           <>
-            <div className="space-y-1">
-              <Button tone="ghost" onClick={handleExport} disabled={desktop} aria-describedby={desktop ? "health-export-note" : undefined}>
-                <Icon name="download" className="text-sm" />
-                Export JSON
-              </Button>
-              {desktop && <p id="health-export-note" className="text-xs text-primary-subtle">Export is available in the browser.</p>}
-            </div>
+            <Button tone="ghost" onClick={() => void handleExport()} disabled={exporting}>
+              <Icon name="download" className="text-sm" />
+              {exporting ? "Waiting for Save dialog…" : "Export JSON"}
+            </Button>
             {!reviewOnly ? (
               <Button tone="secondary" onClick={() => void handleRefresh()} disabled={refreshAudit.isPending}>
                 <Icon name="refresh" className={`text-sm ${refreshAudit.isPending ? "animate-spin" : ""}`} />

@@ -14,7 +14,7 @@ from threading import Thread
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from yaml import YAMLError
@@ -28,14 +28,15 @@ SPA_ROUTES = ("/", "/search", "/review", "/duplicates", "/health", "/history", "
 PREVIEW_BUILD = "PREVIEW_BUILD.json"
 
 
-def create_local_app(*, frontend_dir: Path, music_root: Path, workspace_root: Path) -> FastAPI:
+def mount_local_frontend(app: FastAPI, frontend_dir: Path, *, desktop: bool = False) -> FastAPI:
     index = frontend_dir / "index.html"
     preview = frontend_dir.parent.parent / PREVIEW_BUILD
     repair = "Extract a fresh copy of the preview ZIP." if preview.is_file() else "Run npm ci and npm run build in web/."
     build_error = f"Frontend build is missing or incomplete at {frontend_dir}. {repair}"
     if not index.is_file():
         raise ValueError(build_error)
-    assets = re.findall(r'(?:href|src)="(/assets/[^"]+)"', index.read_text(encoding="utf-8"))
+    html = index.read_text(encoding="utf-8")
+    assets = re.findall(r'(?:href|src)="(/assets/[^"]+)"', html)
     if not any(asset.endswith(".js") for asset in assets) or any(
         not (frontend_dir / asset.lstrip("/")).is_file() for asset in assets
     ):
@@ -53,16 +54,27 @@ def create_local_app(*, frontend_dir: Path, music_root: Path, workspace_root: Pa
         ):
             raise ValueError(build_error)
 
-    app = create_app(music_root=music_root, workspace_root=workspace_root, review_only=True)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST])
     app.mount("/assets", StaticFiles(directory=frontend_dir / "assets"), name="frontend-assets")
 
-    def frontend() -> FileResponse:
+    def frontend():
+        if desktop:
+            return HTMLResponse(
+                html.replace("</head>", '<meta name="nyxcore-desktop" content="1"></head>', 1),
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"},
+            )
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     for route in SPA_ROUTES:
         app.add_api_route(route, frontend, methods=["GET", "HEAD"], include_in_schema=False)
     return app
+
+
+def create_local_app(
+    *, frontend_dir: Path, music_root: Path, workspace_root: Path, desktop: bool = False,
+) -> FastAPI:
+    app = create_app(music_root=music_root, workspace_root=workspace_root, review_only=True)
+    return mount_local_frontend(app, frontend_dir, desktop=desktop)
 
 
 def _open_browser(url: str) -> None:
