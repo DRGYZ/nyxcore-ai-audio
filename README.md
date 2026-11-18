@@ -369,4 +369,6 @@ For running NyxCore inside Windows Subsystem for Linux (WSL2), refer to the dedi
 
 ## License
 
-No open-source license has been declared for this repository yet. All rights reserved.
+NyxCore's first-party source code is available under the MIT License. Third-party dependencies, bundled fonts, and externally sourced assets retain their own licenses and attribution requirements. [MIT License](LICENSE)
+
+The frozen Windows candidate includes Mutagen under GPL-2.0-or-later. Distribution of the combined executable has separate GPL and runtime obligations. [Windows distribution notes](docs/WINDOWS_DISTRIBUTION.md)
