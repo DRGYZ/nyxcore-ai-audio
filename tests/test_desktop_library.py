@@ -72,19 +72,33 @@ def test_corrupt_or_inaccessible_library_settings_are_recoverable(tmp_path, monk
         libraries.resolve(LibraryChoice(music))
 
 
+def test_portable_workspace_cannot_overlap_application_files(tmp_path):
+    portable = tmp_path / "Portable NyxCore"
+    music = tmp_path / "Music"
+    portable.mkdir()
+    music.mkdir()
+    libraries = DesktopLibraries(tmp_path / "App Data", application=portable)
+    with pytest.raises(ValueError, match="outside the extracted"):
+        libraries.resolve(LibraryChoice(music, portable / "workspace"))
+    with pytest.raises(ValueError, match="outside the extracted"):
+        libraries.resolve(LibraryChoice(portable))
+
+
 def test_desktop_controls_use_only_native_selections_and_the_current_report(tmp_path, monkeypatch):
     state = tmp_path / "AppData"
+    portable = tmp_path / "Portable NyxCore"
     music = tmp_path / "Music"
     other = tmp_path / "Different Music"
-    for path in (music, other):
+    for path in (music, other, portable):
         path.mkdir()
-    libraries = DesktopLibraries(state)
+    libraries = DesktopLibraries(state, application=portable)
     app = FastAPI()
     app.state.desktop_health_report = lambda: {"total": 3}
     keys = {"X-NyxCore-Window": "owner", "Origin": "http://127.0.0.1:41000"}
     selected = [None, other]
     destination = tmp_path / "health.json"
-    destinations = [None, music / "blocked.json", tmp_path / "missing" / "health.json", destination, destination]
+    destinations = [None, music / "blocked.json", portable / "blocked.json",
+                    tmp_path / "missing" / "health.json", destination, destination]
     activated = []
     install_desktop_controls(
         app, libraries=libraries, session=libraries.resolve(LibraryChoice(music)),
@@ -101,6 +115,7 @@ def test_desktop_controls_use_only_native_selections_and_the_current_report(tmp_
         assert client.post(control + "open-folder", headers=keys, json={"path": str(other)}).status_code == 409
         assert client.post(control + "choose-folder", headers=keys, json={"path": str(music)}).json() == {"path": str(other)}
         assert client.post(control + "export-health", headers=keys).json() == {"path": None}
+        assert client.post(control + "export-health", headers=keys).status_code == 422
         assert client.post(control + "export-health", headers=keys).status_code == 422
         assert client.post(control + "export-health", headers=keys).status_code == 422
         assert not (tmp_path / "missing").exists()

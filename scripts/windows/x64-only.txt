@@ -1,0 +1,1 @@
+Pywebview expects this directory to exist. NyxCore ships only the x64 WebView2 loader.

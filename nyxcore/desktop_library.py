@@ -29,8 +29,9 @@ def overlaps(left: Path, right: Path) -> bool:
 
 
 class DesktopLibraries:
-    def __init__(self, state: Path):
+    def __init__(self, state: Path, *, application: Path | None = None):
         self.state = state
+        self.application = application
         self.settings = state / "settings.json"
 
     def remembered(self) -> LibraryChoice | None:
@@ -68,6 +69,10 @@ class DesktopLibraries:
             raise ValueError("NyxCore could not resolve this folder. Choose a directly accessible music folder.") from exc
         if overlaps(music, self.state.resolve()):
             raise ValueError("Choose a music folder that is separate from NyxCore’s application data.")
+        if self.application and (
+            overlaps(workspace, self.application) or (choice.music is not None and overlaps(music, self.application))
+        ):
+            raise ValueError("Choose a music folder and workspace outside the extracted NyxCore application.")
         return LibrarySession(music, workspace, choice.music is None)
 
     def remember(self, session: LibrarySession) -> None:

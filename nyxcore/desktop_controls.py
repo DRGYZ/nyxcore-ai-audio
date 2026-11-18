@@ -166,8 +166,9 @@ def install_desktop_controls(
             destination = path.resolve()
             if destination.suffix.lower() != ".json":
                 raise ValueError("Choose a file with the .json extension.")
-            if any(destination.is_relative_to(root) for root in (session.music, session.workspace, libraries.state.resolve())):
-                raise ValueError("Save the report outside the music library and NyxCore workspace.")
+            protected = (session.music, session.workspace, libraries.state.resolve(), libraries.application)
+            if any(root is not None and destination.is_relative_to(root) for root in protected):
+                raise ValueError("Save the report outside the music library and NyxCore folders.")
             if not destination.parent.is_dir():
                 raise ValueError("Choose an existing destination folder.")
             atomic_write_text(destination, json.dumps(report, ensure_ascii=False, indent=2) + "\n")

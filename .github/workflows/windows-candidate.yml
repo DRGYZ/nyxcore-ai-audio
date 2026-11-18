@@ -1,0 +1,80 @@
+name: Windows Desktop Candidate
+
+on:
+  push:
+    branches:
+      - codex/desktop-release-candidate
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/windows-candidate.yml
+      - scripts/windows/**
+      - scripts/*windows_candidate.py
+      - nyxcore/**
+      - web/**
+      - demo/create_demo_library.py
+      - INSTALL_WINDOWS.md
+      - docs/WINDOWS_DISTRIBUTION.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and smoke-test Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify the pinned Python distribution
+        shell: pwsh
+        run: |
+          $runtime = Get-Content scripts/windows/runtime.json -Raw | ConvertFrom-Json
+          $archive = Join-Path $env:RUNNER_TEMP 'nyxcore-cpython.tar.gz'
+          Invoke-WebRequest -Uri $runtime.python_download -OutFile $archive
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash -ne $runtime.python_archive_sha256) {
+            throw 'Pinned Python archive checksum mismatch'
+          }
+          tar.exe -xf $archive -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "$env:RUNNER_TEMP/python/python.exe" -m venv .venv
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -m pip install -r scripts/windows/requirements.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -m pip check
+
+      - name: Build binary and source ZIPs
+        run: .\.venv\Scripts\python.exe scripts/build_windows_candidate.py
+
+      - name: Smoke-test the extracted windowed executable
+        run: .\.venv\Scripts\python.exe scripts/smoke_windows_candidate.py dist/windows-rc/NyxCore-Windows-x64.zip --receipt dist/windows-rc/WINDOWS_SMOKE.json
+
+      - name: Upload validation receipt and checksums
+        uses: actions/upload-artifact@v7
+        with:
+          name: NyxCore-Windows-x64-validation-${{ github.sha }}
+          path: |
+            dist/windows-rc/*.sha256
+            dist/windows-rc/WINDOWS_*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the approved binary and source pair
+        if: vars.NYXCORE_WINDOWS_RC_UPLOAD == 'true' && hashFiles('LICENSE') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: NyxCore-Windows-x64-${{ github.sha }}
+          path: |
+            dist/windows-rc/*.zip
+            dist/windows-rc/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

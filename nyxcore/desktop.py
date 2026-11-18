@@ -19,7 +19,7 @@ from threading import Event, Lock, Thread
 from time import monotonic
 from urllib.parse import urlsplit
 
-from nyxcore.desktop_library import DesktopLibraries, LibraryChoice, LibrarySession
+from nyxcore.desktop_library import DesktopLibraries, LibraryChoice, LibrarySession, overlaps
 
 
 HOST = "127.0.0.1"
@@ -30,6 +30,10 @@ FOREGROUND = "#f5f0e6"
 WINDOW_SIZE = (1320, 860)
 MIN_SIZE = (740, 560)
 STARTUP_TIMEOUT = 15
+WEBVIEW2_REQUIRED = (
+    "Microsoft Edge WebView2 Evergreen Runtime is required. Install or repair it from Microsoft, then reopen NyxCore.\n\n"
+    "https://developer.microsoft.com/microsoft-edge/webview2/#download"
+)
 LOG = logging.getLogger(__name__)
 
 
@@ -181,7 +185,11 @@ def require_webview2() -> None:
             continue
         if isinstance(version, str) and version.strip() not in {"", "0.0.0.0"}:
             return
-    raise RuntimeError("Microsoft Edge WebView2 Runtime is required. Install or repair it, then reopen NyxCore.")
+    raise RuntimeError(WEBVIEW2_REQUIRED)
+
+
+def packaged_directory() -> Path | None:
+    return Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
 
 
 def run_window(
@@ -196,11 +204,13 @@ def run_window(
         import webview
         from webview.guilib import initialize
     except ImportError as exc:
+        if packaged_directory():
+            raise RuntimeError("The desktop components could not load. Extract the complete NyxCore ZIP again.") from exc
         raise RuntimeError('Install the desktop extra with python -m pip install -e ".[desktop]".') from exc
 
     gui = initialize("edgechromium")
     if gui.renderer != "edgechromium":
-        raise RuntimeError("Microsoft Edge WebView2 Runtime is required. Install or repair it, then reopen NyxCore.")
+        raise RuntimeError(WEBVIEW2_REQUIRED)
     screens = sorted(gui.WinForms.Screen.AllScreens, key=lambda screen: (not screen.Primary, screen.DeviceName))
     if not 1 <= display <= len(screens):
         raise ValueError(f"Display {display} is unavailable. Choose a display from 1 to {len(screens)}.")
@@ -208,7 +218,7 @@ def run_window(
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     webview.settings["ALLOW_FILE_URLS"] = False
     webview.settings["ALLOW_DOWNLOADS"] = False
-    libraries = DesktopLibraries(state if state is not None else desktop_state())
+    libraries = DesktopLibraries(state if state is not None else desktop_state(), application=packaged_directory())
     window_key = token_urlsafe(32)
     lifetime_lock = Lock()
     closing = Event()
@@ -415,7 +425,7 @@ def run_window(
     window.events.shown += lambda: LOG.info("Window shown after %.3fs", monotonic() - started_at)
     initial_backend.start()
     try:
-        with TemporaryDirectory(prefix="nyxcore-webview2-") as profile:
+        with TemporaryDirectory(prefix="nyxcore-webview2-", dir=libraries.state if libraries.application else None) as profile:
             webview.start(
                 coordinate_startup, gui="edgechromium", debug=False, http_server=False,
                 private_mode=True, storage_path=profile, icon=str(RESOURCES / "desktop.ico"),
@@ -446,6 +456,9 @@ def main(argv: list[str] | None = None) -> int:
 
     state = desktop_state()
     try:
+        application = packaged_directory()
+        if application and overlaps(state.resolve(), application):
+            raise ValueError("NyxCore needs a per-user application data folder outside the extracted application.")
         state.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(state / "desktop.log", maxBytes=256_000, backupCount=2, encoding="utf-8")
         logging.basicConfig(handlers=[handler], level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

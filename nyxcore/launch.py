@@ -22,7 +22,7 @@ from yaml import YAMLError
 from nyxcore.config import load_config
 from nyxcore.webapi.app import configured_config_path, create_app
 
-SOURCE_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
 SPA_ROUTES = ("/", "/search", "/review", "/duplicates", "/health", "/history", "/playlists", "/metadata", "/organization")
 PREVIEW_BUILD = "PREVIEW_BUILD.json"

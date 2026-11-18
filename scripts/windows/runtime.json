@@ -1,0 +1,22 @@
+{
+  "python_version": "3.12.14",
+  "python_build": "Astral python-build-standalone 20260901 Windows AMD64",
+  "python_download": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
+  "python_archive_sha256": "e90c1b6419da3bd812dd73bb3de40287a21abf153438147639ec5e20375ea93f",
+  "python_dll_sha256": "6e1cd54bed9a5448616161061a43e037a05337780b15c2e33be0254ec44154b1",
+  "python_build_source": "https://github.com/astral-sh/python-build-standalone/tree/20260901",
+  "python_source": "https://www.python.org/downloads/release/python-31214/",
+  "webview2_sdk_version": "1.0.3856.49",
+  "webview2_sdk_nupkg_sha256": "bc0f76eb911b569838dc4aa8f8d325269b966bedb592863d26211aef3a099f1a",
+  "webview2_sdk": {
+    "lib/Microsoft.Web.WebView2.Core.dll": "8219a3135436c147f8eb02fb831e99596103eebc18b6d7b794ca93f4c67018a2",
+    "lib/Microsoft.Web.WebView2.WinForms.dll": "c48f8d729dc531288d2c53a6241effe7922ed1b947850b2442008a945c098c48",
+    "lib/runtimes/win-x64/native/WebView2Loader.dll": "eb5335edeaa6f2122c044e82aab2351dc8c9b4e0fe5e578c71922fb61be285e7"
+  },
+  "system_dependencies": {
+    "WebView2 Evergreen Runtime": "https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution",
+    ".NET Framework 4.8 or later": "https://learn.microsoft.com/dotnet/framework/install/on-windows-and-server",
+    "Visual C++ v14 x64 Redistributable": "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist",
+    "Windows UCRT": "https://learn.microsoft.com/cpp/windows/universal-crt-deployment"
+  }
+}
