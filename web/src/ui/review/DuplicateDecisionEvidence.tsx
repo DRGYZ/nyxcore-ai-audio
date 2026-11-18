@@ -5,7 +5,7 @@ import { DuplicateFiles, DuplicatePreference, PairEvidence, formatDuplicateScore
 export function DuplicateDecisionEvidence({ evidence, preview = false }: { evidence: DuplicateEvidence; preview?: boolean }) {
   const exact = evidence.kind === "exact";
   return (
-    <Panel className="space-y-2.5 bg-surface-low/50 p-3">
+    <Panel className="space-y-3 bg-surface-low/65 p-3.5">
       <h4 className="font-display text-sm font-semibold text-primary">Duplicate evidence</h4>
       {evidence.status !== "matched" ? (
         <p className="text-xs leading-relaxed text-primary-muted" role="status">
@@ -36,7 +36,7 @@ export function DuplicateDecisionEvidence({ evidence, preview = false }: { evide
               <summary className="cursor-pointer text-xs font-semibold text-accent focus-visible:outline-accent">
                 {exact ? "Compare copies" : "Compare copies and reported pairs"}
               </summary>
-              <div className="mt-2 space-y-3">
+              <div className="mt-2.5 space-y-3">
                 {!exact ? <PairEvidence group={evidence.group} /> : null}
                 <DuplicateFiles group={evidence.group} root={evidence.root} compact />
               </div>

@@ -1,4 +1,6 @@
-# NyxCore Desktop prototype
+# NyxCore Desktop 01
+
+The approved desktop identity is **Pressed & Cataloged**. The Windows application and browser workflow share one React frontend. See the [design rules](docs/DESKTOP_DESIGN.md) and [native acceptance report](docs/DESKTOP_DESIGN_ACCEPTANCE.md).
 
 The prototype runs on Windows 11 with Python 3.12 and the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). The source setup uses Node 22 for the frontend build and FFmpeg to generate the synthetic demo. The desktop window launches the local engine itself.
 

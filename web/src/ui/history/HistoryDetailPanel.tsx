@@ -25,15 +25,15 @@ function RecoveryInstructions({ batchId, meta }: { batchId: string; meta: ApiMet
   const command = `python -m nyxcore.cli recover-review-action ${quote(batchId)} --action inspect --music ${quote(meta.music_path)} --out ${quote(meta.out_path)}`;
 
   return (
-    <Panel className="border border-amber-500/30 bg-amber-500/10 p-3.5">
-      <h4 className="font-sans text-sm font-semibold text-amber-300">Recovery inspection required</h4>
+    <Panel className="border border-[#e9b44c]/35 bg-[#e9b44c]/10 p-4">
+      <h4 className="font-sans text-sm font-semibold text-[#f2c86b]">Recovery inspection required</h4>
       <p className="mt-1.5 text-xs leading-relaxed text-primary-muted">
         Inspect this batch before further mutation. Inspection reads the journal and checks the files. Some states require manual intervention.
       </p>
       <p className="mt-2 text-xs text-primary-muted">
         Run in {windows ? "PowerShell" : "the library's shell"} with the NyxCore Python environment active.
       </p>
-      <pre className="mt-2 select-all whitespace-pre-wrap rounded-[3px] bg-surface p-2.5 font-mono text-xs text-primary [overflow-wrap:anywhere]"><code>{command}</code></pre>
+      <pre className="mt-2 select-all whitespace-pre-wrap rounded-lg bg-surface p-3 font-mono text-xs text-primary [overflow-wrap:anywhere]"><code>{command}</code></pre>
     </Panel>
   );
 }
@@ -74,7 +74,7 @@ export function HistoryDetailPanel({
       }
     >
       {!batch ? (
-        <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-4 py-8 text-center font-editorial text-xs italic text-primary-subtle">
+        <div className="rounded-xl border border-white/[0.08] bg-surface-low/65 px-4 py-8 text-center font-sans text-xs text-primary-subtle">
           Select a history batch to inspect operation steps, reversibility, and restore outcomes.
         </div>
       ) : (
@@ -91,13 +91,13 @@ export function HistoryDetailPanel({
               </div>
             </div>
             <div className="mt-3.5 grid grid-cols-2 gap-2.5">
-              <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-2.5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Source Plans</p>
-                <p className="mt-1 font-display text-lg font-bold tracking-tight text-primary">{batch.source_plan_ids.length}</p>
+              <div className="rounded-lg border border-white/[0.07] bg-surface-low/75 p-2.5">
+                <p className="font-sans text-[11px] text-primary-subtle">Source Plans</p>
+                <p className="mt-1 font-display text-lg font-semibold tracking-tight text-primary">{batch.source_plan_ids.length}</p>
               </div>
-              <div className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-2.5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Review Items</p>
-                <p className="mt-1 font-display text-lg font-bold tracking-tight text-accent">{batch.source_review_item_ids.length}</p>
+              <div className="rounded-lg border border-white/[0.07] bg-surface-low/75 p-2.5">
+                <p className="font-sans text-[11px] text-primary-subtle">Review Items</p>
+                <p className="mt-1 font-display text-lg font-semibold tracking-tight text-accent">{batch.source_review_item_ids.length}</p>
               </div>
             </div>
           </Panel>
@@ -105,9 +105,9 @@ export function HistoryDetailPanel({
           {batch.recovery_required ? <RecoveryInstructions batchId={batch.batch_id} meta={meta} /> : null}
 
           {mutationResult ? (
-            <Panel className="border border-accent/30 bg-accent/[0.04] p-3.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-accent">Latest Reversal Outcome</p>
-              <p className="mt-1.5 font-sans text-xs text-primary-muted">
+            <Panel className="border border-accent/30 bg-accent/[0.05] p-3.5">
+              <p className="font-sans text-xs font-semibold text-accent">Latest Reversal Outcome</p>
+              <p className="mt-1 font-sans text-xs text-primary-muted">
                 {mutationSummary?.successful ?? 0} successful,
                 {" "}
                 {mutationSummary?.unsupported ?? 0} not supported,
@@ -118,8 +118,8 @@ export function HistoryDetailPanel({
           ) : null}
 
           <div>
-            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-primary-subtle">Operation Steps</p>
-            <div className="space-y-2">
+            <p className="mb-2.5 font-sans text-xs font-medium text-primary-subtle">Operation Steps</p>
+            <div className="space-y-2.5">
               {batch.operations.map((operation) => {
                 const changed = changedById.get(operation.operation_id);
                 const undoStatus = changed?.undo_status ?? operation.undo_status;
@@ -128,7 +128,7 @@ export function HistoryDetailPanel({
                   ? HISTORY_OPERATION_LABELS[operation.journal_state]
                   : null;
                 return (
-                  <div key={operation.operation_id} className="rounded-[3px] border border-white/[0.06] bg-surface-low/60 p-3">
+                  <div key={operation.operation_id} className="rounded-xl border border-white/[0.08] bg-surface-low/75 p-3.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-sans text-xs font-semibold capitalize text-primary">{operation.operation_type.replace(/_/g, " ")}</p>
                       <div className="flex flex-wrap gap-1.5">
@@ -150,10 +150,10 @@ export function HistoryDetailPanel({
                       <PathBlock value={operationPath(operation)} />
                     </div>
                     {operation.failure_reason ? (
-                      <p className="mt-2 break-words font-sans text-xs text-rose-400">{operation.failure_reason}</p>
+                      <p className="mt-2 break-words font-sans text-xs text-[#f59f8a]">{operation.failure_reason}</p>
                     ) : null}
                     {undoMessage ? (
-                      <p className={`mt-2 break-words font-mono text-xs ${undoStatus === "error" ? "text-rose-400" : "text-primary-muted"}`}>
+                      <p className={`mt-2 break-words font-mono text-xs ${undoStatus === "error" ? "text-[#f59f8a]" : "text-primary-muted"}`}>
                         {undoMessage}
                       </p>
                     ) : null}

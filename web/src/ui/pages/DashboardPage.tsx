@@ -16,14 +16,23 @@ import {
   DataTable,
   EmptyState,
   Icon,
-  MetricCard,
   PageHeader,
   Panel,
   PathBlock,
   ProgressBar,
+  SleeveArt,
+  formatBytes,
   formatDate,
   formatNumber,
 } from "../components";
+
+function findingIcon(itemType: string) {
+  if (itemType.includes("duplicate")) return "library_music";
+  if (itemType.includes("artwork") || itemType.includes("cover")) return "album";
+  if (itemType.includes("metadata")) return "sell";
+  if (itemType.includes("quality") || itemType.includes("bitrate")) return "graphic_eq";
+  return "folder_open";
+}
 
 export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
   const navigate = useNavigate();
@@ -48,9 +57,9 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
     return (
       <div className="space-y-6">
         <PageHeader
-          eyebrow="Library Overview"
+          eyebrow="Collection Home"
           title="Overview"
-          description="Local music library review priorities, duplicate findings, and recent operations."
+          description="Browse your local music library, review curation notes, and inspect proposed changes safely."
         />
         <ApiUnavailableState contextLabel="Overview" />
       </div>
@@ -60,15 +69,24 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
   const health = reviewOnly ? analysis?.health : healthQuery.data?.data;
   const review = reviewOnly ? analysis?.review : reviewQuery.data?.data;
   const duplicates = reviewOnly ? analysis?.duplicates : duplicatesQuery.data?.data;
+  const formatEntries = Object.entries(health?.overview.format_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   const firstFinding = !reviewOnly && reviewQuery.isError ? undefined : review?.items.find(
     (item) => item.review_status === "new" || item.review_status === "seen",
   );
+
+  const failedSections = [
+    healthQuery.isError && !reviewOnly && "library health",
+    reviewQuery.isError && !reviewOnly && "review findings",
+    duplicatesQuery.isError && !reviewOnly && "duplicates",
+    historyQuery.isError && "recent operations",
+  ].filter(Boolean);
+
   const viewHeader = (
     <>
       <PageHeader
-        eyebrow="Library Overview"
+        eyebrow="Collection Home"
         title="Overview"
-        description="Inspect your local library, review findings, and preview proposed changes."
+        description="Inspect your personal music collection, track down duplicates, and prepare metadata improvements without altering audio."
         actions={status && !reviewOnly ? (
           <Button tone="secondary" onClick={() => void checkConnection()} disabled={refreshing}>
             <Icon name="refresh" className={`text-base ${refreshing ? "animate-spin" : ""}`} />
@@ -76,55 +94,110 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
           </Button>
         ) : undefined}
       />
+
       {status ? (
-        <Panel className="min-w-0 space-y-3 p-4 sm:p-5">
-          <h2 className="font-display text-base font-semibold text-primary">Active library</h2>
-          <PathBlock value={status.music_path} />
-          <p className="text-xs leading-relaxed text-primary-muted">
-            Overview reads the library configured in your local backend. Browsing, reviewing findings, and generating plan previews leave audio files unchanged.
-            {!status.review_only ? " Applying a selected plan can change files. Use a disposable library to test Apply." : null}
-          </p>
-          <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-            {firstFinding ? (
-              <Link className="font-semibold text-accent underline-offset-4 hover:underline focus-visible:outline-accent" to={`/review?item=${encodeURIComponent(firstFinding.item_id)}`}>Inspect the first finding</Link>
-            ) : null}
-            <Link className="text-primary underline-offset-4 hover:underline focus-visible:outline-accent" to="/review">Open Review Inbox</Link>
+        <Panel className="overflow-hidden">
+          <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
+            <div aria-hidden="true" className="hidden sm:flex items-center pr-4">
+              <div className="relative flex items-center">
+                <SleeveArt
+                  title="Secondary"
+                  artist={status.music_path}
+                  format={formatEntries[1]?.[0]?.replace(/^\./, "").toUpperCase() || "AUDIO"}
+                  size="lg"
+                  showMonogram={false}
+                  className="-rotate-6 opacity-80"
+                />
+                <SleeveArt
+                  title={status.music_path}
+                  artist={status.active_profile}
+                  format={formatEntries[0]?.[0]?.replace(/^\./, "").toUpperCase() || "LOCAL"}
+                  hasArtwork={health ? health.artwork.with_artwork > 0 : false}
+                  size="lg"
+                  showVinyl
+                  showMonogram={false}
+                  className="-ml-8 z-10 shadow-soft"
+                />
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h2 className="font-display text-lg font-semibold text-primary">Active library</h2>
+                  {health ? (
+                    <Chip tone="accent">
+                      {formatNumber(health.overview.total_audio_files)} tracks · {formatBytes(health.overview.total_library_size_bytes)}
+                    </Chip>
+                  ) : null}
+                </div>
+                <span className="font-sans text-xs text-primary-subtle">
+                  Profile: <strong className="font-medium text-primary-muted">{status.active_profile}</strong>
+                </span>
+              </div>
+
+              <PathBlock value={status.music_path} />
+
+              <p className="text-xs leading-relaxed text-primary-muted">
+                Overview reads the library configured in your local backend. Browsing, reviewing findings, and generating plan previews leave audio files unchanged.
+                {!status.review_only ? " Applying a selected plan can change files. Use a disposable library to test Apply." : null}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                {firstFinding ? (
+                  <Link
+                    className="inline-flex items-center gap-2 rounded-lg border border-accent bg-accent px-3.5 py-2 font-sans text-xs font-semibold text-[#14110e] transition-colors hover:bg-[#e8ae6d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    to={`/review?item=${encodeURIComponent(firstFinding.item_id)}`}
+                  >
+                    <Icon name="tune" className="text-[16px]" />
+                    Inspect the first finding
+                  </Link>
+                ) : null}
+                <Link
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] bg-surface-mid px-3.5 py-2 font-sans text-xs font-medium text-primary transition-colors hover:border-accent/50 hover:bg-surface-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  to="/review"
+                >
+                  Open Review Inbox
+                </Link>
+                <details className="w-full pt-1 text-xs text-primary-muted sm:w-auto">
+                  <summary className="cursor-pointer font-medium text-primary-muted hover:text-accent focus-visible:outline-accent">
+                    Inspect a different library
+                  </summary>
+                  <div className="mt-2 rounded-lg border border-white/[0.08] bg-surface-low p-3 text-xs leading-relaxed text-primary-muted">
+                    {desktop ? (
+                      <p>Close this window, then reopen <code>nyxcore-desktop.exe</code> with <code>--music</code> set to the library and <code>--out</code> set to a separate workspace.</p>
+                    ) : status.review_only ? (
+                      <p>Press <kbd>Ctrl+C</kbd> in the launcher terminal. Restart with <code>--music</code> set to the desired library and <code>--out</code> set to a separate workspace, then open the printed URL.</p>
+                    ) : (
+                      <p>Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
+                    )}
+                  </div>
+                </details>
+              </div>
+            </div>
           </div>
-          <details className="border-t border-white/[0.07] pt-2 text-xs text-primary-muted">
-            <summary className="cursor-pointer text-primary focus-visible:outline-accent">Inspect a different library</summary>
-            {desktop ? (
-              <p className="mt-2">Close this window, then reopen <code>nyxcore-desktop.exe</code> with <code>--music</code> set to the library and <code>--out</code> set to a separate workspace.</p>
-            ) : status.review_only ? (
-              <p className="mt-2">Press <kbd>Ctrl+C</kbd> in the launcher terminal. Restart with <code>--music</code> set to the desired library and <code>--out</code> set to a separate workspace, then open the printed URL.</p>
-            ) : (
-              <p className="mt-2">Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
-            )}
-          </details>
         </Panel>
       ) : null}
     </>
   );
-  const failedSections = [
-    healthQuery.isError && !reviewOnly && "library health",
-    reviewQuery.isError && !reviewOnly && "review findings",
-    duplicatesQuery.isError && !reviewOnly && "duplicates",
-    historyQuery.isError && "recent operations",
-  ].filter(Boolean);
+
   if (!status || failedSections.length || !health || !review || !duplicates || !historyQuery.data) {
     return (
       <div className="space-y-6">
         {viewHeader}
         {status && failedSections.length ? (
-          <ActionBanner tone="error" message={`The local API is connected. Overview could not load ${failedSections.join(", ")}. ${reviewOnly ? "Open History to retry." : "Use Refresh Overview to try again."}`} />
+          <ActionBanner
+            tone="error"
+            message={`The local API is connected. Overview could not load ${failedSections.join(", ")}. ${reviewOnly ? "Open History to retry." : "Use Refresh Overview to try again."}`}
+          />
         ) : !reviewOnly ? (
-          <Panel className="p-8 text-center text-sm text-slate-400">Loading library data from local API…</Panel>
+          <Panel className="p-8 text-center text-sm text-primary-muted">Loading library data from local API…</Panel>
         ) : null}
       </div>
     );
   }
 
   const history = historyQuery.data;
-
   const actionableReviewItems = review.items.filter(
     (item) => item.review_status === "new" || item.review_status === "seen",
   );
@@ -139,73 +212,85 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
     health.metadata.missing_album.count;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {viewHeader}
 
-      {/* 4 Focused Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Library Files"
-          value={formatNumber(health.overview.total_audio_files)}
-          icon="audio_file"
-          meta={
-            <p className="truncate font-mono text-[11px] text-primary-subtle">
-              {formatNumber(health.overview.total_folders_touched)} folders scanned
+      {/* Unified Collection Ledger Strip */}
+      <Panel className="overflow-hidden">
+        <div className="grid grid-cols-1 divide-y divide-white/[0.07] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
+          <div className="p-4 sm:p-5">
+            <div className="flex items-center justify-between text-primary-subtle">
+              <span className="font-sans text-xs font-medium text-primary-muted">Collection Tracks</span>
+              <Icon name="library_music" className="text-[17px] text-accent/80" />
+            </div>
+            <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-primary">
+              {formatNumber(health.overview.total_audio_files)}
             </p>
-          }
-        />
-        <MetricCard
-          label="Needs Review"
-          value={formatNumber(actionableReviewItems.length)}
-          icon="inbox"
-          accent={
-            actionableReviewItems.length > 0 ? (
-              <Chip tone="danger">Actionable</Chip>
-            ) : undefined
-          }
-          meta={<p className="font-mono text-[11px] text-primary-subtle">{review.items.length} total findings recorded</p>}
-        />
-        <MetricCard
-          label="Duplicate Sets"
-          value={formatNumber(duplicates.summary.exact_group_count)}
-          icon="copy_all"
-          meta={
-            <p className="font-mono text-[11px] text-primary-subtle">
-              Exact: <span className="font-semibold text-primary">{duplicates.summary.exact_group_count}</span> • Likely: <span className="font-semibold text-amber-400">{duplicates.summary.likely_group_count}</span>
+            <p className="mt-1.5 text-xs text-primary-subtle">
+              {formatNumber(health.overview.total_folders_touched)} folders · {formatBytes(health.overview.total_library_size_bytes)}
             </p>
-          }
-        />
-        <MetricCard
-          label="Health Issues"
-          value={formatNumber(missingTagsCount + unreadableCount)}
-          icon="health_and_safety"
-          meta={
-            <p className="font-mono text-[11px] text-primary-subtle">
-              Artwork: {health.artwork.coverage_percent.toFixed(0)}% • Unreadable: {unreadableCount}
-            </p>
-          }
-        />
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* Left 2 Cols: Priority Review + Recent History */}
-        <div className="space-y-6 xl:col-span-2">
-          <Panel className="p-5">
-            <div className="mb-4 flex items-center justify-between border-b border-white/[0.07] pb-4">
+          <div className="p-4 sm:p-5 sm:border-l sm:border-white/[0.07] lg:border-l-0">
+            <div className="flex items-center justify-between">
+              <span className="font-sans text-xs font-medium text-primary-muted">Needs Review</span>
+              {actionableReviewItems.length > 0 ? <Chip tone="danger">Actionable</Chip> : <Chip tone="success">Clear</Chip>}
+            </div>
+            <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-primary">
+              {formatNumber(actionableReviewItems.length)}
+            </p>
+            <p className="mt-1.5 text-xs text-primary-subtle">
+              {formatNumber(review.items.length)} total findings recorded
+            </p>
+          </div>
+
+          <div className="p-4 sm:p-5 sm:border-t sm:border-white/[0.07] lg:border-t-0">
+            <div className="flex items-center justify-between text-primary-subtle">
+              <span className="font-sans text-xs font-medium text-primary-muted">Duplicate Sets</span>
+              <Icon name="content_copy" className="text-[17px] text-accent/80" />
+            </div>
+            <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-primary">
+              {formatNumber(duplicates.summary.exact_group_count)}
+            </p>
+            <p className="mt-1.5 text-xs text-primary-subtle">
+              Exact: <strong className="font-semibold text-primary">{duplicates.summary.exact_group_count}</strong> · Likely:{" "}
+              <strong className="font-semibold text-[#f2c86b]">{duplicates.summary.likely_group_count}</strong>
+            </p>
+          </div>
+
+          <div className="p-4 sm:p-5 sm:border-l sm:border-t sm:border-white/[0.07] lg:border-l-0 lg:border-t-0">
+            <div className="flex items-center justify-between text-primary-subtle">
+              <span className="font-sans text-xs font-medium text-primary-muted">Tag & Artwork Gaps</span>
+              <Icon name="sell" className="text-[17px] text-accent/80" />
+            </div>
+            <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-primary">
+              {formatNumber(missingTagsCount + unreadableCount)}
+            </p>
+            <p className="mt-1.5 text-xs text-primary-subtle">
+              Artwork: {health.artwork.coverage_percent.toFixed(0)}% · Unreadable: {unreadableCount}
+            </p>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <div className="space-y-6 xl:col-span-7">
+          <Panel className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
               <div>
-                <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
-                  <Icon name="inbox" className="text-base text-accent" />
+                <h2 className="flex items-center gap-2 font-display text-base font-semibold text-primary">
+                  <Icon name="inbox" className="text-[18px] text-accent" />
                   Priority Review Stream
                 </h2>
-                <p className="mt-0.5 font-editorial text-xs italic text-primary-subtle">
-                  High-leverage issues requiring operator decision
+                <p className="mt-0.5 text-xs text-primary-subtle">
+                  Items worth checking first to clean up duplicates, missing tags, and artwork.
                 </p>
               </div>
-              <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/review")}>
+              <Button tone="secondary" onClick={() => navigate("/review")}>
                 Open Inbox →
               </Button>
             </div>
-            <div>
+            <div className="p-3 sm:p-4">
               {actionableReviewItems.length === 0 ? (
                 <EmptyState
                   title={review.items.length === 0 ? "No review findings" : "No active review findings"}
@@ -216,33 +301,40 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
                   }
                 />
               ) : (
-                <div className="divide-y divide-white/[0.05]">
-                  {actionableReviewItems.slice(0, 4).map((item) => (
+                <div className="divide-y divide-white/[0.06]">
+                  {actionableReviewItems.slice(0, 5).map((item) => (
                     <Link
                       key={item.item_id}
                       to={`/review?item=${encodeURIComponent(item.item_id)}`}
-                      className="group -mx-2 flex items-center justify-between gap-4 rounded-[3px] px-3 py-3 transition-colors hover:bg-surface-raised/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                      className="group flex items-center justify-between gap-4 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-mid/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Chip
-                          tone={item.priority_band === "high" ? "danger" : item.priority_band === "medium" ? "warning" : "default"}
-                          className="shrink-0"
-                        >
-                          {item.priority_band}
-                        </Chip>
+                      <div className="flex min-w-0 items-start gap-3.5">
+                        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-surface-low text-accent">
+                          <Icon name={findingIcon(item.item_type)} className="text-[18px]" />
+                        </span>
                         <div className="min-w-0">
-                          <p className="truncate font-sans text-xs font-medium text-primary transition-colors group-hover:text-accent">
-                            {item.summary}
-                          </p>
-                          <p className="truncate font-editorial text-xs italic text-primary-subtle">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Chip
+                              tone={item.priority_band === "high" ? "danger" : item.priority_band === "medium" ? "warning" : "default"}
+                              className="shrink-0 capitalize"
+                            >
+                              {item.priority_band}
+                            </Chip>
+                            <p className="truncate font-sans text-[13px] font-medium text-primary transition-colors group-hover:text-accent">
+                              {item.summary}
+                            </p>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-primary-subtle">
                             {item.reason_summary}
                           </p>
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-4">
-                        <span className="font-mono text-xs text-primary-subtle">Score {item.priority_score}</span>
-                        <span className="font-sans text-xs text-primary-subtle transition-colors group-hover:text-accent">
-                          Inspect →
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="hidden font-mono text-xs text-primary-subtle sm:inline">
+                          {item.priority_score}
+                        </span>
+                        <span className="inline-flex items-center gap-1 font-sans text-xs font-medium text-primary-muted transition-colors group-hover:text-accent">
+                          Inspect <span aria-hidden="true">→</span>
                         </span>
                       </div>
                     </Link>
@@ -253,17 +345,17 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
           </Panel>
 
           <Panel className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
               <div>
-                <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
-                  <Icon name="history" className="text-base text-accent" />
+                <h2 className="flex items-center gap-2 font-display text-base font-semibold text-primary">
+                  <Icon name="history" className="text-[18px] text-accent" />
                   Recent Operations
                 </h2>
-                <p className="mt-0.5 font-editorial text-xs italic text-primary-subtle">
-                  Batches committed to the local ledger
+                <p className="mt-0.5 text-xs text-primary-subtle">
+                  Recorded edits and moves saved with reversal safety
                 </p>
               </div>
-              <Button tone="secondary" className="px-3 py-1.5 text-xs" onClick={() => navigate("/history")}>
+              <Button tone="secondary" onClick={() => navigate("/history")}>
                 View History
               </Button>
             </div>
@@ -294,49 +386,66 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
           </Panel>
         </div>
 
-        {/* Right Col: Health Breakdown & Quick Inspection */}
-        <div className="space-y-6">
+        <div className="space-y-6 xl:col-span-5">
           <Panel className="p-5">
-            <div className="mb-4 flex items-center justify-between border-b border-white/[0.07] pb-3.5">
-              <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-primary">
-                <Icon name="health_and_safety" className="text-base text-accent" />
+            <div className="mb-4 flex items-center justify-between border-b border-white/[0.08] pb-3.5">
+              <h2 className="flex items-center gap-2 font-display text-base font-semibold text-primary">
+                <Icon name="graphic_eq" className="text-[18px] text-accent" />
                 Library Health
               </h2>
-              <Button tone="ghost" className="px-2.5 py-1 text-xs" onClick={() => navigate("/health")}>
+              <Button tone="ghost" onClick={() => navigate("/health")}>
                 Full Audit
               </Button>
             </div>
+
+            {formatEntries.length > 0 ? (
+              <div className="mb-5">
+                <p className="mb-2 font-sans text-xs font-medium text-primary-subtle">Audio Formats</p>
+                <div className="flex flex-wrap gap-2">
+                  {formatEntries.map(([ext, count]) => (
+                    <span
+                      key={ext}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-surface-low px-2.5 py-1 text-xs text-primary"
+                    >
+                      <span className="font-mono font-semibold uppercase text-accent">{ext.replace(/^\./, "")}</span>
+                      <span className="text-primary-subtle">{formatNumber(count)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-4">
               <div>
-                <div className="mb-2 flex items-center justify-between font-sans text-xs">
-                  <span className="text-primary-subtle">Artwork Coverage</span>
-                  <span className="font-semibold text-accent">{health.artwork.coverage_percent.toFixed(1)}%</span>
+                <div className="mb-1.5 flex items-center justify-between font-sans text-xs">
+                  <span className="text-primary-muted">Artwork Coverage</span>
+                  <span className="font-mono font-semibold text-accent">{health.artwork.coverage_percent.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={health.artwork.coverage_percent} />
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between font-sans text-xs">
-                  <span className="text-primary-subtle">Lossless Files Share</span>
-                  <span className="font-semibold text-primary">{losslessRatio.toFixed(1)}%</span>
+                <div className="mb-1.5 flex items-center justify-between font-sans text-xs">
+                  <span className="text-primary-muted">Lossless Files Share</span>
+                  <span className="font-mono font-semibold text-[#7cd4aa]">{losslessRatio.toFixed(1)}%</span>
                 </div>
                 <ProgressBar value={losslessRatio} tone="violet" />
               </div>
 
-              <div className="mt-4 space-y-2 border-t border-white/[0.06] pt-3.5">
-                <div className="flex justify-between font-sans text-xs">
-                  <span className="text-primary-subtle">Missing Artist / Title / Album</span>
-                  <span className="font-mono text-primary">{formatNumber(missingTagsCount)}</span>
+              <div className="mt-4 space-y-2.5 border-t border-white/[0.07] pt-4 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-primary-muted">Missing Artist / Title / Album</span>
+                  <span className="font-mono font-medium text-primary">{formatNumber(missingTagsCount)}</span>
                 </div>
-                <div className="flex justify-between font-sans text-xs">
-                  <span className="text-primary-subtle">Unreadable / Unparseable</span>
-                  <span className={`font-mono ${unreadableCount > 0 ? "text-rose-400 font-semibold" : "text-primary"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-primary-muted">Unreadable / Unparseable</span>
+                  <span className={`font-mono ${unreadableCount > 0 ? "font-semibold text-[#f59f8a]" : "font-medium text-primary"}`}>
                     {formatNumber(unreadableCount)}
                   </span>
                 </div>
-                <div className="flex justify-between font-sans text-xs">
-                  <span className="text-primary-subtle">Placeholder Metadata</span>
-                  <span className="font-mono text-primary">
+                <div className="flex items-center justify-between">
+                  <span className="text-primary-muted">Placeholder Metadata</span>
+                  <span className="font-mono font-medium text-primary">
                     {formatNumber(health.metadata.placeholder_metadata.count)}
                   </span>
                 </div>
@@ -345,60 +454,30 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
           </Panel>
 
           <Panel className="p-5">
-            <h3 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-primary-subtle">
-              Inspect Next
+            <h3 className="mb-3.5 font-display text-sm font-semibold text-primary">
+              Explore Collection Tools
             </h3>
-            <div className="space-y-1.5">
-              <Link
-                to="/review"
-                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon name="inbox" className="text-sm text-accent" />
-                  <span>Review Inbox</span>
-                </div>
-                <span className="font-mono font-semibold text-accent">{actionableReviewItems.length}</span>
-              </Link>
-              <Link
-                to="/duplicates"
-                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon name="copy_all" className="text-sm text-accent" />
-                  <span>Duplicates</span>
-                </div>
-                <span className="font-mono text-primary-subtle">{duplicates.summary.exact_group_count} exact</span>
-              </Link>
-              <Link
-                to="/health"
-                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon name="health_and_safety" className="text-sm text-accent" />
-                  <span>Library Health</span>
-                </div>
-                <span className="font-mono text-primary-subtle">{missingTagsCount} tags</span>
-              </Link>
-              <Link
-                to="/history"
-                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon name="history" className="text-sm text-accent" />
-                  <span>Operation History</span>
-                </div>
-                <span className="font-mono text-primary-subtle">{history.items.length} batches</span>
-              </Link>
-              <Link
-                to="/search"
-                className="flex items-center justify-between rounded-[3px] border border-white/[0.06] bg-surface-low/60 px-3.5 py-2.5 font-sans text-xs text-primary-muted transition-colors hover:border-accent/40 hover:bg-surface-mid hover:text-accent"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon name="manage_search" className="text-sm text-accent" />
-                  <span>Archive Search</span>
-                </div>
-                <span className="font-mono text-primary-subtle">Lookup</span>
-              </Link>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              {[
+                { to: "/search", icon: "search", label: "Archive Search", meta: "Lookup tracks" },
+                { to: "/duplicates", icon: "library_music", label: "Duplicates", meta: `${duplicates.summary.exact_group_count} exact · ${duplicates.summary.likely_group_count} likely` },
+                { to: "/organization", icon: "folder_open", label: "Library Organization", meta: "Preview folders" },
+                ...(desktop ? [{ to: "/metadata", icon: "sell", label: "Staged Metadata", meta: "Review tag edits" }] : []),
+                { to: "/review", icon: "inbox", label: "Review Inbox", meta: `${actionableReviewItems.length} open` },
+                { to: "/history", icon: "history", label: "Operation History", meta: `${history.items.length} batches` },
+              ].map((entry) => (
+                <Link
+                  key={entry.to}
+                  to={entry.to}
+                  className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-surface-low/80 px-3.5 py-2.5 text-xs text-primary transition-colors hover:border-accent/40 hover:bg-surface-mid"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Icon name={entry.icon} className="text-[17px] text-accent" />
+                    <span className="font-medium">{entry.label}</span>
+                  </div>
+                  <span className="font-sans text-[11px] text-primary-subtle">{entry.meta}</span>
+                </Link>
+              ))}
             </div>
           </Panel>
         </div>

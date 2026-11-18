@@ -20,7 +20,7 @@ export function App({ desktop = false }: { desktop?: boolean }) {
         <Route path="/playlists" element={<PlaylistsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/duplicates" element={<DuplicatesPage />} />
-        <Route path="/health" element={<HealthPage />} />
+        <Route path="/health" element={<HealthPage desktop={desktop} />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/metadata" element={<MetadataPage />} />
         <Route path="/organization" element={<OrganizationPage />} />

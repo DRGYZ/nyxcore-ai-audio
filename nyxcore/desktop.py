@@ -21,7 +21,9 @@ from urllib.parse import urlsplit
 
 HOST = "127.0.0.1"
 RESOURCES = Path(__file__).with_name("resources")
-BACKGROUND = "#0a0a0c"
+BACKGROUND = "#11100e"
+CAPTION_BACKGROUND = "#141311"
+FOREGROUND = "#f5f0e6"
 WINDOW_SIZE = (1320, 860)
 MIN_SIZE = (740, 560)
 STARTUP_TIMEOUT = 15
@@ -143,7 +145,7 @@ def place_window(form, screen) -> None:
     form.Bounds = Rectangle(area.X + (area.Width - width) // 2, area.Y + (area.Height - height) // 2, width, height)
     if not SystemInformation.HighContrast:
         hwnd = wintypes.HWND(form.Handle.ToInt64())
-        for attribute, color in ((35, "#17151c"), (36, "#f1f0f3")):  # DWM caption and text colors
+        for attribute, color in ((35, CAPTION_BACKGROUND), (36, FOREGROUND)):  # DWM caption and text colors
             value = wintypes.DWORD(ColorTranslator.ToWin32(ColorTranslator.FromHtml(color)))
             ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
     LOG.info("Display %s, %d DPI, window %dx%d", screen.DeviceName, round(96 * scale), width, height)
@@ -158,7 +160,7 @@ def native_status(form, message: str):
     label.TextAlign = ContentAlignment.MiddleCenter
     label.Font = Font("Segoe UI", 13)
     label.BackColor = ColorTranslator.FromHtml(BACKGROUND)
-    label.ForeColor = ColorTranslator.FromHtml("#f1f0f3")
+    label.ForeColor = ColorTranslator.FromHtml(FOREGROUND)
     label.Text = message
     form.Controls.Add(label)
     label.BringToFront()

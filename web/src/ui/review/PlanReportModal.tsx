@@ -88,7 +88,7 @@ function OperationDetails({
         </dl>
       ) : null}
       {operation.operation_type === "write_metadata" && operation.fields.length ? (
-        <dl className="grid min-w-0 gap-1 rounded-[3px] bg-surface-low p-2 text-xs">
+        <dl className="grid min-w-0 gap-1 rounded-lg bg-surface-low p-2.5 text-xs">
           {operation.fields.map((field) => (
             <div key={field} className="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
               <dt className="font-semibold capitalize text-primary-muted">{field.replace(/_/g, " ")}</dt>
@@ -120,7 +120,6 @@ function PlanCard({
   const keeper = preferredCopy(plan);
   const filteredOperations = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
-    // Preferred copies already appear as Keep on each move that has a grounded keeper.
     const hasNamedKeeper = keeper && plan.proposed_operations.some(
       (op) => op.operation_type === "quarantine_move" && keeper !== op.path && keeper !== op.destination_path,
     );
@@ -137,8 +136,8 @@ function PlanCard({
   const visible = filteredOperations.slice(safePage * OPERATION_PAGE_SIZE, (safePage + 1) * OPERATION_PAGE_SIZE);
 
   return (
-    <Panel className="min-w-0 border border-white/[0.07] bg-surface-low/60 p-3 sm:p-4">
-      <div className="mb-3 border-b border-white/[0.06] pb-2">
+    <Panel className="min-w-0 border border-white/[0.08] bg-surface-low/75 p-4">
+      <div className="mb-3 border-b border-white/[0.07] pb-2.5">
         <h4 className="font-display text-sm font-semibold capitalize text-primary">{plan.action_type.replace(/_/g, " ")}</h4>
         {plan.reasons.length ? <p className="mt-1 text-xs text-primary-muted">{plan.reasons.join(" · ")}</p> : null}
       </div>
@@ -149,16 +148,16 @@ function PlanCard({
           value={filter}
           onChange={(event) => { setFilter(event.target.value); setPage(0); }}
           placeholder="Filter proposed operations"
-          className="mb-3 w-full rounded-[3px] border border-white/[0.08] bg-surface px-3 py-2 text-xs text-primary"
+          className="mb-3 w-full rounded-lg border border-white/[0.1] bg-surface px-3 py-2 text-xs text-primary"
         />
       ) : null}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {visible.map((operation) => {
           const selectable = isActionOperationSelectable(plan, operation);
           const checked = selectable && selectedOperationIds.has(actionOperationSelectionKey(plan.plan_id, operation.operation_id));
           const displayPath = operation.path && (libraryRelativePath(operation.path, root) ?? pathFilename(operation.path));
           return (
-            <div key={operation.operation_id} className="min-w-0 rounded-[3px] border border-white/[0.07] bg-surface p-3">
+            <div key={operation.operation_id} className="min-w-0 rounded-xl border border-white/[0.08] bg-surface p-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="flex items-center gap-2 text-xs font-semibold text-primary">
                   {selectable ? (
@@ -184,7 +183,7 @@ function PlanCard({
         })}
         {!visible.length ? <p className="py-4 text-center text-xs text-primary-muted">No operations match this filter.</p> : null}
       </div>
-      {plan.notes.length ? <p className="mt-2 text-xs text-primary-muted">{plan.notes.join(" ")}</p> : null}
+      {plan.notes.length ? <p className="mt-2.5 text-xs text-primary-muted">{plan.notes.join(" ")}</p> : null}
       {pageCount > 1 ? (
         <div className="mt-3 flex items-center justify-between gap-3">
           <Button tone="ghost" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>Previous</Button>
@@ -261,7 +260,7 @@ export function PlanReportModal({
             {[...groups].map(([type, count]) => <Chip key={type} tone="default">{ACTION_GROUP_LABELS[type]} · {count}</Chip>)}
           </div>
           {selectedChanges.map(({ planId, keeper, operation }) => (
-            <Panel key={actionOperationSelectionKey(planId, operation.operation_id)} className="min-w-0 bg-surface-low/60 p-3">
+            <Panel key={actionOperationSelectionKey(planId, operation.operation_id)} className="min-w-0 bg-surface-low/75 p-3.5">
               <h4 className="text-sm font-semibold text-primary">{actionLabel(operation.operation_type)}</h4>
               <OperationDetails operation={operation} keeper={keeper} root={root} applies />
             </Panel>
@@ -275,8 +274,16 @@ export function PlanReportModal({
             <ActionBanner key={item.source_review_item_id} message={"Review only. " + item.reason} />
           ))}
           {report.plans.map((plan) => (
-            <PlanCard key={plan.plan_id} plan={plan} root={root} selectedTotal={selectedTotal}
-              selectedOperationIds={selectedOperationIds} maximum={maximum} disabled={applyPending} onToggleOperation={onToggleOperation} />
+            <PlanCard
+              key={plan.plan_id}
+              plan={plan}
+              root={root}
+              selectedTotal={selectedTotal}
+              selectedOperationIds={selectedOperationIds}
+              maximum={maximum}
+              disabled={applyPending}
+              onToggleOperation={onToggleOperation}
+            />
           ))}
         </div>
       ) : null}
@@ -301,7 +308,7 @@ export function ApplyResultPanel({
   const allApplied = applied > 0 && applied === selectedStates.length;
   const title = allApplied ? "All selected changes applied" : applied > 0 ? "Partially applied" : "No changes applied";
   return (
-    <Panel className="min-w-0 space-y-4 p-4">
+    <Panel className="min-w-0 space-y-4 p-4 sm:p-5">
       <ActionBanner
         tone={allApplied ? "success" : "error"}
         message={title + ". " + applied + " applied · " + failed + " failed · " + notApplied + " not applied."}
@@ -312,18 +319,18 @@ export function ApplyResultPanel({
       />
       <div className="grid min-w-0 gap-3 lg:grid-cols-2">
         {result.results.map((entry) => (
-          <div key={entry.plan_id} className="min-w-0 rounded-[3px] border border-white/[0.06] bg-surface p-3.5">
+          <div key={entry.plan_id} className="min-w-0 rounded-xl border border-white/[0.08] bg-surface-low/65 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-xs font-semibold capitalize text-primary">{entry.action_type.replace(/_/g, " ")}</h4>
               <Chip tone={planExecutionTone(entry.status)}>{formatPlanExecutionStatus(entry.status)}</Chip>
             </div>
             <div className="mt-3 space-y-2">
               {entry.operation_results.map((operation) => (
-                <div key={operation.operation_id} className="space-y-1 rounded-[3px] bg-surface-low p-2.5">
+                <div key={operation.operation_id} className="space-y-1.5 rounded-lg bg-surface p-3">
                   <p className="text-xs font-semibold text-primary">{actionLabel(operation.operation_type)}</p>
                   {operation.path ? <OperationPath path={operation.path} root={root} /> : null}
                   {operation.destination_path ? <OperationPath path={operation.destination_path} root={root} /> : null}
-                  <p className={operation.status === "error" ? "text-xs text-rose-400 [overflow-wrap:anywhere]" : "text-xs text-primary-muted [overflow-wrap:anywhere]"}>
+                  <p className={operation.status === "error" ? "text-xs text-[#f59f8a] [overflow-wrap:anywhere]" : "text-xs text-primary-muted [overflow-wrap:anywhere]"}>
                     <strong>{operation.status === "ok" ? "Applied" : operation.status === "error" ? "Failed" : "Skipped"}</strong> · {operation.message}
                   </p>
                 </div>
