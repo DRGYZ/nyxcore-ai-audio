@@ -1,10 +1,10 @@
 # NyxCore for Windows 11
 
-NyxCore is a portable x64 desktop application for reviewing a local music library. The release candidate is unsigned and intended for internal acceptance. Use a ZIP from a trusted source.
+NyxCore is a portable x64 desktop application for reviewing a local music library. The unsigned executable is built for personal use. For the source-based setup, see [NyxCore Desktop](INSTALL_DESKTOP.md).
 
 ## Open the portable app
 
-1. Download `NyxCore-Windows-x64.zip` and its `.sha256` file from the same approved location. Open PowerShell in that folder and run `Get-FileHash -Algorithm SHA256 .\NyxCore-Windows-x64.zip`. Compare the full hash with the checksum file.
+1. [Build the Windows ZIP from source](docs/WINDOWS_DISTRIBUTION.md#build) to produce `NyxCore-Windows-x64.zip` and its `.sha256` file. Open PowerShell in that folder and run `Get-FileHash -Algorithm SHA256 .\NyxCore-Windows-x64.zip`. Compare the full hash with the checksum file.
 2. Extract the entire ZIP to a local folder. Keep `_internal` beside `NyxCore.exe`.
 3. Double-click **NyxCore.exe**. Choose a music folder, check the shown path, and select **Open Library**. You can also explore the synthetic demo.
 

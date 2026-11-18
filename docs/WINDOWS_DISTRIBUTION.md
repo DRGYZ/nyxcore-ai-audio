@@ -1,4 +1,6 @@
-# Windows release candidate
+# Windows build and distribution
+
+Desktop 01–05 are complete for personal use. The portable build at commit `80943c2` passed independent Windows 11 VM acceptance after installation of the documented Visual C++ runtime. Physical USB disconnect and reconnect was unverified because the VM had no USB passthrough.
 
 ## Build
 
@@ -24,7 +26,9 @@ Both ZIPs carry the complete GPLv3 text and a notice for the proposed GPLv3 dist
 
 ### Redistribution decision record
 
-**Public distribution remains on hold.** The candidate is unsigned and clean Windows 11 acceptance remains open. Before release, confirm the scope of the covered combination and provide access to matching preferred source alongside the binary at no extra charge. A source mirror may be used with equivalent access and clear directions next to the binary. [GPLv3 §§1 and 6](https://www.gnu.org/licenses/gpl-3.0.html#section6)
+**Public Windows binary distribution is out of scope.** The unsigned executable is for personal use. There is no planned installer, commercial launch, or end-user support commitment. The owner must explicitly revisit this decision before public binary distribution is considered. The redistribution questions below remain unresolved.
+
+If distribution is revisited, confirm the scope of the covered combination and provide access to matching preferred source alongside the binary at no extra charge. A source mirror may be used with equivalent access and clear directions next to the binary. [GPLv3 §§1 and 6](https://www.gnu.org/licenses/gpl-3.0.html#section6)
 
 | Component | Evidence and governing terms |
 | --- | --- |
@@ -38,4 +42,4 @@ The CRT startup library is a normal MSVC toolchain input and enables the Windows
 
 If the project has a committed root `LICENSE`, the builder includes it beside the executable and at the root of the source ZIP, as well as in the source snapshot. The build manifest records the exact SHA-256. Ordinary CI runs produce internal candidates and upload receipts and checksums only.
 
-Archive upload requires a manual workflow run on `main` with `upload_archives` selected. Set `NYXCORE_WINDOWS_RC_APPROVED_LICENSE_SHA256` to the digest of the approved committed license bytes. Set `NYXCORE_WINDOWS_RC_UPLOAD` to `true` only after separately clearing redistribution, corresponding-source delivery, and clean-machine acceptance. The upload step requires verification of both ZIP checksums, the matching source snapshot and commit, and the approved license bytes in both ZIPs.
+Keep `upload_archives` off and the upload approval variables unset. The workflow's archive upload gate requires a manual run on `main`, explicit redistribution clearance in `NYXCORE_WINDOWS_RC_UPLOAD`, and the approved committed license digest in `NYXCORE_WINDOWS_RC_APPROVED_LICENSE_SHA256`. The upload step verifies both ZIP checksums, the matching source snapshot and commit, and the approved license bytes in both ZIPs.

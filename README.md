@@ -1,21 +1,21 @@
 # NyxCore
 
-> NyxCore is an experimental local-first music-library review toolkit for people who manage folders of audio files rather than streaming playlists.
+NyxCore is a completed personal Windows desktop project for local music-library analysis and review. It finds duplicates and metadata issues, keeps review state in a separate workspace for each library, and previews changes while leaving audio files untouched.
 
-NyxCore scans a local audio directory, surfaces duplicate and metadata health findings, builds an interactive review queue, generates explicit, inspectable action plans, and applies selected operations with journaling, single-writer locking, quarantine-based moves, and reversible history.
+The portable Windows build passed acceptance in an independent Windows 11 VM. The executable is for personal use, with no official Windows binary or installer distribution. Developers can [run the desktop app from source](INSTALL_DESKTOP.md). NyxCore's first-party code is [MIT-licensed](LICENSE), and third-party components retain their own licenses.
 
 Everything runs against local files and local state. NyxCore does not require cloud accounts, remote media servers, or hosted databases.
 
-Current release version: `0.3.0`
+Latest tagged release: `0.3.0`
 
 ![NyxCore Review Inbox](screenshots/02_review_inbox_selected_1440.png)
-*NyxCore Review Inbox: inspect finding details, review generated plan operations, and selectively approve changes before execution.*
+*NyxCore Review Inbox showing findings and generated plan previews.*
 
 ---
 
 ## Core Workflow
 
-NyxCore enforces a strict review-first lifecycle:
+The desktop app and browser preview are review-only. The experimental mutation tools follow a review-first lifecycle:
 
 ```
 scan
@@ -120,11 +120,9 @@ NyxCore is designed around defensive, local-first safety primitives:
 
 ---
 
-## Prebuilt Preview
+## Source-Based Review Preview
 
-Use the prebuilt preview for local review with Python 3.12. The ZIP includes the compiled frontend and seven synthetic tracks, so users can launch without Node.js, Vite, or FFmpeg. The preview uses an editable Python install from the extracted folder. It is experimental, review-only, and intended for trying the application.
-
-The [Windows desktop prototype](INSTALL_DESKTOP.md) runs the same review-only application in a dedicated WebView2 window from a source checkout.
+The review preview uses an editable Python 3.12 install from the extracted ZIP. It includes the compiled frontend and seven synthetic tracks, so it can run without Node.js, Vite, or FFmpeg.
 
 The launcher analyzes the selected library on first use. Overview, Duplicates, Review Inbox, and Archive Search share the latest analysis in memory. Select **Refresh Library** after changing files. A refresh performs a full scan and keeps the previous successful results available if it fails. Restarting the launcher or requesting a different analysis profile rebuilds the analysis. If NyxCore detects changes during a scan, let the transfers or edits finish and try again. Triage is saved independently in the workspace. A finding marked resolved can return as Seen if it remains after a fresh analysis.
 
