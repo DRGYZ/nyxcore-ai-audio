@@ -18,6 +18,12 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 RUNTIME_ROOTS = ("fastapi", "aiohttp", "pillow", "mutagen", "pywebview", "pyyaml", "uvicorn")
+FROZEN_BUILD_INPUTS = ("pyinstaller", "pyinstaller-hooks-contrib")
+REQUIRED_SOURCE_DISTRIBUTIONS = ("mutagen", *FROZEN_BUILD_INPUTS)
+GPL_NOTICES = {
+    "licenses/GPL-3.0.txt": "scripts/windows/GPL-3.0.txt",
+    "licenses/GPL-NOTICE.md": "scripts/windows/GPL-NOTICE.md",
+}
 NOTICE = re.compile(r"^(licen[cs]e|copying|copyright|notice)(?:$|[._-])", re.I)
 
 
@@ -146,9 +152,16 @@ def native_inventory(bundle: Path, packages: dict[str, metadata.Distribution], r
 
 
 def collect_notices(stage: Path, bundle: Path, runtime: dict, frontend_lock: Path) -> tuple[dict, dict, dict]:
-    packages = runtime_packages()
+    runtime_distributions = runtime_packages()
+    packages = {
+        **runtime_distributions,
+        **{name: metadata.distribution(name) for name in FROZEN_BUILD_INPUTS},
+    }
     upstream = stage / "_upstream"
-    licenses = {"licenses/CPython/LICENSE.txt": Path(sys.base_prefix) / "LICENSE.txt"}
+    licenses = {
+        **{name: stage / path for name, path in GPL_NOTICES.items()},
+        "licenses/CPython/LICENSE.txt": Path(sys.base_prefix) / "LICENSE.txt",
+    }
     if not licenses["licenses/CPython/LICENSE.txt"].is_file():
         raise ValueError("The pinned CPython license is missing.")
     sdk = runtime["webview2_sdk_version"]
@@ -184,8 +197,8 @@ def collect_notices(stage: Path, bundle: Path, runtime: dict, frontend_lock: Pat
                         package.metadata.get("License"), "notices": [path.name for path in distribution_notices]}
         for path in distribution_notices:
             licenses[f"licenses/python/{name}/{path.name}"] = path
-        if name == "mutagen" and not (source and distribution_notices):
-            raise ValueError("The exact Mutagen source and copying terms are required.")
+        if name in REQUIRED_SOURCE_DISTRIBUTIONS and not (source and distribution_notices):
+            raise ValueError(f"The exact source and copying terms for {name} are required.")
 
     core_source = sources[f"upstream/python/{python['pydantic-core']['file']}"]
     crates, crate_sources, crate_notices = rust_inventory(core_source, upstream)
@@ -199,6 +212,10 @@ def collect_notices(stage: Path, bundle: Path, runtime: dict, frontend_lock: Pat
         paths = pool.map(lambda item: fetch(item[1]["url"], upstream / "notices" / item[0], item[1]["sha256"]),
                          supplemental.items())
         licenses.update((f"licenses/{name}", path) for name, path in zip(supplemental, paths, strict=True))
+        runtime_sources = runtime["source_archives"]
+        paths = pool.map(lambda item: fetch(item[1]["url"], upstream / "native" / item[0], item[1]["sha256"]),
+                         runtime_sources.items())
+        sources.update((f"upstream/native/{name}", path) for name, path in zip(runtime_sources, paths, strict=True))
     packages_lock = json.loads(frontend_lock.read_bytes())["packages"]
     frontend = {
         name.removeprefix("node_modules/"): {key: package.get(key) for key in ("version", "resolved", "integrity", "license")}
@@ -210,5 +227,5 @@ def collect_notices(stage: Path, bundle: Path, runtime: dict, frontend_lock: Pat
         "pydantic_core_locked_rust_sources": crates,
         "supplemental_notices": supplemental,
         "frontend": frontend,
-        "native_files": native_inventory(bundle, packages, runtime),
+        "native_files": native_inventory(bundle, runtime_distributions, runtime),
     }

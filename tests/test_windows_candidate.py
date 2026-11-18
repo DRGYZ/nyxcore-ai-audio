@@ -53,20 +53,41 @@ def archive_pair(tmp_path, packaging):
     builder, verifier = packaging
 
     def check(*, licensed=True, approved=None, omit=None, replace=None, source_commit=COMMIT,
-              source_binary=None, companion_hash=None, expected_commit=COMMIT):
+              source_binary=None, companion_hash=None, expected_commit=COMMIT,
+              omit_gpl=False, replace_mutagen=False, omit_native=False):
         license_file = tmp_path / "fixture-license"
         license_file.write_bytes(LICENSE_BYTES)
         incorrect_license = tmp_path / "changed-license"
         incorrect_license.write_bytes(b"Different fixture bytes\n")
-        mutagen = tmp_path / "mutagen-fixture.tar.gz"
-        mutagen.write_bytes(b"Source fixture")
+        upstream = tmp_path / "upstream-source"
+        upstream.write_bytes(b"Source fixture")
+        upstream_sha256 = builder.digest(upstream)
+        runtime_source = "upstream/native/runtime-fixture.tar.gz"
+        python_sources = {
+            name: {"file": f"{name}-fixture.tar.gz", "sha256": upstream_sha256, "notices": ["COPYING"]}
+            for name in verifier.REQUIRED_SOURCE_DISTRIBUTIONS
+        }
+        inventory = builder.save_json(tmp_path / "inventory.json", {
+            "python": python_sources,
+            "pydantic_core_locked_rust_sources": [],
+            "runtime": {"source_archives": {"runtime-fixture.tar.gz": {"sha256": upstream_sha256}}},
+        })
+        gpl_notice = tmp_path / "gpl-fixture"
+        gpl_notice.write_bytes(b"GPL notice fixture")
+        common = {
+            "WINDOWS_DEPENDENCIES.json": inventory,
+            **{name: gpl_notice for name in verifier.GPL_NOTICES},
+            **{f"licenses/python/{name}/COPYING": gpl_notice for name in python_sources},
+        }
         copies = {}
         if licensed:
             copies = {
                 section: incorrect_license if section == replace else license_file
                 for section in ("binary", "source", "snapshot") if section != omit
             }
-        recorded = {"LICENSE": LICENSE_SHA256} if licensed else {}
+        recorded = {path: builder.digest(gpl_notice) for path in verifier.GPL_NOTICES.values()}
+        if licensed:
+            recorded["LICENSE"] = LICENSE_SHA256
         provenance = {
             "source_state": "commit", "source_commit": COMMIT, "base_commit": None,
             "first_party_license_sha256": LICENSE_SHA256 if licensed else None,
@@ -74,9 +95,15 @@ def archive_pair(tmp_path, packaging):
         }
         package, source = tmp_path / builder.ZIP_NAME, tmp_path / builder.SOURCE_NAME
         source_files = {
+            **common,
             "SOURCE_FILES.json": builder.save_json(tmp_path / "SOURCE_FILES.json", recorded),
-            "upstream/python/mutagen-fixture.tar.gz": mutagen,
+            **{f"project/{path}": gpl_notice for path in verifier.GPL_NOTICES.values()},
+            **{f"upstream/python/{item['file']}": upstream for item in python_sources.values()},
         }
+        if not omit_native:
+            source_files[runtime_source] = upstream
+        if replace_mutagen:
+            source_files["upstream/python/mutagen-fixture.tar.gz"] = incorrect_license
         if "source" in copies:
             source_files["LICENSE"] = copies["source"]
         if "snapshot" in copies:
@@ -87,7 +114,12 @@ def archive_pair(tmp_path, packaging):
         provenance["source_companion"] = {
             "file": source.name, "sha256": companion_hash or builder.digest(source),
         }
-        builder.write_archive(package, {"LICENSE": copies["binary"]} if "binary" in copies else {}, provenance)
+        binary_files = dict(common)
+        if omit_gpl:
+            del binary_files["licenses/GPL-3.0.txt"]
+        if "binary" in copies:
+            binary_files["LICENSE"] = copies["binary"]
+        builder.write_archive(package, binary_files, provenance)
         for path in (package, source):
             path.with_name(path.name + ".sha256").write_text(
                 f"{builder.digest(path)}  {path.name}\n", encoding="ascii",
@@ -135,5 +167,18 @@ def test_missing_or_different_license_is_rejected(archive_pair, section):
     ],
 )
 def test_archive_pair_rejects_mismatched_provenance(archive_pair, change, error):
+    with pytest.raises(ValueError, match=error):
+        archive_pair(approved=LICENSE_SHA256, **change)
+
+
+@pytest.mark.parametrize(
+    ("change", "error"),
+    [
+        ({"omit_gpl": True}, "Missing GPL notice"),
+        ({"replace_mutagen": True}, "Upstream source checksum mismatch: .*mutagen"),
+        ({"omit_native": True}, "Missing upstream source: upstream/native"),
+    ],
+)
+def test_archive_pair_requires_verified_source_materials(archive_pair, change, error):
     with pytest.raises(ValueError, match=error):
         archive_pair(approved=LICENSE_SHA256, **change)
