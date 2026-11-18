@@ -6,6 +6,109 @@
   "python_dll_sha256": "6e1cd54bed9a5448616161061a43e037a05337780b15c2e33be0254ec44154b1",
   "python_build_source": "https://github.com/astral-sh/python-build-standalone/tree/20260901",
   "python_source": "https://www.python.org/downloads/release/python-31214/",
+  "source_archives": {
+    "Python-3.12.14.tar.xz": {
+      "url": "https://www.python.org/ftp/python/3.12.14/Python-3.12.14.tar.xz",
+      "sha256": "5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a"
+    },
+    "python-build-standalone-20260901.tar.gz": {
+      "url": "https://codeload.github.com/astral-sh/python-build-standalone/tar.gz/refs/tags/20260901",
+      "sha256": "bf4776e7bdb751a58fa6879d280b678f60b955b62b19ec98a32903fd82cee1c6"
+    },
+    "bzip2-1.0.8.tar.gz": {
+      "url": "https://astral-sh.github.io/mirror/files/bzip2-1.0.8.tar.gz",
+      "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
+    },
+    "libffi-cpython-source-deps-16fad48.tar.gz": {
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/16fad4855b3d8c03b5910e405ff3a04395b39a98",
+      "sha256": "f21ae7b0cce58cf9428e01d4d22aac9c3b70722a4e9b2c92b3a97d490a1b401c"
+    },
+    "openssl-3.5.8.tar.gz": {
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+      "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2"
+    },
+    "sqlite-autoconf-3530100.tar.gz": {
+      "url": "https://www.sqlite.org/2026/sqlite-autoconf-3530100.tar.gz",
+      "sha256": "83e6b2020a034e9a7ad4a72feea59e1ad52f162e09cbd26735a3ffb98359fc4f"
+    },
+    "sqlite-src-3530100.zip": {
+      "url": "https://www.sqlite.org/2026/sqlite-src-3530100.zip",
+      "sha256": "1b2b5755d9064c4d5d1b0bf5307b48b089963e291c40cc7351318aa1b61c460e"
+    },
+    "xz-5.8.3.tar.gz": {
+      "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+      "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0"
+    },
+    "yaml-0.2.5.tar.gz": {
+      "url": "https://pyyaml.org/download/libyaml/yaml-0.2.5.tar.gz",
+      "sha256": "c642ae9b75fee120b2d96c712538bd2cf283228d2337df2cf2988e3c02678ef4"
+    },
+    "zlib-1.3.2.tar.gz": {
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+    },
+    "libaom-3.14.1.tar.gz": {
+      "url": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz",
+      "sha256": "44bf90dbd23e734d50e70a8c41c285193922938bd0d3bc2ee56764d181d55ef5"
+    },
+    "brotli-1.2.0.tar.gz": {
+      "url": "https://codeload.github.com/google/brotli/tar.gz/refs/tags/v1.2.0",
+      "sha256": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec"
+    },
+    "dav1d-1.5.3.tar.xz": {
+      "url": "https://download.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz",
+      "sha256": "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011"
+    },
+    "freetype-2.14.3.tar.gz": {
+      "url": "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-14-3",
+      "sha256": "dc49de6b01a266eef4876a4dd34d9842c475d3e28ff2eff63bd2fb760ab56261"
+    },
+    "lcms2-2.19.1.tar.gz": {
+      "url": "https://codeload.github.com/mm2/Little-CMS/tar.gz/refs/tags/lcms2.19.1",
+      "sha256": "267705e278e2f7c2fb886c259dadcbaeb2be52748bcbc71c79f08aacacb7a709"
+    },
+    "libavif-1.4.2.tar.gz": {
+      "url": "https://codeload.github.com/AOMediaCodec/libavif/tar.gz/refs/tags/v1.4.2",
+      "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d"
+    },
+    "libjpeg-turbo-3.2.0.tar.gz": {
+      "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz",
+      "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e"
+    },
+    "libpng-1.6.58.tar.gz": {
+      "url": "https://codeload.github.com/pnggroup/libpng/tar.gz/refs/tags/v1.6.58",
+      "sha256": "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
+    },
+    "libwebp-1.6.0.tar.gz": {
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
+    },
+    "libyuv-644251f25.tar.gz": {
+      "url": "https://codeload.github.com/lemenkov/libyuv/tar.gz/644251f252a84bf8ce91ff0aca86a9b16b069ab8",
+      "sha256": "ccc11fbb02077b9385a37606d9edce34eb5e588b5626c894eb1e883c9c2da114",
+      "upstream": "https://chromium.googlesource.com/libyuv/libyuv/+/644251f252a84bf8ce91ff0aca86a9b16b069ab8"
+    },
+    "openjpeg-2.5.4.tar.gz": {
+      "url": "https://codeload.github.com/uclouvain/openjpeg/tar.gz/refs/tags/v2.5.4",
+      "sha256": "a695fbe19c0165f295a8531b1e4e855cd94d0875d2f88ec4b61080677e27188a"
+    },
+    "pillow-windows-build-13.0.0.tar.gz": {
+      "url": "https://codeload.github.com/python-pillow/Pillow/tar.gz/refs/tags/13.0.0",
+      "sha256": "edf59ba26a21ea6d7e6a3755fe139a57297704591c4113ad470dac9ac2ccaf5e"
+    },
+    "tiff-4.7.2.tar.gz": {
+      "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz",
+      "sha256": "672bd7d10aee4606171afb864f3570b83340f6a33e2c186dc0512f7145ffdf6a"
+    },
+    "xz-5.8.4.tar.gz": {
+      "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz",
+      "sha256": "0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9"
+    },
+    "zlib-ng-2.3.3.tar.gz": {
+      "url": "https://codeload.github.com/zlib-ng/zlib-ng/tar.gz/refs/tags/2.3.3",
+      "sha256": "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
+    }
+  },
   "webview2_sdk_version": "1.0.3856.49",
   "webview2_sdk_nupkg_sha256": "bc0f76eb911b569838dc4aa8f8d325269b966bedb592863d26211aef3a099f1a",
   "webview2_sdk": {

@@ -24,7 +24,7 @@ SOURCE_NAME = "NyxCore-Windows-x64-source.zip"
 SOURCE_PATHS = (
     "nyxcore", "web", "demo/create_demo_library.py", "scripts", "tests", ".github/workflows",
     ".gitignore", "pyproject.toml", "README.md", "INSTALL_DESKTOP.md", "INSTALL_PREVIEW.md",
-    "INSTALL_WINDOWS.md", "docs/WINDOWS_DISTRIBUTION.md",
+    "INSTALL_WINDOWS.md", "docs/WINDOWS_DISTRIBUTION.md", "docs/WINDOWS_ACCEPTANCE.md",
 )
 
 
@@ -128,6 +128,7 @@ def build(destination: Path, working_tree: bool) -> tuple[Path, Path]:
             **licenses,
             "WINDOWS_DEPENDENCIES.json": inventory_path,
             "WINDOWS_DISTRIBUTION.md": sources["docs/WINDOWS_DISTRIBUTION.md"],
+            "WINDOWS_ACCEPTANCE.md": sources["docs/WINDOWS_ACCEPTANCE.md"],
         }
         if "LICENSE" in sources:
             common["LICENSE"] = sources["LICENSE"]

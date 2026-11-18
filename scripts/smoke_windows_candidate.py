@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from zipfile import ZipFile
 
-from windows.notices import digest
+from windows.notices import GPL_NOTICES, REQUIRED_SOURCE_DISTRIBUTIONS, digest
 
 MARKER = b'<meta name="nyxcore-desktop" content="1">'
 HTTP = build_opener(ProxyHandler({}))
@@ -39,6 +39,46 @@ def verify_zip(path: Path) -> None:
             parts = PurePosixPath(name).parts
             require(bool(parts) and parts[0] == path.stem and ".." not in parts and "\\" not in name,
                     f"Invalid archive member {name}.")
+
+
+def verify_source_materials(
+    binary: ZipFile, source: ZipFile, binary_root: str, source_root: str, recorded: dict[str, str],
+) -> None:
+    for notice, original in GPL_NOTICES.items():
+        for archive, root in ((binary, binary_root), (source, source_root)):
+            member = root + notice
+            require(member in archive.namelist(), f"Missing GPL notice: {member}")
+            require(hashlib.sha256(archive.read(member)).hexdigest() == recorded.get(original),
+                    f"GPL notice differs from the source snapshot: {member}")
+
+    inventory = source.read(source_root + "WINDOWS_DEPENDENCIES.json")
+    require(binary.read(binary_root + "WINDOWS_DEPENDENCIES.json") == inventory,
+            "Binary and source dependency inventories differ.")
+    dependencies = json.loads(inventory)
+    for name in REQUIRED_SOURCE_DISTRIBUTIONS:
+        package = dependencies["python"].get(name, {})
+        require(bool(package.get("file") and package.get("notices")), f"Missing source or copying terms for {name}.")
+        for notice in package["notices"]:
+            member = f"licenses/python/{name}/{notice}"
+            require(binary_root + member in binary.namelist() and source_root + member in source.namelist(),
+                    f"Missing upstream license notice: {member}")
+            require(binary.read(binary_root + member) == source.read(source_root + member),
+                    f"Upstream license notice differs across the archives: {member}")
+    inputs = {
+        **{f"upstream/python/{item['file']}": item["sha256"]
+           for item in dependencies["python"].values() if "file" in item},
+        **{f"upstream/rust/{item['name']}-{item['version']}.crate": item["sha256"]
+           for item in dependencies["pydantic_core_locked_rust_sources"]},
+        **{f"upstream/native/{name}": item["sha256"]
+           for name, item in dependencies["runtime"]["source_archives"].items()},
+    }
+    source_members = set(source.namelist())
+    for name, expected in inputs.items():
+        member = source_root + name
+        require(member in source_members, f"Missing upstream source: {name}")
+        with source.open(member) as stream:
+            require(hashlib.file_digest(stream, "sha256").hexdigest() == expected,
+                    f"Upstream source checksum mismatch: {name}")
 
 
 def verify_pair(
@@ -86,8 +126,7 @@ def verify_pair(
         for name, expected in recorded.items():
             member = archive.read(root + "project/" + name)
             require(hashlib.sha256(member).hexdigest() == expected, f"Source snapshot differs at {name}.")
-        require(any(name.startswith(root + "upstream/python/mutagen-") for name in archive.namelist()),
-                "The exact source distribution for Mutagen is missing.")
+        verify_source_materials(binary, archive, package.stem + "/", root, recorded)
 
 
 def read_http(origin: str, path: str, data=None, headers=None) -> tuple[int, bytes]:
