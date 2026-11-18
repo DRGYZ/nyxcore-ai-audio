@@ -62,6 +62,22 @@ export function refreshLibrary() {
   return postJson<ApiMeta>("/library/refresh", {});
 }
 
+export type DesktopSession = {
+  configured: boolean;
+  demo: boolean;
+  issue: string | null;
+  retry_path: string | null;
+  can_retry: boolean;
+};
+
+export async function fetchDesktopSession() {
+  return readJson<DesktopSession>(await fetch("/api/desktop/session", { cache: "no-store", redirect: "error" }));
+}
+
+export async function desktopAction<T>(action: "choose-folder" | "open-folder" | "open-demo" | "retry-library" | "export-health") {
+  return readJson<T>(await fetch(`/api/desktop/${action}`, { method: "POST", cache: "no-store", redirect: "error" }));
+}
+
 export function fetchMetadataTrack(path: string) {
   return getJson<MetadataTrack>(`/metadata/track?${new URLSearchParams({ path })}`);
 }

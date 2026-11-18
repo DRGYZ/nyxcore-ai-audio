@@ -159,20 +159,18 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
                 >
                   Open Review Inbox
                 </Link>
-                <details className="w-full pt-1 text-xs text-primary-muted sm:w-auto">
+                {!desktop && <details className="w-full pt-1 text-xs text-primary-muted sm:w-auto">
                   <summary className="cursor-pointer font-medium text-primary-muted hover:text-accent focus-visible:outline-accent">
                     Inspect a different library
                   </summary>
                   <div className="mt-2 rounded-lg border border-white/[0.08] bg-surface-low p-3 text-xs leading-relaxed text-primary-muted">
-                    {desktop ? (
-                      <p>Close this window, then reopen <code>nyxcore-desktop.exe</code> with <code>--music</code> set to the library and <code>--out</code> set to a separate workspace.</p>
-                    ) : status.review_only ? (
+                    {status.review_only ? (
                       <p>Press <kbd>Ctrl+C</kbd> in the launcher terminal. Restart with <code>--music</code> set to the desired library and <code>--out</code> set to a separate workspace, then open the printed URL.</p>
                     ) : (
                       <p>Stop the backend, set <code>NYXCORE_WEB_MUSIC_DIR</code> to the desired library and <code>NYXCORE_WEB_OUT_DIR</code> to its reports folder, then restart the backend and refresh Overview.</p>
                     )}
                   </div>
-                </details>
+                </details>}
               </div>
             </div>
           </div>
@@ -193,6 +191,19 @@ export function DashboardPage({ desktop = false }: { desktop?: boolean }) {
         ) : !reviewOnly ? (
           <Panel className="p-8 text-center text-sm text-primary-muted">Loading library data from local API…</Panel>
         ) : null}
+      </div>
+    );
+  }
+
+  if (health.overview.total_audio_files === 0) {
+    return (
+      <div className="space-y-6">
+        {viewHeader}
+        <EmptyState title="No supported audio found" description={
+          desktop
+            ? "Add audio to this folder and refresh, or use Change Library to open another folder."
+            : "Add audio to this folder, then refresh the library."
+        } />
       </div>
     );
   }

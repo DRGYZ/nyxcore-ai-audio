@@ -64,10 +64,13 @@ export function useRefreshLibrary() {
   return useMutation({
     mutationFn: async () => {
       await refreshLibrary();
-      await queryClient.invalidateQueries({ queryKey: ["metadata"] });
       await queryClient.cancelQueries({ queryKey: libraryQuery.queryKey });
       try {
         await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey }, { throwOnError: true });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["metadata"] }),
+          queryClient.invalidateQueries({ queryKey: ["status"] }),
+        ]);
       } catch {
         throw new Error("The library was scanned, but the updated reports could not be loaded. Try Refresh Library again.");
       }

@@ -78,15 +78,19 @@ describe("Overview first run", () => {
     expect(screen.queryByText("NYXCORE_WEB_MUSIC_DIR")).toBeNull();
   });
 
-  it("offers Metadata navigation and desktop-specific library instructions in the desktop window", async () => {
+  it("offers Metadata and a keyboard-dismissible library picker in the desktop window", async () => {
     reviewOnly = true;
     const user = userEvent.setup();
     renderWithProviders(<AppShell desktop><DashboardPage desktop /></AppShell>);
     expect(screen.getByRole("link", { name: "Metadata" })).toHaveAttribute("href", "/metadata");
     expect(await screen.findByText("Local API Connected")).toBeVisible();
-    await user.click(screen.getByText("Inspect a different library"));
-    expect(screen.getByText("nyxcore-desktop.exe")).toBeVisible();
-    expect(screen.queryByText("Ctrl+C")).not.toBeInTheDocument();
+    const changeLibrary = screen.getByRole("button", { name: "Change Library" });
+    await user.click(changeLibrary);
+    expect(screen.getByRole("dialog", { name: "Change Library" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Choose Music Folder" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(changeLibrary).toHaveFocus();
   });
 
   it("keeps the configured library visible when only History fails and refreshes on retry", async () => {
@@ -109,7 +113,7 @@ describe("Overview first run", () => {
     expect(await screen.findByText("1,007")).toBeVisible();
     expect(libraryReads).toBe(1);
 
-    const refresh = () => user.click(screen.getByRole("button", { name: "Refresh Library" }));
+    const refresh = async () => user.click(await screen.findByRole("button", { name: /^(Refresh Library|Retry Analysis)$/ }));
     refreshStatus = 503;
     await refresh();
     expect(await screen.findByRole("alert")).toHaveTextContent("Library analysis failed");

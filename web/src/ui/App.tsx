@@ -1,4 +1,5 @@
 import { Route, Routes } from "react-router-dom";
+import type { DesktopSession } from "../lib/api";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { HealthPage } from "./pages/HealthPage";
@@ -11,9 +12,9 @@ import { ReviewPage } from "./pages/ReviewPage";
 import { SearchPage } from "./pages/SearchPage";
 import { AppShell } from "./shell";
 
-export function App({ desktop = false }: { desktop?: boolean }) {
+export function App({ desktop = false, desktopSession }: { desktop?: boolean; desktopSession?: DesktopSession }) {
   return (
-    <AppShell desktop={desktop}>
+    <AppShell desktop={desktop} demo={desktopSession?.demo}>
       <Routes>
         <Route path="/" element={<DashboardPage desktop={desktop} />} />
         <Route path="/review" element={<ReviewPage />} />
